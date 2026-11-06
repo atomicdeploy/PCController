@@ -36,7 +36,7 @@ hardware-free virtual board. The browser, terminal UI, CLI, automation engine,
 and network APIs all use the same command dispatcher, safety rules, connection
 owner, and event stream.
 
-The Windows desktop work retains the complete RayanLamp source tree under
+The Windows desktop work retains the complete imported presentation source tree under
 [`Tools/NativeDesktop`](Tools/NativeDesktop), not a selected GUI extract.
 See the [source coverage and feature-integration inventory](docs/NATIVE-DONOR-COVERAGE.md)
 for the exact donor revision, repeatable file audit, font replacement, and
@@ -74,6 +74,37 @@ everywhere through the same typed event stream.
 | 🪟 Host integration | Global hotkeys, desktop notifications, local-device diagnostics, bounded read-only WMI/COM facts, native Microsoft display and shell adapters, discovery, webhooks, host bridges, scripts, automation, and platform-specific port-owner diagnostics. |
 | ♻️ Recoverable updates | Content-addressed artifacts, SHA-256 verification, pre-flash backup, explicit review, write/verify, reconnect, settings restoration, and recovery markers. |
 | 🧪 Test without hardware | A native virtual board exercises protocol and host behavior over the same authenticated transport contract. |
+
+<!-- controller-preview-gallery:start -->
+## 🖥️ Desktop and terminal interfaces
+
+These are reproducible **offline previews**, rendered by the actual application UI. They do not certify a live board connection.
+
+| Acrylic desktop | Channel cards |
+| --- | --- |
+| ![PCController desktop](docs/assets/screenshots/gui-dashboard.png) | ![Hardware channels](docs/assets/screenshots/gui-channels.png) |
+
+| Inline channel rename | Windows titlebar |
+| --- | --- |
+| ![Aligned inline channel rename](docs/assets/screenshots/gui-inline-rename.png) | ![Compact Windows titlebar](docs/assets/screenshots/gui-windows-titlebar.png) |
+
+| Compact front panel | Detachable card windows |
+| --- | --- |
+| ![Compact front panel](docs/assets/screenshots/gui-compact.png) | ![Independent acrylic widgets](docs/assets/screenshots/gui-widgets.png) |
+
+### Desktop preferences
+
+![PCController desktop preferences](docs/assets/screenshots/gui-settings.png)
+
+| TUI dashboard | TUI Control page |
+| --- | --- |
+| ![PCController TUI dashboard](docs/assets/screenshots/tui-dashboard.svg) | ![PCController TUI Control page](docs/assets/screenshots/tui-controls.svg) |
+
+Regenerate on Windows with `screenshots.cmd`, `.\screenshots.ps1`, or `node Tools/Build/update-readme-previews.mjs`. On other systems use `bash screenshots.sh --tui-only` for terminal assets.
+<!-- controller-preview-gallery:end -->
+
+Use **Desktop widgets…** in the desktop/tray menu to show individual acrylic
+windows. See [desktop widgets, snapping and compact mode](docs/DESKTOP-WIDGETS.md).
 
 ## 🧭 System architecture
 

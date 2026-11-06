@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "preact/hooks";
-import { APIError, type RayanLampClient } from "../api";
+import { APIError, type PCControllerDesktopClient } from "../api";
+import { audioImportAccept } from "../audio";
 import type {
   AppConfig,
   DeepPartial,
@@ -46,7 +47,7 @@ const sections: Array<{
   description: string;
   icon: IconName;
 }> = [
-  { key: "lamp", label: "Lamp", description: "Address and transport", icon: "lamp" },
+  { key: "device", label: "Device", description: "Address and transport", icon: "device" },
   { key: "ui", label: "Appearance", description: "Native window and material", icon: "settings" },
   { key: "notifications", label: "Notifications", description: "Toasts, balloons, and sound", icon: "bell" },
   { key: "hotkeys", label: "Hotkeys", description: "System-wide shortcuts", icon: "keyboard" },
@@ -55,11 +56,11 @@ const sections: Array<{
   { key: "diagnostics", label: "Diagnostics", description: "Endpoint allowlists", icon: "diagnostics" }
 ];
 
-export function Settings({ api }: { api: RayanLampClient }) {
+export function Settings({ api }: { api: PCControllerDesktopClient }) {
   const current = config.value;
   const [disableAPIOpen, setDisableAPIOpen] = useState(false);
   const [toastOpen, setToastOpen] = useState(false);
-  const [toastMessage, setToastMessage] = useState(() => t("Rayan Lamp notifications are ready."));
+  const [toastMessage, setToastMessage] = useState(() => t("PCController notifications are ready."));
   const [testingToast, setTestingToast] = useState(false);
   const direct = capabilities.value.transport_direct === true;
   const visualNotifications =
@@ -92,7 +93,7 @@ export function Settings({ api }: { api: RayanLampClient }) {
     (item) => item.key === settingsSection.value
   )
     ? settingsSection.value
-    : visibleSections[0]?.key ?? "lamp";
+    : visibleSections[0]?.key ?? "device";
   const patch = (value: DeepPartial<AppConfig>, immediate = false) =>
     updateConfig(value, immediate);
 
@@ -165,8 +166,8 @@ export function Settings({ api }: { api: RayanLampClient }) {
         </nav>
 
         <Card class="settings-panel">
-          {section === "lamp" && (
-            <LampSettings value={current} patch={patch} direct={direct} />
+          {section === "device" && (
+            <DeviceSettings value={current} patch={patch} direct={direct} />
           )}
           {section === "ui" && (
             <AppearanceSettings
@@ -255,7 +256,7 @@ export function Settings({ api }: { api: RayanLampClient }) {
             onClick={async () => {
               setTestingToast(true);
               try {
-                await api.notify(t("Rayan Lamp test"), toastMessage.trim());
+                await api.notify(t("PCController test"), toastMessage.trim());
                 showToast("success", t("Test notification sent"));
                 setToastOpen(false);
               } catch (error) {
@@ -297,45 +298,45 @@ function PanelHeading({
   );
 }
 
-export function LampSettings({
+export function DeviceSettings({
   value,
   patch,
   direct
 }: SettingsProps & { direct: boolean }) {
-  const lamp = value.lamp;
+  const device = value.device;
   return (
     <>
       <PanelHeading
-        title="Lamp connection"
+        title="Device connection"
         description={
           direct
-            ? "This browser talks to the lamp over CORS-enabled HTTP and its firmware WebSocket."
+            ? "This browser talks to the device over CORS-enabled HTTP and its firmware WebSocket."
             : "The native controller owns discovery, HTTP commands, and the resilient event socket."
         }
       />
       <FieldGroup title="Device">
         <TextField
-          label="Lamp address"
+          label="Device address"
           type="url"
-          value={lamp.base_url}
-          placeholder="http://rayanlamp.local"
+          value={device.base_url}
+          placeholder="http://pccontroller-desktop.local"
           description="HTTP or HTTPS origin without a path, query, or embedded credentials."
-          onInput={(base_url) => patch({ lamp: { base_url } })}
+          onInput={(base_url) => patch({ device: { base_url } })}
         />
         <TextField
           label="Request timeout"
           dir="ltr"
-          value={lamp.request_timeout}
+          value={device.request_timeout}
           description={
             direct
               ? "Duration from 100ms through 2m."
               : "Go duration from 100ms through 5m."
           }
-          onInput={(request_timeout) => patch({ lamp: { request_timeout } })}
+          onInput={(request_timeout) => patch({ device: { request_timeout } })}
         />
         <NumberField
           label="Device terminal port"
-          value={lamp.telnet_port}
+          value={device.telnet_port}
           min={1}
           max={65_535}
           description={
@@ -344,7 +345,7 @@ export function LampSettings({
               : "Audited Telnet-style device console port. The default firmware uses TCP 23."
           }
           onInput={(telnet_port) =>
-            patch({ lamp: { telnet_port } }, true)
+            patch({ device: { telnet_port } }, true)
           }
         />
       </FieldGroup>
@@ -352,27 +353,27 @@ export function LampSettings({
         <Toggle
           label="Listen for WebSocket events"
           description="Connect to /ws, request one state, then passively receive updates."
-          checked={lamp.websocket}
-          onChange={(websocket) => patch({ lamp: { websocket } }, true)}
+          checked={device.websocket}
+          onChange={(websocket) => patch({ device: { websocket } }, true)}
         />
         <TextField
           label="Reconnect minimum"
           dir="ltr"
-          value={lamp.reconnect_min}
-          onInput={(reconnect_min) => patch({ lamp: { reconnect_min } })}
+          value={device.reconnect_min}
+          onInput={(reconnect_min) => patch({ device: { reconnect_min } })}
         />
         <TextField
           label="Reconnect maximum"
           dir="ltr"
-          value={lamp.reconnect_max}
-          onInput={(reconnect_max) => patch({ lamp: { reconnect_max } })}
+          value={device.reconnect_max}
+          onInput={(reconnect_max) => patch({ device: { reconnect_max } })}
         />
         <TextField
           label="HTTP polling interval"
           dir="ltr"
-          value={lamp.http_poll}
+          value={device.http_poll}
           description="Use 0s to disable fallback polling."
-          onInput={(http_poll) => patch({ lamp: { http_poll } })}
+          onInput={(http_poll) => patch({ device: { http_poll } })}
         />
       </FieldGroup>
     </>
@@ -404,7 +405,7 @@ export function AppearanceSettings({
               label="Window layout"
               value={ui.view_mode}
               options={[
-                { value: "compact", label: "Compact lamp" },
+                { value: "compact", label: "Compact device" },
                 { value: "dashboard", label: "Larger dashboard" }
               ]}
               onChange={(view_mode) => uiPatch({ view_mode })}
@@ -623,7 +624,7 @@ export function NotificationSettings({
   audioAvailable,
   onTest
 }: SettingsProps & {
-  api: RayanLampClient;
+  api: PCControllerDesktopClient;
   direct: boolean;
   visualAvailable: boolean;
   audioAvailable: boolean;
@@ -666,7 +667,7 @@ export function NotificationSettings({
       await api.playAudio("message", 1);
       showToast(
         "success",
-        direct ? t("Audio played in this browser") : t("Audio test sent to Rayan Lamp")
+        direct ? t("Audio played in this browser") : t("Audio test sent to PCController")
       );
     } catch (error) {
       showToast(
@@ -721,7 +722,7 @@ export function NotificationSettings({
           <div class="inline-action">
             <div>
               <strong>{t("Verify delivery")}</strong>
-              <span>{t("Send a local test without changing any lamp state.")}</span>
+              <span>{t("Send a local test without changing any device state.")}</span>
             </div>
             <Button icon={<Icon name="bell" />} onClick={onTest}>
               Test notification
@@ -734,7 +735,7 @@ export function NotificationSettings({
         <FieldGroup title="Event timing">
           <Toggle
             label="Initial synchronization"
-            description="Include the first known lamp state after connecting."
+            description="Include the first known device state after connecting."
             checked={item.initial_sync}
             onChange={(initial_sync) => update({ initial_sync })}
           />
@@ -760,8 +761,8 @@ export function NotificationSettings({
             label="Sound source"
             value={item.sound_source}
             options={[
-              { value: "bundled", label: "Bundled Rayan Lamp effects" },
-              { value: "custom", label: "Custom PCM WAV" }
+              { value: "bundled", label: "Bundled PCController effects" },
+              { value: "custom", label: "Custom sound" }
             ]}
             onChange={(sound_source) => {
               if (sound_source === "custom" && !item.sound_file) {
@@ -775,8 +776,8 @@ export function NotificationSettings({
             ref={fileInput}
             class="audio-file-input"
             type="file"
-            accept=".wav,audio/wav,audio/x-wav"
-            aria-label={t("Choose custom WAV")}
+            accept={audioImportAccept}
+            aria-label={t("Choose custom sound")}
             onChange={(event) =>
               void importFile(event.currentTarget.files?.[0])
             }
@@ -788,13 +789,13 @@ export function NotificationSettings({
             <span class="audio-file-copy">
               <strong>
                 {item.sound_file
-                  ? item.sound_name || t("Content-addressed custom WAV")
+                  ? item.sound_name || t("Custom sound")
                   : t("No custom sound imported")}
               </strong>
               <small>
                 {item.sound_file
                   ? `SHA-256 ${shortAssetID(item.sound_file)}`
-                  : t("PCM WAV · mono or stereo · up to 4 MiB")}
+                  : t("WAV, MP3, FLAC · 10 sec · 4 MiB")}
               </small>
             </span>
             <Button
@@ -838,7 +839,7 @@ function shortAssetID(value: string): string {
 
 type HotkeyBindingKey = keyof AppConfig["hotkeys"];
 
-function useHotkeyCaptureSession(api?: RayanLampClient) {
+function useHotkeyCaptureSession(api?: PCControllerDesktopClient) {
   const [active, setActive] = useState<HotkeyBindingKey | null>(null);
   const [errors, setErrors] = useState<
     Partial<Record<HotkeyBindingKey, string>>
@@ -967,7 +968,7 @@ function useHotkeyCaptureSession(api?: RayanLampClient) {
       } catch (error) {
         const message = hotkeyCaptureErrorMessage(
           error,
-          "Rayan Lamp could not prepare shortcut recording."
+          "PCController could not prepare shortcut recording."
         );
         if (activeRef.current === key) {
           updateOwner(null);
@@ -1037,7 +1038,7 @@ function useHotkeyCaptureSession(api?: RayanLampClient) {
     } catch (error) {
       const message = hotkeyCaptureErrorMessage(
         error,
-        "Rayan Lamp could not verify that shortcut. Select Record to try again."
+        "PCController could not verify that shortcut. Select Record to try again."
       );
       if (activeRef.current === key) loseCapture(key, message);
       throw new Error(message);
@@ -1079,7 +1080,7 @@ export function HotkeySettings({
   value,
   patch
 }: SettingsProps & {
-  api?: RayanLampClient;
+  api?: PCControllerDesktopClient;
   captureAvailable?: boolean;
   probeAvailable?: boolean;
 }) {
@@ -1087,7 +1088,7 @@ export function HotkeySettings({
   const captureAPI = api && captureAvailable ? api : undefined;
   const capture = useHotkeyCaptureSession(captureAPI);
   const bindings = [
-    { key: "toggle", label: "Toggle lamp" },
+    { key: "toggle", label: "Toggle device" },
     { key: "on", label: "Turn on" },
     { key: "off", label: "Turn off" },
     { key: "show", label: "Show window" }
@@ -1180,7 +1181,7 @@ function AutomationSettings({ value, patch }: SettingsProps) {
     <>
       <PanelHeading
         title="Event automation"
-        description="Run reviewed local scripts after lamp events and Windows session, power, or network changes."
+        description="Run reviewed local scripts after device events and Windows session, power, or network changes."
       />
       <div class="security-note">
         <Icon name="warning" />
@@ -1198,21 +1199,21 @@ function AutomationSettings({ value, patch }: SettingsProps) {
           label="On script"
           dir="ltr"
           value={item.on_script}
-          placeholder="C:\\Automation\\lamp-on.ps1"
+          placeholder="C:\\Automation\\device-on.ps1"
           onInput={(on_script) => update({ on_script })}
         />
         <TextField
           label="Off script"
           dir="ltr"
           value={item.off_script}
-          placeholder="C:\\Automation\\lamp-off.ps1"
+          placeholder="C:\\Automation\\device-off.ps1"
           onInput={(off_script) => update({ off_script })}
         />
         <TextField
           label="Message script"
           dir="ltr"
           value={item.message_script}
-          placeholder="C:\\Automation\\lamp-message.ps1"
+          placeholder="C:\\Automation\\device-message.ps1"
           onInput={(message_script) => update({ message_script })}
         />
         <TextField
@@ -1282,7 +1283,7 @@ export function IntegrationSettings({
   value,
   patch,
   onDisableAPI
-}: SettingsProps & { api: RayanLampClient; onDisableAPI: () => void }) {
+}: SettingsProps & { api: PCControllerDesktopClient; onDisableAPI: () => void }) {
   const item = value.integration;
   const [listenDraft, setListenDraft] = useState(item.local_api_listen);
   const [moveOpen, setMoveOpen] = useState(false);
@@ -1393,7 +1394,7 @@ export function IntegrationSettings({
           name: t("Windows shell integration"),
           method: "integration.shell.unregister" as const,
           description:
-            t("This removes the rayan-lamp URI handler and Jump List tasks owned by this executable.")
+            t("This removes the pccontroller-desktop URI handler and Jump List tasks owned by this executable.")
         }
       : {
           name: t("COM automation"),
@@ -1475,7 +1476,7 @@ export function IntegrationSettings({
               <div>
                 <strong>{t("Windows shell")}</strong>
                 <span>
-                  <BidiLtr>rayan-lamp://</BidiLtr>{" "}
+                  <BidiLtr>pccontroller-desktop://</BidiLtr>{" "}
                   {t("links and useful Jump List commands")}
                 </span>
               </div>
@@ -1602,7 +1603,7 @@ export function IntegrationSettings({
       <Modal
         open={unregisterTarget !== null}
         title={t("Unregister {name}?", { name: targetCopy.name })}
-        description={`${targetCopy.description} ${t("Rayan Lamp settings and device data are not removed.")}`}
+        description={`${targetCopy.description} ${t("PCController settings and device data are not removed.")}`}
         onClose={() => !busy && setUnregisterTarget(null)}
       >
         {executable && (
@@ -1637,7 +1638,7 @@ export function IntegrationSettings({
         title={t("Move the local dashboard?")}
         description={
           <>
-            {t("Rayan Lamp will restart its loopback listener at")}{" "}
+            {t("PCController will restart its loopback listener at")}{" "}
             <BidiLtr>{listenDraft.trim()}</BidiLtr>.{" "}
             {t("This tab will continue at the new address.")}
           </>

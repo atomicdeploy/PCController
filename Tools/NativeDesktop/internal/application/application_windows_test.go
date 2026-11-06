@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"rayanlamp.local/app/internal/cli"
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/ipc"
-	"rayanlamp.local/app/internal/ui"
+	"pccontroller.local/desktop/internal/cli"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/ipc"
+	"pccontroller.local/desktop/internal/ui"
 )
 
 type fakePrimaryServer struct {
@@ -68,8 +68,8 @@ func TestStartupWindowModeForOptions(t *testing.T) {
 			want:    ui.StartupForceShow,
 		},
 		{
-			name:    "lamp control bootstraps in background",
-			options: cli.Options{Method: "lamp.on"},
+			name:    "device control bootstraps in background",
+			options: cli.Options{Method: "device.on"},
 			want:    ui.StartupForceHidden,
 		},
 		{
@@ -360,7 +360,7 @@ func TestConfigPreviewNeverBlocksBehindListenerRestart(t *testing.T) {
 func TestNewLoggerRotatesLargeLog(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")
-	logPath := filepath.Join(dir, "RayanLamp.log")
+	logPath := filepath.Join(dir, "PCControllerDesktop.log")
 	data := make([]byte, (2<<20)+1)
 	if err := os.WriteFile(logPath, data, 0o600); err != nil {
 		t.Fatal(err)

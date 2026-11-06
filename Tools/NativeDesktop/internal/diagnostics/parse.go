@@ -72,7 +72,7 @@ func Parse(endpoint string, data []byte, fetchedAt time.Time) Document {
 		)
 	}
 	if _, ok := LookupEndpoint(document.Endpoint); !ok {
-		document.Warnings = append(document.Warnings, "endpoint is not in the RayanLamp ESP diagnostics registry")
+		document.Warnings = append(document.Warnings, "endpoint is not in the PCControllerDesktop ESP diagnostics registry")
 	}
 
 	parseInput := strings.TrimSpace(strings.TrimRight(

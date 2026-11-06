@@ -60,16 +60,27 @@ summary; the authoritative text is the `LICENSE` file in each module version.
 | `github.com/charmbracelet/x/ansi` | `v0.11.7` | MIT |
 | `github.com/go-ole/go-ole` | `v1.3.0` | MIT |
 | `github.com/gorilla/websocket` | `v1.5.3` | BSD-2-Clause |
+| `github.com/hajimehoshi/go-mp3` | `v0.3.4` | Apache-2.0 |
+| `github.com/icza/bitio` | `v1.1.0` | Apache-2.0 |
+| `github.com/mewkiz/flac` | `v1.0.14` | Unlicense |
+| `github.com/mewkiz/pkg` | `v0.0.0-20250417130911-3f050ff8c56d` | Unlicense |
+| `github.com/mewpkg/term` | `v0.0.0-20241026122259-37a80af23985` | Unlicense |
 | `github.com/kettek/apng` | `v0.0.0-20250827064933-2bb5f5fcf253` | BSD-3-Clause |
 | `github.com/lxn/walk` | `v0.0.0-20210112085537-c389da54e794` | BSD-3-Clause |
 | `github.com/lxn/win` | `v0.0.0-20210218163916-a377121e959e` | BSD-3-Clause |
 | `github.com/sirupsen/logrus` | `v1.9.3` | MIT |
 | `golang.org/x/mod` | `v0.17.0` | BSD-3-Clause |
 | `golang.org/x/sys` | `v0.47.0` | BSD-3-Clause |
+| `golang.org/x/image` | `v0.23.0` | BSD-3-Clause |
 | `golang.org/x/tools` | `v0.21.1-0.20240508182429-e35e4ccd0d2d` | BSD-3-Clause |
 | `gopkg.in/Knetic/govaluate.v3` | `v3.0.0` | MIT |
 
 The dependency graph and checksums are recorded in `go.mod` and `go.sum`.
+The MP3 and FLAC decoders are compiled into PCController for custom
+sound import. Their license texts remain in `vendor` and are collected in the
+host package notices. The small codec test fixtures are generated from our own
+bundled sound and a synthesized sine wave; the optional FFmpeg fixture generator
+is development-only and does not add a runtime dependency.
 Some modules in the graph are build-time or transitive dependencies and may
 not contribute code to every executable.
 

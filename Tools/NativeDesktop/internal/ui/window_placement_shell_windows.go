@@ -5,8 +5,8 @@ package ui
 import (
 	"github.com/lxn/win"
 
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/winfx"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
 func windowStateForStartupAction(action StartupWindowAction) string {
@@ -252,6 +252,10 @@ func (s *Shell) applyRememberedWindowSession(cfg config.Config) config.Config {
 
 func (s *Shell) persistWindowPlacement() {
 	if s == nil {
+		return
+	}
+	if s.controllerOwner != nil {
+		s.persistControllerWidget()
 		return
 	}
 	bounds, visible, state := s.rememberedWindowSession()

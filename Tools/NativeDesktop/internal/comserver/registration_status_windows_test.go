@@ -10,7 +10,7 @@ import (
 )
 
 func TestRegistrationStatusRequiresExactOwnershipInEveryView(t *testing.T) {
-	executable := filepath.Join(t.TempDir(), "RayanLamp.exe")
+	executable := filepath.Join(t.TempDir(), "PCControllerDesktop.exe")
 	expected, err := RegistrationCommand(executable)
 	if err != nil {
 		t.Fatal(err)
@@ -48,7 +48,7 @@ func TestRegistrationStatusRequiresExactOwnershipInEveryView(t *testing.T) {
 		exists,
 		func(root string, view uint32) (string, bool, error) {
 			if view == foreignView {
-				return `"C:\Other\RayanLamp.exe" /com-server`, true, nil
+				return `"C:\Other\PCControllerDesktop.exe" /com-server`, true, nil
 			}
 			return local(root, view)
 		},
@@ -60,7 +60,7 @@ func TestRegistrationStatusRequiresExactOwnershipInEveryView(t *testing.T) {
 }
 
 func TestRegistrationStatusIsReadOnlyAndFailsClosed(t *testing.T) {
-	executable := filepath.Join(t.TempDir(), "RayanLamp.exe")
+	executable := filepath.Join(t.TempDir(), "PCControllerDesktop.exe")
 	views := registryViewsForProcess(false)
 	readFailure := errors.New("injected registry read failure")
 	registered, err := isRegisteredWithReaders(

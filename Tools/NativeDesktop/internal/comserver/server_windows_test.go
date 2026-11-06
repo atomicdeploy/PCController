@@ -9,7 +9,7 @@ import (
 	"time"
 	"unsafe"
 
-	"rayanlamp.local/app/internal/ipc"
+	"pccontroller.local/desktop/internal/ipc"
 )
 
 func TestNativeVTablesInitialize(t *testing.T) {

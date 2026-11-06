@@ -16,8 +16,8 @@ export type BrowserConsoleEvent =
   | "app.start"
   | "transport.ready"
   | "transport.error"
-  | "lamp.state"
-  | "lamp.command"
+  | "device.state"
+  | "device.command"
   | "websocket.connected"
   | "websocket.disconnected"
   | "message.received"
@@ -61,8 +61,8 @@ const eventPresentation: Record<BrowserConsoleEvent, EventPresentation> = {
   "app.start": { emoji: "🚀" },
   "transport.ready": { emoji: "🔌" },
   "transport.error": { emoji: "⚠️" },
-  "lamp.state": { emoji: "💡" },
-  "lamp.command": { emoji: "⚡" },
+  "device.state": { emoji: "💡" },
+  "device.command": { emoji: "⚡" },
   "websocket.connected": { emoji: "📡" },
   "websocket.disconnected": { emoji: "📡" },
   "message.received": { emoji: "💬" },
@@ -326,7 +326,7 @@ export class StyledBrowserConsole {
 
   start(metadata?: BrowserConsoleMetadata): void {
     this.sink.groupCollapsed(
-      "%c 💡 RAYAN LAMP %c Browser · GUI · TUI activity contract%c",
+      "%c 💡 PCController %c Browser · GUI · TUI activity contract%c",
       brandStyle(),
       brandDetailStyle(),
       resetStyle()

@@ -11,12 +11,12 @@ import (
 	"github.com/lxn/walk"
 	"github.com/lxn/win"
 
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/model"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/model"
 )
 
 func TestDiagnosticsPersianFontLifecycle(t *testing.T) {
-	if os.Getenv("RAYANLAMP_WINDOW_TESTS") != "1" {
+	if os.Getenv("PCCONTROLLER_DESKTOP_WINDOW_TESTS") != "1" {
 		t.Skip("native window integration is opt-in")
 	}
 	runtime.LockOSThread()

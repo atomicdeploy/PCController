@@ -1,4 +1,4 @@
-// Command export-web writes the reproducible static RayanLamp dashboard ZIP.
+// Command export-web writes the reproducible static PCControllerDesktop dashboard ZIP.
 package main
 
 import (
@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"rayanlamp.local/app/tools/internal/webexport"
+	"pccontroller.local/desktop/tools/internal/webexport"
 )
 
 func main() {

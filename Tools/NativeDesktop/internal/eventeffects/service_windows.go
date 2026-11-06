@@ -3,10 +3,10 @@
 package eventeffects
 
 import (
-	"rayanlamp.local/app/internal/automation"
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/model"
-	"rayanlamp.local/app/internal/sfx"
+	"pccontroller.local/desktop/internal/automation"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/model"
+	"pccontroller.local/desktop/internal/sfx"
 )
 
 // NewWindows binds the host-neutral event policy to the existing Windows

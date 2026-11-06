@@ -4,7 +4,7 @@ package ui
 
 import (
 	"github.com/lxn/walk"
-	"rayanlamp.local/app/internal/config"
+	"pccontroller.local/desktop/internal/config"
 	"strings"
 )
 
@@ -38,9 +38,9 @@ func (s *Shell) paintControllerPreferences(c *walk.Canvas, b walk.Rectangle, p p
 	y += 108
 	row(y, "Controls & motion", "\uE713", []option{{"glass", "Raised glass", cfg.LayeredForeground}, {"flat", "Flat", !cfg.LayeredForeground}, {"motion", "Animations", cfg.Animations}})
 	y += 108
-	row(y, "Desktop", "\uE7F4", []option{{"acrylic", "Acrylic", cfg.Backdrop == config.BackdropAcrylic}, {"solid", "Solid", cfg.Backdrop == config.BackdropSolid}, {"pin", "Always on top", cfg.AlwaysOnTop}})
+	row(y, "Desktop", "\uE7F4", []option{{"acrylic", "Acrylic", cfg.Backdrop == config.BackdropAcrylic}, {"solid", "Solid", cfg.Backdrop == config.BackdropSolid}, {"pin", "Always on top", cfg.AlwaysOnTop}, {"compact", "Compact", cfg.ViewMode == config.ViewCompact}, {"native-menu", "Native menus", cfg.NativeMenus}})
 	y += 108
-	for i, item := range []option{{"host", "Host configuration", false}, {"console", "Console / TUI", s.controller.ConsoleVisible != nil && s.controller.ConsoleVisible()}} {
+	for i, item := range []option{{"desktop-settings", "Full desktop settings…", false}, {"host", "Host configuration", false}} {
 		id := actionChannelFirst + actionID(len(s.controllerActionIDs))
 		s.controllerActionIDs[id] = "pref:" + item.id
 		r := walk.Rectangle{X: b.X + i*(b.Width/2+6), Y: y, Width: b.Width/2 - 6, Height: 38}
@@ -50,6 +50,10 @@ func (s *Shell) paintControllerPreferences(c *walk.Canvas, b walk.Rectangle, p p
 }
 
 func (s *Shell) activateControllerPreference(id string) {
+	if id == "desktop-settings" {
+		s.OpenSettings()
+		return
+	}
 	if id == "host" {
 		s.openControllerForm("settings")
 		return
@@ -60,6 +64,20 @@ func (s *Shell) activateControllerPreference(id string) {
 	}
 	cfg := s.Config()
 	switch {
+	case id == "compact":
+		if s.controllerInline != nil {
+			s.controllerInline.input.SetFocus()
+			return
+		}
+		if cfg.UI.ViewMode == config.ViewCompact {
+			cfg.UI.ViewMode = config.ViewDashboard
+		} else {
+			cfg.UI.ViewMode = config.ViewCompact
+		}
+		s.controllerPreferences, s.controllerChannels = false, false
+		s.controllerMinimumHeight = 0
+	case id == "native-menu":
+		cfg.UI.NativeMenus = !cfg.UI.NativeMenus
 	case strings.HasPrefix(id, "theme:"):
 		cfg.UI.Theme = strings.TrimPrefix(id, "theme:")
 	case strings.HasPrefix(id, "chrome:"):
@@ -77,6 +95,7 @@ func (s *Shell) activateControllerPreference(id string) {
 	default:
 		return
 	}
+	cfg = controllerViewConfig(s.Config(), cfg)
 	if err := config.Save(s.configPath, cfg); err != nil {
 		s.showError("Preferences", err)
 		return

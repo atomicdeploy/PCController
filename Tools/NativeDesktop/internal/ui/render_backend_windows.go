@@ -10,9 +10,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/windx"
-	"rayanlamp.local/app/internal/winfx"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/windx"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
 const (

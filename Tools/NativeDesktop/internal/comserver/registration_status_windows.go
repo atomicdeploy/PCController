@@ -29,7 +29,7 @@ func IsRegistered(executable string) (bool, error) {
 }
 
 // IsCurrentExecutableRegistered is the read-only portable-mode status probe
-// for the process image hosting RayanLamp.
+// for the process image hosting PCControllerDesktop.
 func IsCurrentExecutableRegistered() (bool, error) {
 	executable, err := os.Executable()
 	if err != nil {

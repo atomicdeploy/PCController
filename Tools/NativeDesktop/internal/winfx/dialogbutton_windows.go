@@ -12,7 +12,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"rayanlamp.local/app/internal/design"
+	"pccontroller.local/desktop/internal/design"
 )
 
 const (
@@ -481,19 +481,8 @@ func renderDialogButtonFrame(hwnd, targetDC uintptr) bool {
 		}
 	}
 	palette := dialogButtonColors(state.Dark)
-	if state.Dark {
-		fillDialogButtonRect(targetDC, client, palette.Window, resources)
-	} else {
-		// Preserve the existing light-theme behavior, including the exact
-		// parent brush used by Walk around the inset rounded body.
-		fillDialogButtonParent(
-			targetDC,
-			hwnd,
-			client,
-			palette.Window,
-			resources,
-		)
-	}
+	// Both themes need the exact parent material around fractional edges.
+	fillDialogButtonParent(targetDC, hwnd, client, palette.Window, resources)
 
 	buttonState, _, _ := dialogThemeSendMessage.Call(
 		hwnd,
@@ -1148,6 +1137,7 @@ func releaseDialogButtonPaintBuffer(hwnd uintptr) {
 	if hwnd == 0 {
 		return
 	}
+	releaseDialogRasterCache()
 	dialogButtonBufferMu.Lock()
 	buffer := dialogButtonBuffers[hwnd]
 	delete(dialogButtonBuffers, hwnd)
@@ -1426,7 +1416,10 @@ func drawDialogButtonBody(
 		stroke,
 		resources,
 	)
-	if !fillDialogButtonGradientRoundRect(
+	if drawDialogAARoundRect(dc, face, visual.Top, visual.Bottom, visual.Border, radius, stroke, true) {
+		// Fill and border share one coverage calculation; separately blending
+		// them would darken the outer antialiased pixels twice.
+	} else if !fillDialogButtonGradientRoundRect(
 		dc,
 		face,
 		visual.Top,
@@ -1573,9 +1566,8 @@ func dialogButtonBodyRect(
 	dpi int32,
 ) dialogButtonRect {
 	if dark {
-		// The dark control owns a rounded HWND region, so its body can cover
-		// the entire child surface without first painting a mismatched
-		// rectangular parent-color slab.
+		// Keep the existing body footprint; fractional coverage now blends its
+		// edges into the aligned parent material instead of a binary region.
 		if client.Right > client.Left {
 			client.Right--
 		}
@@ -1596,38 +1588,7 @@ func updateDialogButtonRegion(hwnd uintptr, dark bool) {
 	if hwnd == 0 || !isWindow(hwnd) {
 		return
 	}
-	if !dark {
-		_, _, _ = dialogButtonSetWindowRgn.Call(hwnd, 0, 1)
-		return
-	}
-
-	var client dialogButtonRect
-	ok, _, _ := dialogButtonGetClientRect.Call(
-		hwnd,
-		uintptr(unsafe.Pointer(&client)),
-	)
-	if ok == 0 || client.Right <= client.Left || client.Bottom <= client.Top {
-		return
-	}
-	radius := scaleDialogButtonMetric(8, dialogButtonDPI(hwnd))
-	diameter := radius * 2
-	region, _, _ := dialogButtonCreateRoundRectRgn.Call(
-		uintptr(client.Left),
-		uintptr(client.Top),
-		uintptr(client.Right+1),
-		uintptr(client.Bottom+1),
-		uintptr(diameter),
-		uintptr(diameter),
-	)
-	if region == 0 {
-		return
-	}
-	applied, _, _ := dialogButtonSetWindowRgn.Call(hwnd, region, 1)
-	if applied == 0 {
-		// SetWindowRgn owns the region only after success.
-		_, _, _ = dialogButtonDeleteObject.Call(region)
-	}
-	runtime.KeepAlive(&client)
+	_, _, _ = dialogButtonSetWindowRgn.Call(hwnd, 0, 1)
 }
 
 func drawDialogButtonContent(
@@ -1774,6 +1735,9 @@ func drawDialogButtonRoundRect(
 	if dc == 0 || rect.Right <= rect.Left || rect.Bottom <= rect.Top {
 		return
 	}
+	if drawDialogAARoundRect(dc, rect, fill, fill, border, radius, max(1, stroke), true) {
+		return
+	}
 	brush, releaseBrush := acquireDialogButtonBrush(dc, resources, fill)
 	pen, releasePen := acquireDialogButtonPen(
 		dc,
@@ -1802,6 +1766,9 @@ func strokeDialogButtonRoundRect(
 	resources *dialogButtonPaintResources,
 ) {
 	if dc == 0 || rect.Right <= rect.Left || rect.Bottom <= rect.Top {
+		return
+	}
+	if drawDialogAARoundRect(dc, rect, 0, 0, color, radius, max(1, stroke), false) {
 		return
 	}
 	pen, releasePen := acquireDialogButtonPen(

@@ -47,7 +47,7 @@ die() {
 
 usage() {
     cat <<'EOF'
-Cross-build the single-file Windows RayanLamp executable from Linux.
+Cross-build the single-file Windows PCControllerDesktop executable from Linux.
 
 Usage:
   tools/build-linux.sh [options]
@@ -64,12 +64,12 @@ Options:
   --skip-tests                    Skip frontend/Go tests and test compilation
   --skip-vet                      Skip Windows-targeted go vet
   --skip-web-build                Reuse the checked-in web distribution
-  --force                         Replace an existing dist/RayanLamp.exe
+  --force                         Replace an existing dist/PCControllerDesktop.exe
   -h, --help                      Show this help
 
 Color follows terminal capability. Set NO_COLOR to disable ANSI styling or
 FORCE_COLOR=1 to retain VT-100 styling in a capable CI log. Set NO_EMOJI=1
-for ASCII labels, or RAYANLAMP_EMOJI=always to force emoji in a UTF-8 CI log.
+for ASCII labels, or PCCONTROLLER_DESKTOP_EMOJI=always to force emoji in a UTF-8 CI log.
 EOF
 }
 
@@ -194,11 +194,11 @@ if [[ -z "$edition" ]]; then
 fi
 case "$edition" in
     develop)
-        build_tag="rayanlamp_develop"
+        build_tag="pccontroller_desktop_develop"
         developer_tools=true
         ;;
     production)
-        build_tag="rayanlamp_production"
+        build_tag="pccontroller_desktop_production"
         developer_tools=false
         ;;
     *) die "Unsupported build edition: $edition" ;;
@@ -257,20 +257,20 @@ fi
     die "Build date must be compact ISO-8601 without spaces."
 
 mkdir -p -- "$dist_root"
-output_path="$dist_root/RayanLamp.exe"
-build_lock_path="$dist_root/.rayanlamp-build.lock"
+output_path="$dist_root/PCControllerDesktop.exe"
+build_lock_path="$dist_root/.pccontroller-desktop-build.lock"
 temporary_root=""
 temporary_output=""
-app_resource="$project_root/cmd/RayanLamp/zz_rayanlamp_windows_${architecture}.syso"
+app_resource="$project_root/cmd/PCControllerDesktop/zz_pccontroller_desktop_windows_${architecture}.syso"
 owns_resource=false
 temporary_prefix="${TMPDIR:-/tmp}"
 [[ "$temporary_prefix" == /* ]] ||
     die "TMPDIR must be an absolute path."
-temporary_prefix="${temporary_prefix%/}/RayanLamp-build."
+temporary_prefix="${temporary_prefix%/}/PCControllerDesktop-build."
 
 exec {build_lock_fd}> "$build_lock_path"
 flock -n "$build_lock_fd" ||
-    die "Another RayanLamp release build is active."
+    die "Another PCControllerDesktop release build is active."
 
 cleanup() {
     local status=$?
@@ -298,7 +298,7 @@ shopt -u nullglob dotglob
 for release_entry in "${release_entries[@]}"; do
     if [[ "$release_entry" != "$output_path" &&
         "$release_entry" != "$build_lock_path" ]]; then
-        die "The release directory must contain only RayanLamp.exe; found $release_entry."
+        die "The release directory must contain only PCControllerDesktop.exe; found $release_entry."
     fi
 done
 
@@ -309,17 +309,17 @@ fi
     die "A stale generated resource already exists: $app_resource"
 
 temporary_root="$(mktemp -d "${temporary_prefix}XXXXXXXX")"
-temporary_output="$(mktemp "$dist_root/.RayanLamp.exe.XXXXXXXX")"
-manifest_path="$temporary_root/RayanLamp.exe.manifest"
+temporary_output="$(mktemp "$dist_root/.PCControllerDesktop.exe.XXXXXXXX")"
+manifest_path="$temporary_root/PCControllerDesktop.exe.manifest"
 
 awk -v version="$file_version" '
-    /name="YektaYar\.RayanLamp"/ { in_app_identity = 1 }
+    /name="DRSDavidSoft\.PCController"/ { in_app_identity = 1 }
     in_app_identity && /version="/ {
         sub(/version="[^"]+"/, "version=\"" version "\"")
         in_app_identity = 0
     }
     { print }
-' "$project_root/resources/RayanLamp.exe.manifest" > "$manifest_path"
+' "$project_root/resources/PCControllerDesktop.exe.manifest" > "$manifest_path"
 grep -Fq "version=\"$file_version\"" "$manifest_path" ||
     die "Failed to stamp the application manifest version."
 
@@ -339,7 +339,7 @@ else
         if ! $skip_tests; then
             npm test
         fi
-        VITE_RAYANLAMP_BUILD_EDITION="$edition" npm run build
+        VITE_PCCONTROLLER_DESKTOP_BUILD_EDITION="$edition" npm run build
     )
 fi
 
@@ -391,7 +391,7 @@ if [[ "$edition" == "production" ]]; then
     step "Verifying that developer servers and SDK bridges are absent"
     dependency_graph="$(
         env GOOS=windows GOARCH="$architecture" CGO_ENABLED=0 \
-            go list -tags "$build_tag" -deps ./cmd/RayanLamp
+            go list -tags "$build_tag" -deps ./cmd/PCControllerDesktop
     )"
     for forbidden_dependency in \
         expvar \
@@ -399,8 +399,8 @@ if [[ "$edition" == "production" ]]; then
         runtime/pprof \
         runtime/trace \
         testing \
-        rayanlamp.local/app/internal/dllapi \
-        rayanlamp.local/app/sdk; do
+        pccontroller.local/desktop/internal/dllapi \
+        pccontroller.local/desktop/sdk; do
         if grep -Fxq "$forbidden_dependency" <<< "$dependency_graph"; then
             die "production dependency graph contains developer-only package: $forbidden_dependency"
         fi
@@ -442,7 +442,7 @@ env GOOS="$host_os" GOARCH="$host_architecture" CGO_ENABLED=0 \
     go run "$resource_tool" \
     "-64=$resource_is_64" \
     "-arm=$resource_is_arm" \
-    "-icon=$project_root/assets/RayanLamp.ico" \
+    "-icon=$project_root/assets/PCControllerDesktop.ico" \
     "-manifest=$manifest_path" \
     "-file-version=$file_version" \
     "-product-version=$version" \
@@ -465,12 +465,12 @@ linker_flags=""
 if [[ "$edition" == "production" ]]; then
     linker_flags="-s -w"
 fi
-linker_flags+=" -X=rayanlamp.local/app/internal/buildinfo.Commit=$commit"
-linker_flags+=" -X=rayanlamp.local/app/internal/buildinfo.Date=$build_date"
+linker_flags+=" -X=pccontroller.local/desktop/internal/buildinfo.Commit=$commit"
+linker_flags+=" -X=pccontroller.local/desktop/internal/buildinfo.Date=$build_date"
 env GOOS=windows GOARCH="$architecture" CGO_ENABLED=0 \
     go build -trimpath -buildvcs=false -tags "$build_tag" \
     -ldflags "$linker_flags" \
-    -o "$temporary_output" ./cmd/RayanLamp
+    -o "$temporary_output" ./cmd/PCControllerDesktop
 
 step "Inspecting PE architecture, console subsystem, resources, and embedded UI"
 env GOOS="$host_os" GOARCH="$host_architecture" CGO_ENABLED=0 \

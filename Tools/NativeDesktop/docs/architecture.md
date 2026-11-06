@@ -1,9 +1,9 @@
 # Architecture
 
-RayanLamp is a single-user Windows controller. In attached operation the GUI
+PCControllerDesktop is a single-user Windows controller. In attached operation the GUI
 process owns the device connection and is the authoritative state coordinator;
 every local control surface routes through the same dispatcher instead of
-implementing lamp behavior independently. The terminal UI can also be launched
+implementing device behavior independently. The terminal UI can also be launched
 in explicit standalone mode, where it becomes a headless primary: it claims
 the same per-user pipe before persisting configuration or opening the device
 connection.
@@ -12,9 +12,9 @@ connection.
 flowchart LR
     subgraph Inputs["Control surfaces"]
         UI["Main window / tray / hotkeys"]
-        CLI["RayanLamp.exe cli / direct command"]
-        TUI["RayanLamp.exe tui"]
-        SERVE["RayanLamp.exe serve"]
+        CLI["PCControllerDesktop.exe cli / direct command"]
+        TUI["PCControllerDesktop.exe tui"]
+        SERVE["PCControllerDesktop.exe serve"]
         WEB["Bundled SPA / installed PWA"]
         HTTP["Loopback HTTP API"]
         COM["Optional COM Automation"]
@@ -25,9 +25,9 @@ flowchart LR
     HEADLESS["Headless primary runtime"]
     DISPATCH["Command dispatcher"]
     CORE["Application core and state model"]
-    LAMP["Lamp client"]
+    DEVICE["Device client"]
     TERMINAL["Shared bounded device terminal"]
-    DEVICE["Rayan lamp firmware"]
+    DEVICE["Controller device firmware"]
     SHELL["Windows shell services"]
 
     UI --> DISPATCH
@@ -45,9 +45,9 @@ flowchart LR
     COM --> PIPE
     DISPATCH --> CORE
     DISPATCH --> SHELL
-    CORE --> LAMP
-    LAMP -->|"/lamp/* HTTP"| DEVICE
-    DEVICE -->|"/ws events"| LAMP
+    CORE --> DEVICE
+    DEVICE -->|"/device/* HTTP"| DEVICE
+    DEVICE -->|"/ws events"| DEVICE
     CORE --> TERMINAL
     TERMINAL -->|"Manual raw/Telnet TCP"| DEVICE
     CORE --> SHELL
@@ -56,7 +56,7 @@ flowchart LR
 
 ## Processes and entry points
 
-`RayanLamp.exe` is the only shipped executable and is linked as a Windows
+`PCControllerDesktop.exe` is the only shipped executable and is linked as a Windows
 console-subsystem PE so an invoking shell waits for CLI/TUI completion and
 receives the real process exit code. On Windows 11 24H2, Windows Server 2025,
 and later releases, a manifest console-allocation policy prevents automatic
@@ -69,12 +69,12 @@ handoff client; it also hosts the opt-in
 out-of-process COM local server. The primary instance is gated by the named
 pipe, not by a timing-sensitive mutex.
 
-`RayanLamp.exe cli` is the controller-only surface. With no command it requests
+`PCControllerDesktop.exe cli` is the controller-only surface. With no command it requests
 status. It emits readable JSON-shaped output by default, strict JSON with
 `--json`, and ANSI color only when the target is a suitable terminal and
 `--no-color` was not supplied.
 
-`RayanLamp.exe tui` is the interactive application built on Bubble Tea, Lip
+`PCControllerDesktop.exe tui` is the interactive application built on Bubble Tea, Lip
 Gloss, Bubbles, and Huh. In attached mode it is a replaceable
 presentation layer over named-pipe IPC or the authenticated loopback API; the
 GUI remains the state/connection owner and the TUI polls its in-memory status.
@@ -85,11 +85,11 @@ state subscription, automation runner, and audible event effects without
 starting any GUI, tray icon, or global hotkeys. Existing pipe clients can
 control or quit that session exactly as they control the GUI primary.
 
-`RayanLamp.exe serve` uses the same headless primary runtime but makes the
+`PCControllerDesktop.exe serve` uses the same headless primary runtime but makes the
 embedded browser application its presentation layer. It creates no native
 window or tray service. After winning named-pipe ownership it starts the
 loopback HTTP/WebSocket API, embedded SPA handler, event-effects service, and
-lamp core. API listener changes are serialized outside active request-handler
+device core. API listener changes are serialized outside active request-handler
 locks; configuration is broadcast before a graceful close/rebind. IPC quit or
 console cancellation then joins HTTP, effects, automation, IPC, and core
 workers in order.
@@ -123,7 +123,7 @@ WebSocket and never enters that application event stream or BroadcastChannel.
 The core owns one manually opened TCP session, a bounded in-memory transcript,
 and independent cursor reads for the TUI, HTTP/IPC clients, and browser tabs.
 The static/direct browser build cannot open raw TCP itself; its terminal view
-therefore requires a same-origin RayanLamp coordinator.
+therefore requires a same-origin PCControllerDesktop coordinator.
 
 The browser terminal asks xterm.js to use its WebGL renderer after the terminal
 is attached to the document. If WebGL initialization fails or the browser
@@ -135,14 +135,14 @@ capability-owned by the browser and is independent from the native
 The UI-facing client contract has two implementations. The relay client uses
 the authenticated same-origin Go API and its normalized event stream. The
 direct client issues credential-free CORS-simple GET requests only to
-`/lamp/get`, `/lamp/on`, and `/lamp/off`, selects a safe on/off action for
+`/device/get`, `/device/on`, and `/device/off`, selects a safe on/off action for
 toggle from confirmed state, and connects to `/ws` with bounded reconnect.
 Both normalize state/message events before they reach the store. Automatic
 mode tries relay first and falls back to direct; an explicit selection never
 silently changes transport. Broadcast channel and Web Lock names are derived
-from transport plus target, so tabs for different lamps cannot cross-talk.
+from transport plus target, so tabs for different devices cannot cross-talk.
 
-Direct diagnostics accept exactly the six public, noncredential lamp endpoints
+Direct diagnostics accept exactly the six public, noncredential device endpoints
 and share the plain-line/JSON/XML parser and redacted typed projection used by
 the UI. The Go coordinator and direct/static browser client additionally poll
 exact `/config/ap` and `/config/st` projection sources to obtain SSID and
@@ -200,12 +200,12 @@ The application core owns:
 
 - the normalized configuration;
 - the current `Snapshot`;
-- the HTTP/WebSocket lamp client;
+- the HTTP/WebSocket device client;
 - command serialization;
 - reconnect and polling lifecycle;
 - event subscriptions.
 
-On startup it creates one lamp client, starts the WebSocket listener when
+On startup it creates one device client, starts the WebSocket listener when
 enabled, and optionally starts HTTP polling. Commands update a pending marker,
 perform the HTTP request, and merge the confirmed state. WebSocket snapshots
 and connection status update the same model. Subscribers receive immutable
@@ -253,7 +253,7 @@ the explicit no-border mode removes the sizing frame. Walk remains the native
 HWND, message-loop, focus, accessibility, and modal-control scaffold. The
 visual surface is a separate adaptive premultiplied-alpha compositor. In
 `auto` or `directx` mode, compatible systems dynamically initialize hardware
-D3D11, DXGI, and DirectComposition and present RayanLamp's own premultiplied
+D3D11, DXGI, and DirectComposition and present PCControllerDesktop's own premultiplied
 surface without a GPU-to-CPU desktop readback. The implementation binds those
 Windows components directly from pure Go; it introduces no CGO dependency,
 import library, or external DirectX redistributable. The retained
@@ -275,7 +275,7 @@ after a context loss.
 
 No main-window or tray visual is made from a desktop capture, snapshot, or
 desktop readback. DWM/Accent draws the live material behind each ordinary host
-window, while the foreground contains only RayanLamp-owned pixels. Complete
+window, while the foreground contains only PCControllerDesktop-owned pixels. Complete
 transparent mode deliberately selects the per-pixel layered presenter: a
 DirectComposition visual can blend alpha but cannot use that alpha as the
 HWND's native hit-test mask. This preserves exact alpha-zero pointer
@@ -354,7 +354,7 @@ All integrations use IPC protocol version 1 and the same method names:
 The TUI transport layer consumes these boundaries rather than bypassing them.
 Named-pipe attach is restricted to the current user, API attach uses the token
 from the protected configuration, and standalone mode talks only to the
-configured lamp origin.
+configured device origin.
 
 See [Commands and integrations](integration.md) for wire examples and the
 complete command mapping.
@@ -365,11 +365,11 @@ The default user files are:
 
 | Path | Purpose |
 | --- | --- |
-| `%APPDATA%\RayanLamp\config.json` | Strict JSON configuration and local API secret |
-| `%APPDATA%\RayanLamp\sfx\<sha256>.wav` | Validated, content-addressed custom sound assets |
-| `%APPDATA%\RayanLamp\RayanLamp.log` | Application and automation log |
-| `%APPDATA%\RayanLamp\RayanLamp.log.previous` | One rotated log generation |
-| `%APPDATA%\RayanLamp\toast-icon.png` | Private cached copy of embedded toast artwork |
+| `%APPDATA%\PCControllerDesktop\config.json` | Strict JSON configuration and local API secret |
+| `%APPDATA%\PCControllerDesktop\sfx\<sha256>.wav` | Validated, content-addressed custom sound assets |
+| `%APPDATA%\PCControllerDesktop\PCControllerDesktop.log` | Application and automation log |
+| `%APPDATA%\PCControllerDesktop\PCControllerDesktop.log.previous` | One rotated log generation |
+| `%APPDATA%\PCControllerDesktop\toast-icon.png` | Private cached copy of embedded toast artwork |
 
 Configuration saves use a same-directory temporary file, flush, atomic
 replacement, and a current-user-only Windows ACL. The log rotates after

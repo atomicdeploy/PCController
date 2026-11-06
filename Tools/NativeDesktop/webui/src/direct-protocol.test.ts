@@ -1,15 +1,16 @@
 import { describe, expect, it } from "vitest";
+import compatibilityProtocol from "../../compatibility/device-protocol.json";
 import {
   DIRECT_DIAGNOSTIC_ENDPOINTS,
   deriveDirectWebSocketURL,
   directDiagnosticURL,
-  directLampCommandURL,
+  directDeviceCommandURL,
   directProjectionDiagnosticURLs,
   isDirectDiagnosticEndpoint,
-  normalizeDirectLampURL,
-  normalizeDirectLampURLs,
+  normalizeDirectDeviceURL,
+  normalizeDirectDeviceURLs,
   parseDirectDiagnostic,
-  parseDirectLampState,
+  parseDirectOutputState,
   parseDirectProjectionDiagnostic,
   parseDirectWebSocketFrame,
   parseDurationMilliseconds,
@@ -18,38 +19,38 @@ import {
   type DirectDiagnosticDocuments
 } from "./direct-protocol";
 
-describe("direct lamp URL policy", () => {
+describe("direct device URL policy", () => {
   it("normalizes only root HTTP(S) device authorities", () => {
-    expect(normalizeDirectLampURL(" rayanlamp.local ")).toBe(
-      "http://rayanlamp.local"
+    expect(normalizeDirectDeviceURL(" pccontroller-desktop.local ")).toBe(
+      "http://pccontroller-desktop.local"
     );
-    expect(normalizeDirectLampURL("HTTPS://Lamp.Example:8443/")).toBe(
-      "https://lamp.example:8443"
+    expect(normalizeDirectDeviceURL("HTTPS://Device.Example:8443/")).toBe(
+      "https://device.example:8443"
     );
-    expect(normalizeDirectLampURLs("http://[::1]:8080")).toEqual({
+    expect(normalizeDirectDeviceURLs("http://[::1]:8080")).toEqual({
       baseURL: "http://[::1]:8080",
       websocketURL: "ws://[::1]:8080/ws"
     });
-    expect(deriveDirectWebSocketURL("https://rayanlamp.local")).toBe(
-      "wss://rayanlamp.local/ws"
+    expect(deriveDirectWebSocketURL("https://pccontroller-desktop.local")).toBe(
+      "wss://pccontroller-desktop.local/ws"
     );
-    expect(directLampCommandURL("rayanlamp.local", "off")).toBe(
-      "http://rayanlamp.local/lamp/off"
+    expect(directDeviceCommandURL("pccontroller-desktop.local", "off")).toBe(
+      "http://pccontroller-desktop.local" + compatibilityProtocol.statePrefix + "off"
     );
   });
 
   it.each([
     "",
-    "ftp://rayanlamp.local",
-    "http://user:pass@rayanlamp.local",
-    "http://rayanlamp.local/info",
-    "http://rayanlamp.local?",
-    "http://rayanlamp.local#",
-    "http://rayanlamp.local/?state=on",
-    "http://rayanlamp.local\\evil",
-    "http://rayanlamp.local:70000"
+    "ftp://pccontroller-desktop.local",
+    "http://user:pass@pccontroller-desktop.local",
+    "http://pccontroller-desktop.local/info",
+    "http://pccontroller-desktop.local?",
+    "http://pccontroller-desktop.local#",
+    "http://pccontroller-desktop.local/?state=on",
+    "http://pccontroller-desktop.local\\evil",
+    "http://pccontroller-desktop.local:70000"
   ])("rejects unsafe base URL %j", (value) => {
-    expect(() => normalizeDirectLampURL(value)).toThrow();
+    expect(() => normalizeDirectDeviceURL(value)).toThrow();
   });
 
   it("constructs only exact audited diagnostics URLs", () => {
@@ -58,25 +59,25 @@ describe("direct lamp URL policy", () => {
     expect(isDirectDiagnosticEndpoint("/config/st")).toBe(false);
     expect(isDirectDiagnosticEndpoint("/config/ap")).toBe(false);
     expect(isDirectDiagnosticEndpoint("/pu")).toBe(false);
-    expect(directDiagnosticURL("rayanlamp.local", "/wifi/signal")).toBe(
-      "http://rayanlamp.local/wifi/signal"
+    expect(directDiagnosticURL("pccontroller-desktop.local", "/wifi/signal")).toBe(
+      "http://pccontroller-desktop.local/wifi/signal"
     );
     expect(() =>
       directDiagnosticURL(
-        "rayanlamp.local",
+        "pccontroller-desktop.local",
         "/pu" as (typeof DIRECT_DIAGNOSTIC_ENDPOINTS)[number]
       )
     ).toThrow(/allowlist/i);
     expect(
-      directProjectionDiagnosticURLs("rayanlamp.local")
+      directProjectionDiagnosticURLs("pccontroller-desktop.local")
     ).toEqual([
       {
         endpoint: "/config/ap",
-        url: "http://rayanlamp.local/config/ap"
+        url: "http://pccontroller-desktop.local/config/ap"
       },
       {
         endpoint: "/config/st",
-        url: "http://rayanlamp.local/config/st"
+        url: "http://pccontroller-desktop.local/config/st"
       }
     ]);
   });
@@ -95,10 +96,10 @@ describe("direct state responses", () => {
     ['"ON"', "on"],
     ['{"state":"off"}', "off"],
     ['{"STATUS":"HIGH"}', "on"],
-    ['{"lamp":true}', "on"],
+    ['{"device":true}', "on"],
     ['{"value":false}', "off"]
   ] as const)("parses %s as %s", (payload, state) => {
-    expect(parseDirectLampState(payload)).toBe(state);
+    expect(parseDirectOutputState(payload)).toBe(state);
   });
 
   it.each([
@@ -111,7 +112,7 @@ describe("direct state responses", () => {
     '{"state":"unknown"}',
     "{broken"
   ])("fails closed for %s", (payload) => {
-    expect(parseDirectLampState(payload)).toBe("unknown");
+    expect(parseDirectOutputState(payload)).toBe("unknown");
   });
 });
 
@@ -122,21 +123,21 @@ describe("direct firmware WebSocket frames", () => {
       state: "on",
       raw: "on"
     });
-    expect(parseDirectWebSocketFrame("message: Hello\tlamp")).toEqual({
+    expect(parseDirectWebSocketFrame("message: Hello\tdevice")).toEqual({
       type: "message",
-      title: "Rayan Lamp",
-      message: "Hello\tlamp",
+      title: "PCController",
+      message: "Hello\tdevice",
       icon: 0,
-      raw: "message: Hello\tlamp"
+      raw: "message: Hello\tdevice"
     });
     expect(
-      parseDirectWebSocketFrame("MSG: 12,Hello+Rayan%21")
+      parseDirectWebSocketFrame("MSG: 12,Hello+Controller%21")
     ).toEqual({
       type: "message",
-      title: "Rayan Lamp",
-      message: "Hello Rayan!",
+      title: "PCController",
+      message: "Hello Controller!",
       icon: 12,
-      raw: "MSG: 12,Hello+Rayan%21"
+      raw: "MSG: 12,Hello+Controller%21"
     });
     expect(parseDirectWebSocketFrame("beep:10")).toEqual({
       type: "beep",
@@ -204,7 +205,7 @@ describe("direct diagnostics", () => {
     const document = parseDirectDiagnostic(
       "/info",
       [
-        "hostname: RayanLamp",
+        "hostname: PCControllerDesktop",
         "wifi version: SDK:2.2.2/Core:3.1.2",
         "esp chip id: b48537",
         "firmware hash: abcdef (CORRUPTED)",
@@ -231,7 +232,7 @@ describe("direct diagnostics", () => {
 
     const summary = projectDirectDiagnosticSummary({ "/info": document });
     expect(summary).toMatchObject({
-      hostname: "RayanLamp",
+      hostname: "PCControllerDesktop",
       wifi_version: "SDK:2.2.2/Core:3.1.2",
       esp_chip_id: "b48537",
       firmware_hash: "abcdef",
@@ -273,8 +274,8 @@ describe("direct diagnostics", () => {
       "/wifi/country": parseDirectDiagnostic("/wifi/country", "ir"),
       "/description.xml": parseDirectDiagnostic(
         "/description.xml",
-        "<?xml version=\"1.0\"?><device><friendlyName>Rayan Lamp</friendlyName>" +
-          "<modelName>ESP8266</modelName><manufacturer>YektaYar</manufacturer>" +
+        "<?xml version=\"1.0\"?><device><friendlyName>PCController</friendlyName>" +
+          "<modelName>ESP8266</modelName><manufacturer>AtomicDeploy</manufacturer>" +
           "<ignored>not projected</ignored></device>"
       )
     };
@@ -283,7 +284,7 @@ describe("direct diagnostics", () => {
     expect(documents["/description.xml"]?.format).toBe("xml");
     const summary = projectDirectDiagnosticSummary(documents);
     expect(summary).toMatchObject({
-      device_name: "Rayan Lamp",
+      device_name: "PCController",
       rssi_dbm: -63,
       signal_quality: "Good",
       wifi_connected: true,
@@ -297,9 +298,9 @@ describe("direct diagnostics", () => {
         date: "2026-02-16T04:47:51.000Z"
       },
       description: {
-        friendly_name: "Rayan Lamp",
+        friendly_name: "PCController",
         model_name: "ESP8266",
-        manufacturer: "YektaYar"
+        manufacturer: "AtomicDeploy"
       }
     });
   });
@@ -320,7 +321,7 @@ describe("direct diagnostics", () => {
     const accessPoint = parseDirectProjectionDiagnostic(
       "/config/ap",
       [
-        "ssid: RayanLamp Setup",
+        "ssid: PCControllerDesktop Setup",
         "pass: ap-plaintext-secret",
         "ip: 192.168.4.1",
         "netmask: 255.255.255.0"
@@ -358,7 +359,7 @@ describe("direct diagnostics", () => {
       station_gateway: "172.20.5.1",
       station_dns: "172.20.5.1, 1.1.1.1",
       access_point_status: "Enabled",
-      access_point_ssid: "RayanLamp Setup",
+      access_point_ssid: "PCControllerDesktop Setup",
       access_point_ip: "192.168.4.1",
       access_point_netmask: "255.255.255.0"
     });

@@ -10,14 +10,14 @@ import (
 	"testing"
 	"time"
 
-	"rayanlamp.local/app/internal/commands"
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/eventeffects"
-	"rayanlamp.local/app/internal/headless"
-	"rayanlamp.local/app/internal/ipc"
-	"rayanlamp.local/app/internal/localapi"
-	"rayanlamp.local/app/internal/model"
-	"rayanlamp.local/app/internal/sfx"
+	"pccontroller.local/desktop/internal/commands"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/eventeffects"
+	"pccontroller.local/desktop/internal/headless"
+	"pccontroller.local/desktop/internal/ipc"
+	"pccontroller.local/desktop/internal/localapi"
+	"pccontroller.local/desktop/internal/model"
+	"pccontroller.local/desktop/internal/sfx"
 )
 
 type fakeController struct {
@@ -32,7 +32,7 @@ type fakeController struct {
 func (c *fakeController) Snapshot() model.Snapshot {
 	return model.Snapshot{
 		State:     model.StateOff,
-		DeviceURL: c.Config().Lamp.BaseURL,
+		DeviceURL: c.Config().Device.BaseURL,
 	}
 }
 
@@ -176,8 +176,8 @@ type hostFixture struct {
 
 func newHostFixture() *hostFixture {
 	cfg := config.Default()
-	cfg.Lamp.WebSocket = false
-	cfg.Lamp.HTTPPoll = 0
+	cfg.Device.WebSocket = false
+	cfg.Device.HTTPPoll = 0
 	cfg.Integration.LocalAPIEnabled = false
 	controller := &fakeController{cfg: cfg}
 	return &hostFixture{
@@ -192,13 +192,13 @@ func newHostFixture() *hostFixture {
 func (f *hostFixture) dependencies() dependencies {
 	return dependencies{
 		resolveConfig: func(string) (string, error) {
-			return `C:\Temp\RayanLamp\config.json`, nil
+			return `C:\Temp\PCControllerDesktop\config.json`, nil
 		},
 		loadConfig: func(string) (config.Config, error) {
 			return f.cfg, nil
 		},
 		executable: func() (string, error) {
-			return `C:\Apps\RayanLamp\RayanLamp.exe`, nil
+			return `C:\Apps\PCControllerDesktop\PCControllerDesktop.exe`, nil
 		},
 		reconcileStartWithWindows: func(
 			_ string,

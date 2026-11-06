@@ -61,7 +61,7 @@ const (
 
 	MsgSettingsGeneral       MessageID = "settings.general"
 	MsgSettingsAppearance    MessageID = "settings.appearance"
-	MsgSettingsLamp          MessageID = "settings.lamp"
+	MsgSettingsDevice        MessageID = "settings.device"
 	MsgSettingsNotifications MessageID = "settings.notifications"
 	MsgSettingsHotkeys       MessageID = "settings.hotkeys"
 	MsgSettingsAutomation    MessageID = "settings.automation"
@@ -85,7 +85,7 @@ const (
 
 	MsgMainLightOn        MessageID = "main.light_on"
 	MsgMainLightOff       MessageID = "main.light_off"
-	MsgMainFindingLamp    MessageID = "main.finding_lamp"
+	MsgMainFindingDevice  MessageID = "main.finding_device"
 	MsgMainUpdating       MessageID = "main.updating"
 	MsgMainWorking        MessageID = "main.working"
 	MsgMainInfo           MessageID = "main.info"
@@ -123,14 +123,14 @@ const (
 	MsgErrorRunCommand        MessageID = "error.run_command"
 	MsgErrorCommandFailed     MessageID = "error.command_failed"
 
-	MsgNotificationTestTitle     MessageID = "notification.test_title"
-	MsgNotificationTestBody      MessageID = "notification.test_body"
-	MsgNotificationLampTurnedOn  MessageID = "notification.lamp_turned_on"
-	MsgNotificationLampTurnedOff MessageID = "notification.lamp_turned_off"
+	MsgNotificationTestTitle       MessageID = "notification.test_title"
+	MsgNotificationTestBody        MessageID = "notification.test_body"
+	MsgNotificationDeviceTurnedOn  MessageID = "notification.device_turned_on"
+	MsgNotificationDeviceTurnedOff MessageID = "notification.device_turned_off"
 )
 
 var englishCatalog = map[MessageID]string{
-	MsgAppName: "Rayan Lamp",
+	MsgAppName: "PCController",
 
 	MsgLanguageAuto:    "System default",
 	MsgLanguageEnglish: "English",
@@ -159,7 +159,7 @@ var englishCatalog = map[MessageID]string{
 	MsgStateUnknown:      "Unknown",
 	MsgStateError:        "Error",
 
-	MsgActionToggle:           "Toggle lamp",
+	MsgActionToggle:           "Toggle device",
 	MsgActionTurnOn:           "Turn on",
 	MsgActionTurnOff:          "Turn off",
 	MsgActionShowWindow:       "Show main window",
@@ -167,11 +167,11 @@ var englishCatalog = map[MessageID]string{
 	MsgActionSettings:         "Settings",
 	MsgActionDiagnostics:      "Diagnostics",
 	MsgActionTerminal:         "Terminal",
-	MsgActionQuit:             "Exit Rayan Lamp",
+	MsgActionQuit:             "Exit PCController",
 	MsgActionReconnect:        "Reconnect",
 	MsgActionWebDashboard:     "Web dashboard…",
 	MsgActionDashboardView:    "Use dashboard view",
-	MsgActionCompactView:      "Use compact lamp view",
+	MsgActionCompactView:      "Use compact device view",
 	MsgActionAlwaysOnTop:      "Always on top",
 	MsgActionStartWithWindows: "Start with Windows",
 
@@ -185,7 +185,7 @@ var englishCatalog = map[MessageID]string{
 
 	MsgSettingsGeneral:       "General",
 	MsgSettingsAppearance:    "Appearance",
-	MsgSettingsLamp:          "Lamp",
+	MsgSettingsDevice:        "Device",
 	MsgSettingsNotifications: "Notifications",
 	MsgSettingsHotkeys:       "Hotkeys",
 	MsgSettingsAutomation:    "Automation",
@@ -209,7 +209,7 @@ var englishCatalog = map[MessageID]string{
 
 	MsgMainLightOn:        "LIGHT IS ON",
 	MsgMainLightOff:       "LIGHT IS OFF",
-	MsgMainFindingLamp:    "FINDING LAMP",
+	MsgMainFindingDevice:  "FINDING DEVICE",
 	MsgMainUpdating:       "UPDATING",
 	MsgMainWorking:        "Working…",
 	MsgMainInfo:           "Info",
@@ -223,12 +223,12 @@ var englishCatalog = map[MessageID]string{
 	MsgTrayStateOff:        "off",
 	MsgTrayConnectionError: "connection error",
 	MsgTrayStateUnknown:    "state unknown",
-	MsgTrayTooltip:         "Rayan Lamp — %s (%s)\n%s",
+	MsgTrayTooltip:         "PCController — %s (%s)\n%s",
 	MsgTrayLeftClickHint:   "Left-click to toggle; right-click for menu",
 
-	MsgTaskbarSuspended:       "Rayan Lamp — Suspended",
-	MsgTaskbarDisconnected:    "Rayan Lamp — Disconnected",
-	MsgTaskbarOperationFailed: "Rayan Lamp — Operation failed",
+	MsgTaskbarSuspended:       "PCController — Suspended",
+	MsgTaskbarDisconnected:    "PCController — Disconnected",
+	MsgTaskbarOperationFailed: "PCController — Operation failed",
 	MsgTaskbarTurningOn:       "Turning on…",
 	MsgTaskbarTurningOff:      "Turning off…",
 	MsgTaskbarToggling:        "Toggling…",
@@ -242,19 +242,19 @@ var englishCatalog = map[MessageID]string{
 	MsgErrorOpenMenu:          "Unable to open the app menu",
 	MsgErrorUpdateSettings:    "Unable to update settings",
 	MsgErrorWindowChrome:      "Unable to change the window chrome",
-	MsgErrorResizeWindow:      "Unable to resize the lamp window",
+	MsgErrorResizeWindow:      "Unable to resize the device window",
 	MsgErrorHotkeyUnavailable: "Global hotkey unavailable",
 	MsgErrorRunCommand:        "Unable to run command",
-	MsgErrorCommandFailed:     "Rayan Lamp command failed",
+	MsgErrorCommandFailed:     "PCController command failed",
 
-	MsgNotificationTestTitle:     "Rayan Lamp test",
-	MsgNotificationTestBody:      "Modern notifications are ready.",
-	MsgNotificationLampTurnedOn:  "Lamp turned on",
-	MsgNotificationLampTurnedOff: "Lamp turned off",
+	MsgNotificationTestTitle:       "PCController test",
+	MsgNotificationTestBody:        "Modern notifications are ready.",
+	MsgNotificationDeviceTurnedOn:  "Device turned on",
+	MsgNotificationDeviceTurnedOff: "Device turned off",
 }
 
 var persianCatalog = map[MessageID]string{
-	MsgAppName: "چراغ رایان",
+	MsgAppName: "PCController",
 
 	MsgLanguageAuto:    "پیش‌فرض سیستم",
 	MsgLanguageEnglish: "انگلیسی",
@@ -283,7 +283,7 @@ var persianCatalog = map[MessageID]string{
 	MsgStateUnknown:      "نامشخص",
 	MsgStateError:        "خطا",
 
-	MsgActionToggle:           "تغییر وضعیت چراغ",
+	MsgActionToggle:           "تغییر وضعیت دستگاه",
 	MsgActionTurnOn:           "روشن کردن",
 	MsgActionTurnOff:          "خاموش کردن",
 	MsgActionShowWindow:       "نمایش پنجرهٔ اصلی",
@@ -291,11 +291,11 @@ var persianCatalog = map[MessageID]string{
 	MsgActionSettings:         "تنظیمات",
 	MsgActionDiagnostics:      "عیب‌یابی",
 	MsgActionTerminal:         "پایانه",
-	MsgActionQuit:             "خروج از چراغ رایان",
+	MsgActionQuit:             "خروج از PCController",
 	MsgActionReconnect:        "اتصال دوباره",
 	MsgActionWebDashboard:     "داشبورد وب…",
 	MsgActionDashboardView:    "استفاده از نمای داشبورد",
-	MsgActionCompactView:      "استفاده از نمای فشردهٔ چراغ",
+	MsgActionCompactView:      "استفاده از نمای فشردهٔ دستگاه",
 	MsgActionAlwaysOnTop:      "همیشه روی پنجره‌های دیگر",
 	MsgActionStartWithWindows: "اجرای خودکار با ویندوز",
 
@@ -309,7 +309,7 @@ var persianCatalog = map[MessageID]string{
 
 	MsgSettingsGeneral:       "عمومی",
 	MsgSettingsAppearance:    "ظاهر",
-	MsgSettingsLamp:          "چراغ",
+	MsgSettingsDevice:        "دستگاه",
 	MsgSettingsNotifications: "اعلان‌ها",
 	MsgSettingsHotkeys:       "میان‌برها",
 	MsgSettingsAutomation:    "خودکارسازی",
@@ -331,9 +331,9 @@ var persianCatalog = map[MessageID]string{
 	MsgNoticeRequestFailed: "درخواست ناموفق بود: %s",
 	MsgNoticeNoData:        "داده‌ای موجود نیست",
 
-	MsgMainLightOn:        "چراغ روشن است",
-	MsgMainLightOff:       "چراغ خاموش است",
-	MsgMainFindingLamp:    "در حال یافتن چراغ",
+	MsgMainLightOn:        "دستگاه روشن است",
+	MsgMainLightOff:       "دستگاه خاموش است",
+	MsgMainFindingDevice:  "در حال یافتن دستگاه",
 	MsgMainUpdating:       "در حال به‌روزرسانی",
 	MsgMainWorking:        "در حال انجام…",
 	MsgMainInfo:           "اطلاعات",
@@ -347,12 +347,12 @@ var persianCatalog = map[MessageID]string{
 	MsgTrayStateOff:        "خاموش",
 	MsgTrayConnectionError: "خطای اتصال",
 	MsgTrayStateUnknown:    "وضعیت نامشخص",
-	MsgTrayTooltip:         "چراغ رایان — %s (%s)\n%s",
+	MsgTrayTooltip:         "PCController — %s (%s)\n%s",
 	MsgTrayLeftClickHint:   "کلیک چپ: تغییر وضعیت؛ کلیک راست: نمایش منو",
 
-	MsgTaskbarSuspended:       "چراغ رایان — در حالت تعلیق",
-	MsgTaskbarDisconnected:    "چراغ رایان — قطع ارتباط",
-	MsgTaskbarOperationFailed: "چراغ رایان — عملیات ناموفق بود",
+	MsgTaskbarSuspended:       "PCController — در حالت تعلیق",
+	MsgTaskbarDisconnected:    "PCController — قطع ارتباط",
+	MsgTaskbarOperationFailed: "PCController — عملیات ناموفق بود",
 	MsgTaskbarTurningOn:       "در حال روشن کردن…",
 	MsgTaskbarTurningOff:      "در حال خاموش کردن…",
 	MsgTaskbarToggling:        "در حال تغییر وضعیت…",
@@ -366,15 +366,15 @@ var persianCatalog = map[MessageID]string{
 	MsgErrorOpenMenu:          "باز کردن منوی برنامه ممکن نشد",
 	MsgErrorUpdateSettings:    "به‌روزرسانی تنظیمات ممکن نشد",
 	MsgErrorWindowChrome:      "تغییر قاب پنجره ممکن نشد",
-	MsgErrorResizeWindow:      "تغییر اندازهٔ پنجرهٔ چراغ ممکن نشد",
+	MsgErrorResizeWindow:      "تغییر اندازهٔ پنجرهٔ دستگاه ممکن نشد",
 	MsgErrorHotkeyUnavailable: "میان‌بر سراسری در دسترس نیست",
 	MsgErrorRunCommand:        "اجرای فرمان ممکن نشد",
-	MsgErrorCommandFailed:     "فرمان چراغ رایان ناموفق بود",
+	MsgErrorCommandFailed:     "فرمان PCController ناموفق بود",
 
-	MsgNotificationTestTitle:     "آزمایش چراغ رایان",
-	MsgNotificationTestBody:      "اعلان‌های نوین آماده‌اند.",
-	MsgNotificationLampTurnedOn:  "چراغ روشن شد",
-	MsgNotificationLampTurnedOff: "چراغ خاموش شد",
+	MsgNotificationTestTitle:       "آزمایش PCController",
+	MsgNotificationTestBody:        "اعلان‌های نوین آماده‌اند.",
+	MsgNotificationDeviceTurnedOn:  "دستگاه روشن شد",
+	MsgNotificationDeviceTurnedOff: "دستگاه خاموش شد",
 }
 
 // Localizer translates messages and applies locale-aware digit shaping.

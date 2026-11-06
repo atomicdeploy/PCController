@@ -11,8 +11,8 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"rayanlamp.local/app/internal/deviceterminal"
-	"rayanlamp.local/app/internal/ipc"
+	"pccontroller.local/desktop/internal/deviceterminal"
+	"pccontroller.local/desktop/internal/ipc"
 )
 
 func TestEventWebSocketShutdownNotifiesBeforeAdmittedHandshakeJoins(t *testing.T) {

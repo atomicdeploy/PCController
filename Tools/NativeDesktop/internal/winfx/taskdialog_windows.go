@@ -200,7 +200,7 @@ func TaskDialog(options TaskDialogOptions) (TaskDialogResult, error) {
 		options.Buttons = DialogButtonOK
 	}
 	if options.Title == "" {
-		options.Title = "RayanLamp"
+		options.Title = "PCControllerDesktop"
 	}
 	if !options.RightToLeft {
 		options.RightToLeft = taskDialogContainsRTL(

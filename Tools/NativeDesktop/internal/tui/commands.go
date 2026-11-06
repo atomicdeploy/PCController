@@ -25,11 +25,11 @@ const (
 type commandID string
 
 const (
-	commandLampToggle         commandID = "lamp.toggle"
-	commandLampOn             commandID = "lamp.on"
-	commandLampOff            commandID = "lamp.off"
-	commandLampRefresh        commandID = "lamp.refresh"
-	commandLampReconnect      commandID = "lamp.reconnect"
+	commandDeviceToggle       commandID = "device.toggle"
+	commandDeviceOn           commandID = "device.on"
+	commandDeviceOff          commandID = "device.off"
+	commandDeviceRefresh      commandID = "device.refresh"
+	commandDeviceReconnect    commandID = "device.reconnect"
 	commandAppShow            commandID = "app.show"
 	commandAppHide            commandID = "app.hide"
 	commandAppNativeSettings  commandID = "app.native-settings"
@@ -77,11 +77,11 @@ type commandSpec struct {
 
 func (m *Model) commandSpecs() []commandSpec {
 	specs := []commandSpec{
-		{commandLampToggle, "💡 Lamp · Toggle", "Toggle using the confirmed coordinator state"},
-		{commandLampOn, "☀  Lamp · Turn on", "Request /lamp/on"},
-		{commandLampOff, "🌙 Lamp · Turn off", "Request /lamp/off"},
-		{commandLampRefresh, "↻  Lamp · Refresh state", "Read /lamp/get now"},
-		{commandLampReconnect, "⟳  Lamp · Reconnect", "Restart WebSocket and HTTP recovery"},
+		{commandDeviceToggle, "💡 Device · Toggle", "Toggle using the confirmed coordinator state"},
+		{commandDeviceOn, "☀  Device · Turn on", "Request /device/on"},
+		{commandDeviceOff, "🌙 Device · Turn off", "Request /device/off"},
+		{commandDeviceRefresh, "↻  Device · Refresh state", "Read /device/get now"},
+		{commandDeviceReconnect, "⟳  Device · Reconnect", "Restart WebSocket and HTTP recovery"},
 		{commandAppShow, "▣  App · Show main window", "Bring the existing GUI forward"},
 		{commandAppHide, "—  App · Hide main window", "Keep the coordinator in the tray"},
 		{commandAppNativeSettings, "⚙  App · Open native settings", "Open the Win32 settings window"},
@@ -99,8 +99,8 @@ func (m *Model) commandSpecs() []commandSpec {
 		{commandTerminalConnect, "🔌 Device · Connect terminal", "Connect without opening the terminal screen"},
 		{commandTerminalDisconnect, "⏏  Device · Disconnect terminal", "Close the shared Telnet session"},
 		{commandDiagnostics, "🔎 Diagnostics · Fetch endpoint", "Open the allow-listed diagnostic reader"},
-		{commandDashboard, "⌂  Navigation · Dashboard", "Return to lamp status and activity"},
-		{commandAppQuit, "⏻  App · Quit primary", "Stop the active RayanLamp coordinator"},
+		{commandDashboard, "⌂  Navigation · Dashboard", "Return to device status and activity"},
+		{commandAppQuit, "⏻  App · Quit primary", "Stop the active PCControllerDesktop coordinator"},
 	}
 	for index := range specs {
 		specs[index].label = m.text(specs[index].label)
@@ -231,23 +231,23 @@ func (m *Model) selectPaletteCommand(command commandID) tea.Cmd {
 	case commandDiagnostics:
 		m.closeCommands()
 		return m.openDiagnostics()
-	case commandLampToggle:
+	case commandDeviceToggle:
 		m.closeCommands()
 		_, result := m.startAction(ActionToggle)
 		return result
-	case commandLampOn:
+	case commandDeviceOn:
 		m.closeCommands()
 		_, result := m.startAction(ActionOn)
 		return result
-	case commandLampOff:
+	case commandDeviceOff:
 		m.closeCommands()
 		_, result := m.startAction(ActionOff)
 		return result
-	case commandLampRefresh:
+	case commandDeviceRefresh:
 		m.closeCommands()
 		_, result := m.startAction(ActionRefresh)
 		return result
-	case commandLampReconnect:
+	case commandDeviceReconnect:
 		m.closeCommands()
 		_, result := m.startAction(ActionReconnect)
 		return result
@@ -263,7 +263,7 @@ func (m *Model) openQuitConfirmation() tea.Cmd {
 	m.commands.confirm = false
 	m.commands.err = ""
 	field := huh.NewConfirm().
-		Title(m.text("Quit the active RayanLamp primary?")).
+		Title(m.text("Quit the active PCControllerDesktop primary?")).
 		Description(m.text("This stops the GUI/headless coordinator, WebSocket, local API, tray, and automations.")).
 		Affirmative(m.text("Quit primary")).
 		Negative(m.text("Cancel")).
@@ -395,7 +395,7 @@ func (m *Model) executePaletteCommand(
 	case commandAppNotify:
 		method = "notifications.show"
 		params = map[string]string{
-			"title":   m.text("Rayan Lamp") + " · " + m.text("Terminal"),
+			"title":   m.text("PCController") + " · " + m.text("Terminal"),
 			"message": m.text("Notification test from the command palette."),
 		}
 	case commandAppAudio:
@@ -518,7 +518,7 @@ func (m *Model) resizeCommands() {
 func (m *Model) renderCommandsOverlay() tea.View {
 	layout := calculateSettingsOverlayLayout(m.width, m.height)
 	title := m.text("COMMAND CENTER")
-	subtitle := m.text("Lamp · app · serving · configuration · device")
+	subtitle := m.text("Device · app · serving · configuration · device")
 	footer := m.text("↑/↓ choose · / filter · enter run · esc dashboard")
 	var body string
 	switch m.commands.mode {

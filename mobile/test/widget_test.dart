@@ -267,7 +267,7 @@ void main() {
         peerFixture(
           features: ['buzzer'],
           kind: 'controller',
-          hostname: 'rayanlamp',
+          hostname: 'pccontroller-desktop',
           title: 'Rayan Controller',
           application: 'rayan-controller',
         ),

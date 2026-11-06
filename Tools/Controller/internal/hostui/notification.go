@@ -18,6 +18,7 @@ type NotificationAction struct {
 }
 
 type Notification struct {
+	Silent    bool                 `json:"silent,omitempty"`
 	ID        string               `json:"id,omitempty"`
 	Title     string               `json:"title"`
 	Body      string               `json:"body"`
@@ -59,6 +60,7 @@ type Notifier interface {
 type NotifierOptions struct {
 	AppID    string
 	LogoPath string
+	Delivery string // auto (default), toast, balloon, or off
 }
 
 func NewNotifier(options NotifierOptions) Notifier { return newPlatformNotifier(options) }
@@ -69,6 +71,11 @@ type toastXML struct {
 	ActivationType string        `xml:"activationType,attr,omitempty"`
 	Visual         toastVisual   `xml:"visual"`
 	Actions        *toastActions `xml:"actions,omitempty"`
+	Audio          *toastAudio   `xml:"audio,omitempty"`
+}
+
+type toastAudio struct {
+	Silent bool `xml:"silent,attr"`
 }
 type toastVisual struct {
 	Binding toastBinding `xml:"binding"`
@@ -105,6 +112,9 @@ func buildToastXML(notification Notification, logoURI string) ([]byte, error) {
 	value := toastXML{
 		Launch: notification.LaunchURI,
 		Visual: toastVisual{Binding: toastBinding{Template: "ToastGeneric", Texts: []string{notification.Title, notification.Body}}},
+	}
+	if notification.Silent {
+		value.Audio = &toastAudio{Silent: true}
 	}
 	if strings.TrimSpace(logoURI) != "" {
 		if err := validateToastLogoURI(logoURI); err != nil {

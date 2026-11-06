@@ -5,7 +5,7 @@ package winfx
 import (
 	"os"
 
-	"rayanlamp.local/app/internal/terminal"
+	"pccontroller.local/desktop/internal/terminal"
 )
 
 // EnableVT100 is kept as a compatibility wrapper. New console code should use

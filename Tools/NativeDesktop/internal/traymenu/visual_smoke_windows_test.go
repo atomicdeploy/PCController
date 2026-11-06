@@ -12,22 +12,22 @@ import (
 	"github.com/lxn/win"
 	"golang.org/x/sys/windows"
 
-	"rayanlamp.local/app/assets"
+	"pccontroller.local/desktop/assets"
 )
 
 // TestVisualStyledPopup is an opt-in compositor smoke fixture. It presents
 // only app-owned pixels and exists so an external window-only capture tool can
 // inspect the live DWM popup; it is skipped during ordinary automated tests.
 func TestVisualStyledPopup(t *testing.T) {
-	if os.Getenv("RAYANLAMP_VISUAL_POPUP") != "1" {
-		t.Skip("set RAYANLAMP_VISUAL_POPUP=1 for the compositor smoke fixture")
+	if os.Getenv("PCCONTROLLER_DESKTOP_VISUAL_POPUP") != "1" {
+		t.Skip("set PCCONTROLLER_DESKTOP_VISUAL_POPUP=1 for the compositor smoke fixture")
 	}
 
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
 	className, _ := windows.UTF16FromString("STATIC")
-	title, _ := windows.UTF16FromString("RayanLamp visual smoke owner")
+	title, _ := windows.UTF16FromString("PCControllerDesktop visual smoke owner")
 	owner := win.CreateWindowEx(
 		win.WS_EX_TOOLWINDOW,
 		&className[0],
@@ -57,18 +57,18 @@ func TestVisualStyledPopup(t *testing.T) {
 		return data
 	}
 	items := []Item{
-		{ID: "show", Label: "Lamp is off", Shortcut: "Open", IconPNG: icon("icons/lamp-off.png")},
+		{ID: "show", Label: "Device is off", Shortcut: "Open", IconPNG: icon("icons/device-off.png")},
 		{Separator: true},
-		{ID: "toggle", Label: "Toggle lamp", Shortcut: "Ctrl+Alt+L", IconPNG: icon("icons/app.png")},
-		{ID: "on", Label: "Turn on", IconPNG: icon("icons/lamp-on.png")},
-		{ID: "off", Label: "Turn off", IconPNG: icon("icons/lamp-off.png")},
+		{ID: "toggle", Label: "Toggle device", Shortcut: "Ctrl+Alt+L", IconPNG: icon("icons/app.png")},
+		{ID: "on", Label: "Turn on", IconPNG: icon("icons/device-on.png")},
+		{ID: "off", Label: "Turn off", IconPNG: icon("icons/device-off.png")},
 		{Separator: true},
 		{ID: "settings", Label: "Settings…", IconPNG: icon("icons/menu-settings.png")},
 		{ID: "diagnostics", Label: "Diagnostics…", IconPNG: icon("icons/menu-diagnostics.png")},
 		{ID: "reconnect", Label: "Reconnect", Shortcut: "F5", IconPNG: icon("icons/menu-reconnect.png")},
 		{Separator: true},
 		{ID: "pin", Label: "Always on top", Checked: true, IconPNG: icon("icons/menu-pin.png")},
-		{ID: "quit", Label: "Exit Rayan Lamp", IconPNG: icon("icons/menu-exit.png")},
+		{ID: "quit", Label: "Exit PCController", IconPNG: icon("icons/menu-exit.png")},
 	}
 
 	stopCloser := make(chan struct{})
@@ -101,7 +101,7 @@ func TestVisualStyledPopup(t *testing.T) {
 					bounds.Bottom-bounds.Top < 100 {
 					continue
 				}
-				if path := os.Getenv("RAYANLAMP_VISUAL_POPUP_RECT"); path != "" {
+				if path := os.Getenv("PCCONTROLLER_DESKTOP_VISUAL_POPUP_RECT"); path != "" {
 					_ = os.WriteFile(
 						path,
 						[]byte(fmt.Sprintf(

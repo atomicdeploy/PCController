@@ -8,7 +8,7 @@ import (
 
 	"github.com/lxn/walk"
 
-	"rayanlamp.local/app/assets"
+	"pccontroller.local/desktop/assets"
 )
 
 func TestPackedSettingsIconPaintsCommonCaptionSizes(t *testing.T) {

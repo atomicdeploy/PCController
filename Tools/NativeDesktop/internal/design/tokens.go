@@ -1,5 +1,5 @@
 // Package design exposes the canonical visual tokens shared by native and web
-// RayanLamp surfaces.
+// PCControllerDesktop surfaces.
 package design
 
 import (

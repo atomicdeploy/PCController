@@ -3,8 +3,9 @@ import type {
   DiagnosticDocument,
   DiagnosticField,
   DiagnosticValueKind,
-  LampState
+  OutputState
 } from "./contracts";
+import compatibilityProtocol from "../../compatibility/device-protocol.json";
 
 export const DIRECT_DIAGNOSTIC_ENDPOINTS = [
   "/info",
@@ -34,20 +35,20 @@ type DirectParsedDiagnosticEndpoint =
   | DirectDiagnosticEndpoint
   | DirectProjectionDiagnosticEndpoint;
 
-export interface DirectLampURLs {
+export interface DirectDeviceURLs {
   baseURL: string;
   websocketURL: string;
 }
 
-export type DirectLampEvent =
+export type DirectDeviceEvent =
   | {
       type: "snapshot";
-      state: Exclude<LampState, "unknown">;
+      state: Exclude<OutputState, "unknown">;
       raw: string;
     }
   | {
       type: "message";
-      title: "Rayan Lamp";
+      title: "PCController";
       message: string;
       icon: number;
       raw: string;
@@ -62,7 +63,7 @@ export type DirectDiagnosticDocuments = Partial<
   Record<DirectParsedDiagnosticEndpoint, DiagnosticDocument>
 >;
 
-const stateAliases: Readonly<Record<string, LampState>> = {
+const stateAliases: Readonly<Record<string, OutputState>> = {
   ON: "on",
   "1": "on",
   TRUE: "on",
@@ -73,7 +74,7 @@ const stateAliases: Readonly<Record<string, LampState>> = {
   LOW: "off"
 };
 
-const stateObjectKeys = new Set(["state", "status", "lamp", "value"]);
+const stateObjectKeys = new Set(compatibilityProtocol.stateFields);
 const auditedEndpointSet = new Set<string>(DIRECT_DIAGNOSTIC_ENDPOINTS);
 const projectionEndpointSet = new Set<string>(
   DIRECT_PROJECTION_DIAGNOSTIC_ENDPOINTS
@@ -109,13 +110,13 @@ const maxDiagnosticFields = 256;
 const maxDiagnosticDepth = 12;
 const redactedValue = "[redacted]";
 
-export function normalizeDirectLampURL(raw: string): string {
+export function normalizeDirectDeviceURL(raw: string): string {
   let value = raw.trim();
   if (!value) {
-    throw new TypeError("Lamp URL is required.");
+    throw new TypeError("Device URL is required.");
   }
   if (/[\u0000-\u001f\u007f\\]/u.test(value)) {
-    throw new TypeError("Lamp URL contains invalid characters.");
+    throw new TypeError("Device URL contains invalid characters.");
   }
   if (!value.includes("://")) {
     value = `http://${value}`;
@@ -124,50 +125,50 @@ export function normalizeDirectLampURL(raw: string): string {
   // empty one. Reject the delimiters themselves to keep the device authority
   // and root path exact.
   if (value.includes("?") || value.includes("#")) {
-    throw new TypeError("Lamp URL must not contain a query or fragment.");
+    throw new TypeError("Device URL must not contain a query or fragment.");
   }
 
   let parsed: URL;
   try {
     parsed = new URL(value);
   } catch {
-    throw new TypeError("Lamp URL is invalid.");
+    throw new TypeError("Device URL is invalid.");
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new TypeError("Lamp URL must use HTTP or HTTPS.");
+    throw new TypeError("Device URL must use HTTP or HTTPS.");
   }
   if (!parsed.hostname) {
-    throw new TypeError("Lamp URL must include a hostname.");
+    throw new TypeError("Device URL must include a hostname.");
   }
   if (parsed.username || parsed.password) {
-    throw new TypeError("Lamp URL must not contain credentials.");
+    throw new TypeError("Device URL must not contain credentials.");
   }
   if (parsed.pathname !== "/") {
-    throw new TypeError("Lamp URL must not contain a path prefix.");
+    throw new TypeError("Device URL must not contain a path prefix.");
   }
   return parsed.origin;
 }
 
 export function deriveDirectWebSocketURL(rawBaseURL: string): string {
-  const parsed = new URL(normalizeDirectLampURL(rawBaseURL));
+  const parsed = new URL(normalizeDirectDeviceURL(rawBaseURL));
   parsed.protocol = parsed.protocol === "https:" ? "wss:" : "ws:";
   parsed.pathname = "/ws";
   return parsed.href;
 }
 
-export function normalizeDirectLampURLs(rawBaseURL: string): DirectLampURLs {
-  const baseURL = normalizeDirectLampURL(rawBaseURL);
+export function normalizeDirectDeviceURLs(rawBaseURL: string): DirectDeviceURLs {
+  const baseURL = normalizeDirectDeviceURL(rawBaseURL);
   return {
     baseURL,
     websocketURL: deriveDirectWebSocketURL(baseURL)
   };
 }
 
-export function directLampCommandURL(
+export function directDeviceCommandURL(
   rawBaseURL: string,
   command: "get" | "on" | "off"
 ): string {
-  return `${normalizeDirectLampURL(rawBaseURL)}/lamp/${command}`;
+  return `${normalizeDirectDeviceURL(rawBaseURL)}${compatibilityProtocol.statePrefix}${command}`;
 }
 
 export function isDirectDiagnosticEndpoint(
@@ -181,7 +182,7 @@ export function directDiagnosticURL(
   endpoint: DirectDiagnosticEndpoint
 ): string {
   requireAuditedEndpoint(endpoint);
-  return `${normalizeDirectLampURL(rawBaseURL)}${endpoint}`;
+  return `${normalizeDirectDeviceURL(rawBaseURL)}${endpoint}`;
 }
 
 export function directProjectionDiagnosticURLs(
@@ -190,14 +191,14 @@ export function directProjectionDiagnosticURLs(
   endpoint: DirectProjectionDiagnosticEndpoint;
   url: string;
 }> {
-  const baseURL = normalizeDirectLampURL(rawBaseURL);
+  const baseURL = normalizeDirectDeviceURL(rawBaseURL);
   return DIRECT_PROJECTION_DIAGNOSTIC_ENDPOINTS.map((endpoint) => ({
     endpoint,
     url: `${baseURL}${endpoint}`
   }));
 }
 
-export function parseDirectLampState(payload: string): LampState {
+export function parseDirectOutputState(payload: string): OutputState {
   const text = stripLeadingBOM(payload).trim();
   const direct = parseStateScalar(text);
   if (direct !== "unknown") return direct;
@@ -227,7 +228,7 @@ export function parseDirectLampState(payload: string): LampState {
 
 export function parseDirectWebSocketFrame(
   frame: unknown
-): DirectLampEvent | null {
+): DirectDeviceEvent | null {
   if (
     typeof frame !== "string" ||
     frame.length === 0 ||
@@ -252,7 +253,7 @@ export function parseDirectWebSocketFrame(
     if (!validRemoteMessage(message)) return null;
     return {
       type: "message",
-      title: "Rayan Lamp",
+      title: "PCController",
       message,
       icon: 0,
       raw: text
@@ -279,7 +280,7 @@ export function parseDirectWebSocketFrame(
     if (!validRemoteMessage(message)) return null;
     return {
       type: "message",
-      title: "Rayan Lamp",
+      title: "PCController",
       message,
       icon,
       raw: text
@@ -295,7 +296,7 @@ export function parseDirectWebSocketFrame(
   }
 
   // The firmware also serves unrelated ASA traffic. Failing closed here keeps
-  // those frames out of the lamp state and notification surfaces.
+  // those frames out of the device state and notification surfaces.
   return null;
 }
 
@@ -482,15 +483,15 @@ export function projectDirectDiagnosticSummary(
 
 // Stable integration-facing names. The longer aliases above remain descriptive
 // for call sites that want to make the direct transport explicit.
-export const normalizeLampBaseURL = normalizeDirectLampURL;
+export const normalizeDeviceBaseURL = normalizeDirectDeviceURL;
 export const directWebSocketURL = deriveDirectWebSocketURL;
-export const parseLampStatePayload = parseDirectLampState;
+export const parseOutputStatePayload = parseDirectOutputState;
 export const parseDirectEvent = parseDirectWebSocketFrame;
 export const parseDiagnosticDocument = parseDirectDiagnostic;
 export const diagnosticDeviceFromDocuments =
   projectDirectDiagnosticSummary;
 
-function parseStateScalar(value: string): LampState {
+function parseStateScalar(value: string): OutputState {
   return stateAliases[value.trim().toUpperCase()] ?? "unknown";
 }
 

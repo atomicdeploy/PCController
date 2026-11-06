@@ -47,8 +47,8 @@ jobs:
       - name: Upload release executable
         uses: actions/upload-artifact@v7
         with:
-          name: RayanLamp-windows-amd64-${{ matrix.edition }}
-          path: dist/RayanLamp.exe
+          name: PCControllerDesktop-windows-amd64-${{ matrix.edition }}
+          path: dist/PCControllerDesktop.exe
           if-no-files-found: error
 
   linux-cross:
@@ -68,7 +68,7 @@ jobs:
             edition: production
     env:
       CLICOLOR_FORCE: "1"
-      RAYANLAMP_EMOJI: "1"
+      PCCONTROLLER_DESKTOP_EMOJI: "1"
 
     steps:
       - name: Check out source
@@ -105,6 +105,6 @@ jobs:
       - name: Upload cross-built executable
         uses: actions/upload-artifact@v7
         with:
-          name: RayanLamp-windows-${{ matrix.architecture }}-${{ matrix.edition }}-from-linux
-          path: dist/RayanLamp.exe
+          name: PCControllerDesktop-windows-${{ matrix.architecture }}-${{ matrix.edition }}-from-linux
+          path: dist/PCControllerDesktop.exe
           if-no-files-found: error

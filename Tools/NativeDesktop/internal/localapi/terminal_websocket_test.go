@@ -16,11 +16,11 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"rayanlamp.local/app/internal/appcore"
-	"rayanlamp.local/app/internal/commands"
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/deviceterminal"
-	"rayanlamp.local/app/internal/ipc"
+	"pccontroller.local/desktop/internal/appcore"
+	"pccontroller.local/desktop/internal/commands"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/deviceterminal"
+	"pccontroller.local/desktop/internal/ipc"
 )
 
 func TestTerminalWebSocketRequiresSessionAndBridgesBytes(t *testing.T) {
@@ -38,7 +38,7 @@ func TestTerminalWebSocketRequiresSessionAndBridgesBytes(t *testing.T) {
 		}
 		defer connection.Close()
 		_, _ = connection.Write([]byte{0xff, 0xfb, 0x01})
-		_, _ = connection.Write([]byte("\x1b[32mRayan terminal ready\x1b[0m\r\n> "))
+		_, _ = connection.Write([]byte("\x1b[32mController terminal ready\x1b[0m\r\n> "))
 		buffer := make([]byte, len("status\r\n"))
 		if _, readErr := io.ReadFull(connection, buffer); readErr == nil {
 			deviceInput <- buffer
@@ -47,11 +47,11 @@ func TestTerminalWebSocketRequiresSessionAndBridgesBytes(t *testing.T) {
 	}()
 
 	cfg := config.Default()
-	cfg.Lamp.BaseURL = "http://127.0.0.1"
-	cfg.Lamp.TelnetPort = devicePort
-	cfg.Lamp.WebSocket = false
-	cfg.Lamp.HTTPPoll = 0
-	cfg.Lamp.RequestTimeout = config.Duration(2 * time.Second)
+	cfg.Device.BaseURL = "http://127.0.0.1"
+	cfg.Device.TelnetPort = devicePort
+	cfg.Device.WebSocket = false
+	cfg.Device.HTTPPoll = 0
+	cfg.Device.RequestTimeout = config.Duration(2 * time.Second)
 	core, err := appcore.New(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -102,7 +102,7 @@ func TestTerminalWebSocketRequiresSessionAndBridgesBytes(t *testing.T) {
 	connected := false
 	var output []byte
 	for deadline := time.Now().Add(4 * time.Second); time.Now().Before(deadline) &&
-		(!connected || !strings.Contains(string(output), "Rayan terminal ready")); {
+		(!connected || !strings.Contains(string(output), "Controller terminal ready")); {
 		messageType, payload, readErr := connection.ReadMessage()
 		if readErr != nil {
 			t.Fatalf("read terminal frame: %v", readErr)
@@ -127,7 +127,7 @@ func TestTerminalWebSocketRequiresSessionAndBridgesBytes(t *testing.T) {
 	if !connected {
 		t.Fatal("terminal WebSocket never reported connected")
 	}
-	if !strings.Contains(string(output), "Rayan terminal ready") {
+	if !strings.Contains(string(output), "Controller terminal ready") {
 		t.Fatalf("terminal output = %q", output)
 	}
 	if strings.ContainsRune(string(output), rune(0xff)) {

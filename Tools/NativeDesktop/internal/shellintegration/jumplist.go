@@ -7,7 +7,7 @@ import (
 )
 
 // jumpTask is deliberately static. Jump List tasks remain available while the
-// app is stopped and must not depend on transient lamp state.
+// app is stopped and must not depend on transient device state.
 type jumpTask struct {
 	title       string
 	arguments   string
@@ -16,34 +16,34 @@ type jumpTask struct {
 
 var jumpTasks = []jumpTask{
 	{
-		title:       "Toggle lamp",
+		title:       "Toggle device",
 		arguments:   "/toggle",
-		description: "Toggle the Rayan Lamp",
+		description: "Toggle the PCController",
 	},
 	{
-		title:       "Turn lamp on",
+		title:       "Turn device on",
 		arguments:   "/on",
-		description: "Turn the Rayan Lamp on",
+		description: "Turn the PCController on",
 	},
 	{
-		title:       "Turn lamp off",
+		title:       "Turn device off",
 		arguments:   "/off",
-		description: "Turn the Rayan Lamp off",
+		description: "Turn the PCController off",
 	},
 	{
-		title:       "Show Rayan Lamp",
+		title:       "Show PCController",
 		arguments:   "/show",
-		description: "Show the Rayan Lamp window",
+		description: "Show the PCController window",
 	},
 	{
 		title:       "Open settings",
 		arguments:   "/settings",
-		description: "Open Rayan Lamp settings",
+		description: "Open PCController settings",
 	},
 	{
 		title:       "Reconnect",
 		arguments:   "/reconnect",
-		description: "Reconnect Rayan Lamp to the device",
+		description: "Reconnect PCController to the device",
 	},
 }
 

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"rayanlamp.local/app/internal/ipc"
+	"pccontroller.local/desktop/internal/ipc"
 )
 
 type hotkeyBrowserEnvelope struct {

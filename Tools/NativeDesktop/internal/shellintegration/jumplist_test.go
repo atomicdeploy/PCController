@@ -11,12 +11,12 @@ func TestJumpListTasksAreStaticBoundedCommands(t *testing.T) {
 	t.Parallel()
 
 	expected := []jumpTask{
-		{"Toggle lamp", "/toggle", "Toggle the Rayan Lamp"},
-		{"Turn lamp on", "/on", "Turn the Rayan Lamp on"},
-		{"Turn lamp off", "/off", "Turn the Rayan Lamp off"},
-		{"Show Rayan Lamp", "/show", "Show the Rayan Lamp window"},
-		{"Open settings", "/settings", "Open Rayan Lamp settings"},
-		{"Reconnect", "/reconnect", "Reconnect Rayan Lamp to the device"},
+		{"Toggle device", "/toggle", "Toggle the PCController"},
+		{"Turn device on", "/on", "Turn the PCController on"},
+		{"Turn device off", "/off", "Turn the PCController off"},
+		{"Show PCController", "/show", "Show the PCController window"},
+		{"Open settings", "/settings", "Open PCController settings"},
+		{"Reconnect", "/reconnect", "Reconnect PCController to the device"},
 	}
 	if len(jumpTasks) != len(expected) {
 		t.Fatalf("task count = %d, want %d", len(jumpTasks), len(expected))

@@ -9,12 +9,12 @@ package deviceconfig
 import (
 	"time"
 
-	"rayanlamp.local/app/internal/deviceterminal"
-	"rayanlamp.local/app/internal/diagnostics"
+	"pccontroller.local/desktop/internal/deviceterminal"
+	"pccontroller.local/desktop/internal/diagnostics"
 )
 
 // Capabilities describes what the currently running coordinator can safely do
-// with the configured lamp. WriteAvailable stays false until a future
+// with the configured device. WriteAvailable stays false until a future
 // credential-safe, prompt-aware capability handshake positively identifies an
 // allow-listed writable protocol. A TCP connection or arbitrary banner is not
 // sufficient evidence that mutations are supported.

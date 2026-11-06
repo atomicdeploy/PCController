@@ -17,11 +17,11 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"rayanlamp.local/app/internal/appcore"
-	"rayanlamp.local/app/internal/buildinfo"
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/deviceterminal"
-	"rayanlamp.local/app/internal/ipc"
+	"pccontroller.local/desktop/internal/appcore"
+	"pccontroller.local/desktop/internal/buildinfo"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/deviceterminal"
+	"pccontroller.local/desktop/internal/ipc"
 )
 
 const (
@@ -115,30 +115,30 @@ func (d *Dispatcher) Handler(ctx context.Context, request ipc.Request) (any, err
 			"developer_tools": buildinfo.DeveloperTools,
 			"instance":        "primary",
 		}, nil
-	case "status", "state", "lamp.get", "get":
+	case "status", "state", "device.get", "get":
 		if err := requireNoParams(request.Params); err != nil {
 			return nil, err
 		}
 		return d.core.Snapshot(), nil
-	case "lamp.on", "on":
+	case "device.on", "on":
 		if err := requireNoParams(request.Params); err != nil {
 			return nil, err
 		}
 		state, err := d.core.On(ctx)
 		return state, deviceCommandError(err)
-	case "lamp.off", "off":
+	case "device.off", "off":
 		if err := requireNoParams(request.Params); err != nil {
 			return nil, err
 		}
 		state, err := d.core.Off(ctx)
 		return state, deviceCommandError(err)
-	case "lamp.toggle", "toggle":
+	case "device.toggle", "toggle":
 		if err := requireNoParams(request.Params); err != nil {
 			return nil, err
 		}
 		state, err := d.core.Toggle(ctx)
 		return state, deviceCommandError(err)
-	case "lamp.refresh", "refresh":
+	case "device.refresh", "refresh":
 		if err := requireNoParams(request.Params); err != nil {
 			return nil, err
 		}

@@ -5,7 +5,7 @@ package sdk
 import (
 	"context"
 
-	"rayanlamp.local/app/internal/ipc"
+	"pccontroller.local/desktop/internal/ipc"
 )
 
 func platformCall(

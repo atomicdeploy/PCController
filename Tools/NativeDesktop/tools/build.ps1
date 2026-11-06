@@ -79,7 +79,7 @@ function Assert-SafeDistPath {
     param([Parameter(Mandatory = $true)][string]$LiteralPath)
 
     $fullPath = [IO.Path]::GetFullPath($LiteralPath)
-    $expected = [IO.Path]::GetFullPath((Join-Path $distRoot 'RayanLamp.exe'))
+    $expected = [IO.Path]::GetFullPath((Join-Path $distRoot 'PCControllerDesktop.exe'))
     if (-not [string]::Equals(
         $fullPath,
         $expected,
@@ -139,14 +139,14 @@ if ($Edition -notin @('develop', 'production')) {
     throw "Canonical build edition must be develop or production; got $Edition."
 }
 
-Write-RayanLampStatus -Level Start `
-    -Message "Preparing the Windows/$Architecture RayanLamp $Edition edition."
+Write-PCControllerDesktopStatus -Level Start `
+    -Message "Preparing the Windows/$Architecture PCControllerDesktop $Edition edition."
 
 $buildTag = if ($Edition -eq 'production') {
-    'rayanlamp_production'
+    'pccontroller_desktop_production'
 }
 else {
-    'rayanlamp_develop'
+    'pccontroller_desktop_develop'
 }
 
 $sourceVersion = Get-SourceVersion
@@ -197,21 +197,21 @@ if ($BuildDate -notmatch '^[0-9T:Z+.-]{1,64}$') {
     throw 'BuildDate must be a compact ISO-8601 value without spaces.'
 }
 
-$outputPath = Join-Path $distRoot 'RayanLamp.exe'
-$temporaryOutput = Join-Path $distRoot ('.RayanLamp.' + [Guid]::NewGuid().ToString('N') + '.exe')
-$temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) ('RayanLamp-build-' + [Guid]::NewGuid().ToString('N'))
-$appResource = Join-Path $projectRoot "cmd\RayanLamp\zz_rayanlamp_windows_$Architecture.syso"
-$buildLockPath = Join-Path $distRoot '.rayanlamp-build.lock'
+$outputPath = Join-Path $distRoot 'PCControllerDesktop.exe'
+$temporaryOutput = Join-Path $distRoot ('.PCControllerDesktop.' + [Guid]::NewGuid().ToString('N') + '.exe')
+$temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) ('PCControllerDesktop-build-' + [Guid]::NewGuid().ToString('N'))
+$appResource = Join-Path $projectRoot "cmd\PCControllerDesktop\zz_pccontroller_desktop_windows_$Architecture.syso"
+$buildLockPath = Join-Path $distRoot '.pccontroller-desktop-build.lock'
 $buildLock = $null
 $ownsBuildLock = $false
 $createdResources = New-Object 'Collections.Generic.List[string]'
 
 Assert-SafeDistPath -LiteralPath $outputPath
 Assert-DirectChildPath -LiteralPath $temporaryOutput -ExpectedParent $distRoot `
-    -ExpectedLeafPrefix '.RayanLamp.'
+    -ExpectedLeafPrefix '.PCControllerDesktop.'
 Assert-DirectChildPath -LiteralPath $temporaryRoot `
     -ExpectedParent ([IO.Path]::GetTempPath()) `
-    -ExpectedLeafPrefix 'RayanLamp-build-'
+    -ExpectedLeafPrefix 'PCControllerDesktop-build-'
 
 $environment = @{}
 foreach ($name in @('GOOS', 'GOARCH', 'CGO_ENABLED')) {
@@ -234,7 +234,7 @@ try {
         $ownsBuildLock = $true
     }
     catch {
-        throw "Another RayanLamp release build is active: $($_.Exception.Message)"
+        throw "Another PCControllerDesktop release build is active: $($_.Exception.Message)"
     }
 
     New-Item -ItemType Directory -Path $temporaryRoot | Out-Null
@@ -264,8 +264,8 @@ try {
             }
         }
         else {
-            Write-RayanLampStatus -Level Step `
-                -Icon (Get-RayanLampEmojiGlyph -Name Web) -Label 'WEB' `
+            Write-PCControllerDesktopStatus -Level Step `
+                -Icon (Get-PCControllerDesktopEmojiGlyph -Name Web) -Label 'WEB' `
                 -Message 'Building the embedded Web UI.'
             & (Join-Path $PSScriptRoot 'build-web.ps1') `
                 -Edition $Edition `
@@ -321,11 +321,11 @@ try {
             throw 'CGO_ENABLED=0 was not accepted by the Go toolchain.'
         }
         if ($Edition -eq 'production') {
-            Write-RayanLampStatus -Level Step `
-                -Icon (Get-RayanLampEmojiGlyph -Name Typecheck) -Label 'GRAPH' `
+            Write-PCControllerDesktopStatus -Level Step `
+                -Icon (Get-PCControllerDesktopEmojiGlyph -Name Typecheck) -Label 'GRAPH' `
                 -Message 'Verifying that developer servers and SDK bridges are absent.'
             $dependencyGraph = @(
-                & go list -tags $buildTag -deps ./cmd/RayanLamp
+                & go list -tags $buildTag -deps ./cmd/PCControllerDesktop
             )
             if ($LASTEXITCODE -ne 0) {
                 throw 'Could not inspect the production dependency graph.'
@@ -336,8 +336,8 @@ try {
                 'runtime/pprof',
                 'runtime/trace',
                 'testing',
-                'rayanlamp.local/app/internal/dllapi',
-                'rayanlamp.local/app/sdk'
+                'pccontroller.local/desktop/internal/dllapi',
+                'pccontroller.local/desktop/sdk'
             )
             $unexpectedDependencies = @(
                 $dependencyGraph |
@@ -348,8 +348,8 @@ try {
             }
         }
         if (-not $SkipVet) {
-            Write-RayanLampStatus -Level Step `
-                -Icon (Get-RayanLampEmojiGlyph -Name Typecheck) -Label 'VET' `
+            Write-PCControllerDesktopStatus -Level Step `
+                -Icon (Get-PCControllerDesktopEmojiGlyph -Name Typecheck) -Label 'VET' `
                 -Message 'Running Go static analysis with CGO disabled.'
             & go vet -tags $buildTag ./...
             if ($LASTEXITCODE -ne 0) {
@@ -357,8 +357,8 @@ try {
             }
         }
         if (-not $SkipTests) {
-            Write-RayanLampStatus -Level Step `
-                -Icon (Get-RayanLampEmojiGlyph -Name Test) -Label 'TEST' `
+            Write-PCControllerDesktopStatus -Level Step `
+                -Icon (Get-PCControllerDesktopEmojiGlyph -Name Test) -Label 'TEST' `
                 -Message 'Running the complete Go test suite.'
             & go test -count=1 -tags $buildTag ./...
             if ($LASTEXITCODE -ne 0) {
@@ -366,8 +366,8 @@ try {
             }
         }
 
-        $manifestPath = Join-Path $temporaryRoot 'RayanLamp.exe.manifest'
-        $manifest = [IO.File]::ReadAllText((Join-Path $projectRoot 'resources\RayanLamp.exe.manifest'))
+        $manifestPath = Join-Path $temporaryRoot 'PCControllerDesktop.exe.manifest'
+        $manifest = [IO.File]::ReadAllText((Join-Path $projectRoot 'resources\PCControllerDesktop.exe.manifest'))
         $manifestPlaceholder = 'version="1.0.0.0"'
         $manifestMatchCount = [regex]::Matches(
             $manifest,
@@ -400,8 +400,8 @@ try {
                 Syso = $appResource
             }
         )
-        Write-RayanLampStatus -Level Step `
-            -Icon (Get-RayanLampEmojiGlyph -Name Resource) -Label 'RESOURCE' `
+        Write-PCControllerDesktopStatus -Level Step `
+            -Icon (Get-PCControllerDesktopEmojiGlyph -Name Resource) -Label 'RESOURCE' `
             -Message "Generating $Architecture icon, manifest, and VERSIONINFO resources."
         foreach ($spec in $resourceSpecs) {
             $info = Get-Content -LiteralPath $spec.Source -Raw | ConvertFrom-Json
@@ -421,7 +421,7 @@ try {
             & go run $resourceTool `
                 "-64=$resource64Flag" `
                 "-arm=$resourceArmFlag" `
-                "-icon=$(Join-Path $projectRoot 'assets\RayanLamp.ico')" `
+                "-icon=$(Join-Path $projectRoot 'assets\PCControllerDesktop.ico')" `
                 "-manifest=$manifestPath" `
                 "-o=$($spec.Syso)" `
                 $spec.Output
@@ -435,23 +435,23 @@ try {
         }
 
         $env:GOARCH = $Architecture
-        $linkerFlags = "-X=rayanlamp.local/app/internal/buildinfo.Commit=$Commit -X=rayanlamp.local/app/internal/buildinfo.Date=$BuildDate"
+        $linkerFlags = "-X=pccontroller.local/desktop/internal/buildinfo.Commit=$Commit -X=pccontroller.local/desktop/internal/buildinfo.Date=$BuildDate"
         if ($Edition -eq 'production') {
             $linkerFlags = "-s -w $linkerFlags"
         }
-        Write-RayanLampStatus -Level Step `
-            -Icon (Get-RayanLampEmojiGlyph -Name Compile) -Label 'COMPILE' `
+        Write-PCControllerDesktopStatus -Level Step `
+            -Icon (Get-PCControllerDesktopEmojiGlyph -Name Compile) -Label 'COMPILE' `
             -Message "Cross-compiling the unified Windows/$Architecture $Edition executable."
         & go build -trimpath -buildvcs=false -tags $buildTag `
             -ldflags $linkerFlags `
-            -o $temporaryOutput ./cmd/RayanLamp
+            -o $temporaryOutput ./cmd/PCControllerDesktop
         if ($LASTEXITCODE -ne 0) {
-            throw 'Unified RayanLamp build failed.'
+            throw 'Unified PCControllerDesktop build failed.'
         }
 
         $env:GOARCH = $hostArchitecture
-        Write-RayanLampStatus -Level Step `
-            -Icon (Get-RayanLampEmojiGlyph -Name Typecheck) -Label 'PE' `
+        Write-PCControllerDesktopStatus -Level Step `
+            -Icon (Get-PCControllerDesktopEmojiGlyph -Name Typecheck) -Label 'PE' `
             -Message 'Verifying architecture, console subsystem, icon, manifest, version, and embedded Web UI.'
         & go run ./tools/verify-pe `
             --file $temporaryOutput `
@@ -479,8 +479,8 @@ try {
                     Write-Warning 'UPX was requested but is unavailable; the release remains uncompressed.'
                 }
                 else {
-                    Write-RayanLampStatus -Level Step `
-                        -Icon (Get-RayanLampEmojiGlyph -Name Compress) -Label 'UPX' `
+                    Write-PCControllerDesktopStatus -Level Step `
+                        -Icon (Get-PCControllerDesktopEmojiGlyph -Name Compress) -Label 'UPX' `
                         -Message 'Compressing and integrity-checking the executable.'
                     & $upxExecutable --best --lzma --no-progress -- $temporaryOutput
                     if ($LASTEXITCODE -ne 0) {
@@ -498,8 +498,8 @@ try {
                     if ($LASTEXITCODE -ne 0) {
                         throw 'Packed Windows executable structural verification failed.'
                     }
-                    Write-RayanLampStatus -Level Success `
-                        -Message "Compressed RayanLamp.exe with $upxExecutable"
+                    Write-PCControllerDesktopStatus -Level Success `
+                        -Message "Compressed PCControllerDesktop.exe with $upxExecutable"
                 }
             }
         }
@@ -517,11 +517,11 @@ try {
     }
     Move-Item -LiteralPath $temporaryOutput -Destination $outputPath
     $outputHash = (Get-FileHash -LiteralPath $outputPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    Write-RayanLampStatus -Level Artifact -Message $outputPath
-    Write-RayanLampStatus -Level Info `
-        -Icon (Get-RayanLampEmojiGlyph -Name Hash) -Label 'SHA-256' `
+    Write-PCControllerDesktopStatus -Level Artifact -Message $outputPath
+    Write-PCControllerDesktopStatus -Level Info `
+        -Icon (Get-PCControllerDesktopEmojiGlyph -Name Hash) -Label 'SHA-256' `
         -Message $outputHash
-    Write-RayanLampStatus -Level Success `
+    Write-PCControllerDesktopStatus -Level Success `
         -Message "Built the $Edition edition with CGO_ENABLED=0; one console-subsystem executable contains GUI, CLI, TUI, and Web modes."
     Write-Output $outputPath
 }

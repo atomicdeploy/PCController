@@ -25,7 +25,7 @@ const (
 	FormatXML     Format = "xml"
 )
 
-// EndpointSpec is the immutable registry entry for one audited ESP/lamp
+// EndpointSpec is the immutable registry entry for one audited ESP/device
 // diagnostic source. Paths intentionally remain exact and query-free.
 //
 // Public sources may be selected through diagnostics.fetch. Non-public sources

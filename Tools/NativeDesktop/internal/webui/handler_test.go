@@ -14,8 +14,8 @@ import (
 	"sync"
 	"testing"
 
-	"rayanlamp.local/app/assets"
-	"rayanlamp.local/app/internal/buildinfo"
+	"pccontroller.local/desktop/assets"
+	"pccontroller.local/desktop/internal/buildinfo"
 )
 
 func TestEmbeddedEditionMatchesNativeEdition(t *testing.T) {
@@ -242,17 +242,17 @@ func TestHandlerSeekableStreamingPreservesByteRanges(t *testing.T) {
 func TestEmbeddedContentTypesAndFingerprints(t *testing.T) {
 	t.Parallel()
 	for name, want := range map[string]string{
-		"index.html":       "text/html; charset=utf-8",
-		"app.js":           "text/javascript; charset=utf-8",
-		"app.css":          "text/css; charset=utf-8",
-		"manifest.json":    "application/json; charset=utf-8",
-		"app.webmanifest":  "application/manifest+json; charset=utf-8",
-		"icon.svg":         "image/svg+xml",
-		"icon.png":         "image/png",
-		"icon.ico":         "image/x-icon",
-		"sound.wav":        "audio/wav",
+		"index.html":            "text/html; charset=utf-8",
+		"app.js":                "text/javascript; charset=utf-8",
+		"app.css":               "text/css; charset=utf-8",
+		"manifest.json":         "application/json; charset=utf-8",
+		"app.webmanifest":       "application/manifest+json; charset=utf-8",
+		"icon.svg":              "image/svg+xml",
+		"icon.png":              "image/png",
+		"icon.ico":              "image/x-icon",
+		"sound.wav":             "audio/wav",
 		"Vazirmatn-Regular.ttf": "font/ttf",
-		"unknown.data":     "",
+		"unknown.data":          "",
 	} {
 		if got := embeddedContentType(name); got != want {
 			t.Errorf("content type for %s = %q, want %q", name, got, want)

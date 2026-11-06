@@ -11,7 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"rayanlamp.local/app/internal/model"
+	"pccontroller.local/desktop/internal/model"
 )
 
 type fakeTransport struct {
@@ -81,7 +81,7 @@ func newTestModel(t *testing.T) (*Model, *fakeTransport) {
 		State:           model.StateOff,
 		HTTPReachable:   true,
 		WebSocketOnline: true,
-		DeviceURL:       "http://rayanlamp.local",
+		DeviceURL:       "http://pccontroller-desktop.local",
 		LastSource:      "websocket",
 		LastChanged:     time.Date(2026, 7, 23, 8, 0, 0, 0, time.UTC),
 	}}
@@ -135,7 +135,7 @@ func TestResponsiveViewsStayInsideTerminal(t *testing.T) {
 							size.Width,
 						)
 					}
-					if !strings.Contains(view.Content, "RAYAN") {
+					if !strings.Contains(view.Content, "PCController") {
 						t.Fatal("view omitted product identity")
 					}
 				}
@@ -288,12 +288,12 @@ func TestControllerFailureOverridesCachedGreenConnectivity(t *testing.T) {
 	if state != "Controller offline" {
 		t.Fatalf("connection state = %q, want controller offline", state)
 	}
-	if !strings.Contains(tuiModel.renderLampStatus(), "LAST KNOWN") {
-		t.Fatal("cached lamp state was not marked last known")
+	if !strings.Contains(tuiModel.renderDeviceStatus(), "LAST KNOWN") {
+		t.Fatal("cached device state was not marked last known")
 	}
 }
 
-func TestCompactMouseButtonsNeverFallThroughToLampToggle(t *testing.T) {
+func TestCompactMouseButtonsNeverFallThroughToDeviceToggle(t *testing.T) {
 	for _, size := range []tea.WindowSizeMsg{
 		{Width: 40, Height: 24},
 		{Width: 70, Height: 30},
@@ -315,8 +315,8 @@ func TestCompactMouseButtonsNeverFallThroughToLampToggle(t *testing.T) {
 				if target == nil {
 					t.Fatal("compact layout omitted the On button")
 				}
-				if regionsOverlap(target.region, tuiModel.lampRegion) {
-					t.Fatalf("On button overlaps lamp hitbox: %+v / %+v", target, tuiModel.lampRegion)
+				if regionsOverlap(target.region, tuiModel.deviceRegion) {
+					t.Fatalf("On button overlaps device hitbox: %+v / %+v", target, tuiModel.deviceRegion)
 				}
 
 				_, command := tuiModel.Update(tea.MouseClickMsg{
@@ -358,7 +358,7 @@ func TestMicroViewsFitTerminalsBelowTwentyFourByEight(t *testing.T) {
 				if got := lipgloss.Height(view.Content); got > size.Height {
 					t.Fatalf("view height = %d, terminal height = %d", got, size.Height)
 				}
-				if !strings.HasPrefix(view.Content, "R") {
+				if !strings.HasPrefix(view.Content, "P") {
 					t.Fatalf("micro view lost product identity: %q", view.Content)
 				}
 			},

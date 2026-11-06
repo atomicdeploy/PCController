@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-// Adapted from RayanLamp internal/i18n/digits.go ShapeLatinDigits.
+// Adapted from PCControllerDesktop internal/i18n/digits.go ShapeLatinDigits.
 // Input-only normalization: never shape hostnames, passwords or peer names.
 String latinDigits(String text) => String.fromCharCodes(
   text.runes.map((rune) {

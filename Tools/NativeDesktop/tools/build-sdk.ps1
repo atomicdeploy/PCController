@@ -15,10 +15,10 @@ Set-StrictMode -Version Latest
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $sdkRoot = [IO.Path]::GetFullPath((Join-Path $projectRoot 'dist-sdk'))
 $buildInfoPath = Join-Path $projectRoot 'internal\buildinfo\buildinfo.go'
-$resourceTemplate = Join-Path $projectRoot 'resources\RayanLamp.dll.rc.in'
+$resourceTemplate = Join-Path $projectRoot 'resources\PCControllerDesktop.dll.rc.in'
 $nativeRoot = Join-Path $projectRoot 'sdk\native'
-$headerPath = Join-Path $nativeRoot 'RayanLamp.h'
-$wrapperPath = Join-Path $nativeRoot 'RayanLamp.c'
+$headerPath = Join-Path $nativeRoot 'PCControllerDesktop.h'
+$wrapperPath = Join-Path $nativeRoot 'PCControllerDesktop.c'
 
 function Get-SourceVersion {
     $source = [IO.File]::ReadAllText($buildInfoPath)
@@ -156,18 +156,18 @@ function Invoke-SDKBuild {
 
     $temporaryRoot = Join-Path (
         [IO.Path]::GetTempPath()
-    ) ('RayanLamp-sdk-' + [Guid]::NewGuid().ToString('N'))
+    ) ('PCControllerDesktop-sdk-' + [Guid]::NewGuid().ToString('N'))
     $publishDirectory = Join-Path $temporaryRoot 'publish'
-    $archivePath = Join-Path $temporaryRoot 'RayanLampGo.a'
-    $generatedHeader = Join-Path $temporaryRoot 'RayanLampGo.h'
-    $resourceSource = Join-Path $temporaryRoot 'RayanLamp.dll.rc'
-    $resourceObject = Join-Path $temporaryRoot 'RayanLamp.dll.o'
-    $temporaryDLL = Join-Path $publishDirectory 'RayanLamp.dll'
-    $temporaryImportLibrary = Join-Path $publishDirectory 'libRayanLamp.dll.a'
-    $smokeExecutable = Join-Path $temporaryRoot 'RayanLamp-dll-smoke.exe'
+    $archivePath = Join-Path $temporaryRoot 'PCControllerDesktopGo.a'
+    $generatedHeader = Join-Path $temporaryRoot 'PCControllerDesktopGo.h'
+    $resourceSource = Join-Path $temporaryRoot 'PCControllerDesktop.dll.rc'
+    $resourceObject = Join-Path $temporaryRoot 'PCControllerDesktop.dll.o'
+    $temporaryDLL = Join-Path $publishDirectory 'PCControllerDesktop.dll'
+    $temporaryImportLibrary = Join-Path $publishDirectory 'libPCControllerDesktop.dll.a'
+    $smokeExecutable = Join-Path $temporaryRoot 'PCControllerDesktop-dll-smoke.exe'
     $definitionPath = Join-Path (
         $nativeRoot
-    ) ("RayanLamp_$TargetArchitecture.def")
+    ) ("PCControllerDesktop_$TargetArchitecture.def")
 
     $savedEnvironment = @{}
     foreach ($name in @(
@@ -210,15 +210,15 @@ function Invoke-SDKBuild {
 
         Push-Location $projectRoot
         try {
-            Write-Host "Building attach-only RayanLamp SDK for Windows/$TargetArchitecture"
+            Write-Host "Building attach-only PCControllerDesktop SDK for Windows/$TargetArchitecture"
             & go build `
                 -trimpath `
                 -buildvcs=false `
                 -buildmode=c-archive `
-                -tags 'rayanlamp_sdk,rayanlamp_production' `
+                -tags 'pccontroller_desktop_sdk,pccontroller_desktop_production' `
                 -ldflags '-s -w' `
                 -o $archivePath `
-                ./cmd/RayanLampDLL
+                ./cmd/PCControllerDesktopDLL
             if ($LASTEXITCODE -ne 0) {
                 throw "Go c-archive build failed for $TargetArchitecture."
             }
@@ -260,7 +260,7 @@ function Invoke-SDKBuild {
                 throw "Native SDK DLL link failed for $TargetArchitecture."
             }
             Copy-Item -LiteralPath $headerPath `
-                -Destination (Join-Path $publishDirectory 'RayanLamp.h')
+                -Destination (Join-Path $publishDirectory 'PCControllerDesktop.h')
 
             $hostArchitecture = (& go env GOHOSTARCH).Trim()
             $env:GOARCH = $hostArchitecture
@@ -307,7 +307,7 @@ function Invoke-SDKBuild {
         Move-Item -LiteralPath $publishDirectory -Destination $outputDirectory
         $hash = (
             Get-FileHash `
-                -LiteralPath (Join-Path $outputDirectory 'RayanLamp.dll') `
+                -LiteralPath (Join-Path $outputDirectory 'PCControllerDesktop.dll') `
                 -Algorithm SHA256
         ).Hash.ToLowerInvariant()
         Write-Host "SDK artifact: $outputDirectory"

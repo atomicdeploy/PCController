@@ -5,6 +5,7 @@ package ui
 import (
 	"fmt"
 	"github.com/lxn/walk"
+	"pccontroller.local/desktop/internal/config"
 	"strings"
 )
 
@@ -91,38 +92,50 @@ func (s *Shell) controllerCard(canvas *walk.Canvas, rect walk.Rectangle, colors 
 }
 
 func (s *Shell) paintController(canvas *walk.Canvas, bounds walk.Rectangle, colors palette) error {
+	if s.controllerWidgetID != "" && s.controllerWidgetID != "front-panel" {
+		return s.paintControllerWidget(canvas, bounds, colors)
+	}
 	s.controllerChannelHits = nil
 	state := s.controllerState
 	margin := 24
+	compact := s.Config().UI.ViewMode == config.ViewCompact && !s.controllerPreferences && !s.controllerChannels
+	if compact {
+		margin = 0
+	}
 	width := bounds.Width - margin*2
 	x, y := bounds.X+margin, bounds.Y+18
-	// Brand and lifecycle status occupy one aligned header; identity is not a
-	// repeated all-caps section title. Windows owns the title-bar controls.
-	if s.appIcon != nil {
-		_ = canvas.DrawImageStretchedPixels(s.appIcon, walk.Rectangle{X: x, Y: y + 4, Width: 36, Height: 36})
+	if compact {
+		y = bounds.Y
 	}
-	title := strings.TrimSuffix(s.controller.Title, " — Preview")
-	s.controllerText(canvas, title, s.titleFont, colors.text, walk.Rectangle{X: x + 48, Y: y, Width: width - 280, Height: 28}, false)
-	secondary := state.Endpoint
-	if strings.Contains(s.controller.Title, "Preview") {
-		secondary = "Design preview"
+	if !compact {
+		// Brand and lifecycle status occupy one aligned header; identity is not a
+		// repeated all-caps section title. Windows owns the title-bar controls.
+		if s.appIcon != nil {
+			_ = canvas.DrawImageStretchedPixels(s.appIcon, walk.Rectangle{X: x, Y: y + 4, Width: 36, Height: 36})
+		}
+		title := strings.TrimSuffix(s.controller.Title, " — Preview")
+		s.controllerText(canvas, title, s.titleFont, colors.text, walk.Rectangle{X: x + 48, Y: y, Width: width - 280, Height: 28}, false)
+		secondary := state.Endpoint
+		if strings.Contains(s.controller.Title, "Preview") {
+			secondary = "Design preview"
+		}
+		s.controllerText(canvas, secondary, s.captionFont, colors.secondary, walk.Rectangle{X: x + 48, Y: y + 27, Width: width - 280, Height: 20}, false)
+		status, color := "Offline", colors.secondary
+		if state.Connected {
+			status, color = "Connected", colors.success
+		}
+		pill := walk.Rectangle{X: x + width - 214, Y: y + 8, Width: 124, Height: 28}
+		s.controllerControl(canvas, pill, actionConnection, "", "", s.controller.LoadPage != nil, false, colors)
+		controllerFill(canvas, walk.Rectangle{X: pill.X + 10, Y: pill.Y + 11, Width: 6, Height: 6}, color, 3)
+		s.controllerText(canvas, status, s.captionFont, color, walk.Rectangle{X: pill.X + 23, Y: pill.Y, Width: 94, Height: pill.Height}, false)
+		s.controllerControl(canvas, walk.Rectangle{X: x + width - 36, Y: y + 4, Width: 36, Height: 36}, actionSettings, "\uE713", "", true, false, colors)
+		consoleVisible := s.controller.ConsoleVisible != nil && s.controller.ConsoleVisible()
+		s.controllerControl(canvas, walk.Rectangle{X: x + width - 78, Y: y + 4, Width: 36, Height: 36}, actionConsole, "\uE756", "", s.controller.ShowConsole != nil, consoleVisible, colors)
+		if s.controllerPreferences {
+			return s.paintControllerPreferences(canvas, walk.Rectangle{X: x, Y: y + 70, Width: width, Height: bounds.Height - 100}, colors)
+		}
+		y += 68
 	}
-	s.controllerText(canvas, secondary, s.captionFont, colors.secondary, walk.Rectangle{X: x + 48, Y: y + 27, Width: width - 280, Height: 20}, false)
-	status, color := "Offline", colors.secondary
-	if state.Connected {
-		status, color = "Connected", colors.success
-	}
-	pill := walk.Rectangle{X: x + width - 214, Y: y + 8, Width: 124, Height: 28}
-	s.controllerControl(canvas, pill, actionConnection, "", "", s.controller.LoadPage != nil, false, colors)
-	controllerFill(canvas, walk.Rectangle{X: pill.X + 10, Y: pill.Y + 11, Width: 6, Height: 6}, color, 3)
-	s.controllerText(canvas, status, s.captionFont, color, walk.Rectangle{X: pill.X + 23, Y: pill.Y, Width: 94, Height: pill.Height}, false)
-	s.controllerControl(canvas, walk.Rectangle{X: x + width - 36, Y: y + 4, Width: 36, Height: 36}, actionSettings, "\uE713", "", true, false, colors)
-	consoleVisible := s.controller.ConsoleVisible != nil && s.controller.ConsoleVisible()
-	s.controllerControl(canvas, walk.Rectangle{X: x + width - 78, Y: y + 4, Width: 36, Height: 36}, actionConsole, "\uE756", "", s.controller.ShowConsole != nil, consoleVisible, colors)
-	if s.controllerPreferences {
-		return s.paintControllerPreferences(canvas, walk.Rectangle{X: x, Y: y + 70, Width: width, Height: bounds.Height - 100}, colors)
-	}
-	y += 68
 	if s.controllerChannels {
 		return s.paintControllerChannels(canvas, walk.Rectangle{X: x, Y: y, Width: width, Height: bounds.Height - (y - bounds.Y) - 24}, colors)
 	}
@@ -130,16 +143,36 @@ func (s *Shell) paintController(canvas *walk.Canvas, bounds walk.Rectangle, colo
 	// A real front-panel instrument: neutral enclosure, independently red LED
 	// segments, equal physical keys, and quieter labels beneath each key.
 	fullWidth, panelY := width, y
-	wide := width >= 700
+	wide := width >= 700 && !compact
 	if wide {
 		width = (fullWidth - 16) * 3 / 5
 	}
 	panelHeight := 270
+	if compact {
+		panelHeight = bounds.Height
+	}
 	panel := walk.Rectangle{X: x, Y: y, Width: width, Height: panelHeight}
-	s.controllerCard(canvas, panel, colors)
+	// In compact mode the acrylic HWND is the instrument enclosure. Registering
+	// a dashboard card here adds a second rounded material/border in the glass
+	// compositor (and an inset solid panel in the fallback renderer).
+	if !compact {
+		s.controllerCard(canvas, panel, colors)
+	}
 	s.drawControllerPanelIcon(canvas, walk.Rectangle{X: x + 18, Y: y + 17, Width: 24, Height: 20}, colors.accent)
 	s.controllerText(canvas, "Front panel", s.bodyFont, colors.text, walk.Rectangle{X: x + 48, Y: y + 13, Width: width - 80, Height: 26}, false)
+	if s.controllerWidgetID == "" {
+		glyph := "\uE73F"
+		if compact {
+			glyph = "\uE740"
+		}
+		s.controllerSmallAction(canvas, walk.Rectangle{X: x + width - 42, Y: y + 12, Width: 28, Height: 28}, actionCompact, glyph, true, compact, colors)
+	}
 	screen := walk.Rectangle{X: x + 24, Y: y + 52, Width: width - 48, Height: 126}
+	keyY, labelY := y+192, y+240
+	if compact {
+		screen = walk.Rectangle{X: x + 20, Y: y + 52, Width: width - 40, Height: panelHeight - 160}
+		keyY, labelY = y+panelHeight-92, y+panelHeight-44
+	}
 	controllerFill(canvas, screen, walk.RGB(13, 13, 17), 12)
 	pen, err := walk.NewCosmeticPen(walk.PenSolid, walk.RGB(52, 47, 52))
 	if err == nil {
@@ -148,21 +181,28 @@ func (s *Shell) paintController(canvas *walk.Canvas, bounds walk.Rectangle, colo
 	}
 	digitWidth := minInt(60, (screen.Width-56)/4)
 	left := screen.X + (screen.Width-digitWidth*4)/2
+	digitY := screen.Y + 20
+	if compact {
+		digitY = screen.Y + (screen.Height-84)/2
+	}
 	for i, raw := range state.Segments {
 		if !state.HavePanel {
 			raw = 0
 		}
-		s.drawControllerDigit(canvas, walk.Rectangle{X: left + i*digitWidth, Y: screen.Y + 20, Width: digitWidth - 12, Height: 84}, i, raw, state.Brightness, colors)
+		s.drawControllerDigit(canvas, walk.Rectangle{X: left + i*digitWidth, Y: digitY, Width: digitWidth - 12, Height: 84}, i, raw, state.Brightness, colors)
 	}
 	labels := []string{"Previous", "Next", "Decrease", "Increase"}
 	glyphs := []string{"\uE76B", "\uE76C", "\uE738", "\uE710"}
 	cell := (width - 48) / 4
 	for i, label := range labels {
 		center := x + 24 + i*cell + cell/2
-		key := walk.Rectangle{X: center - 22, Y: y + 192, Width: 44, Height: 44}
+		key := walk.Rectangle{X: center - 22, Y: keyY, Width: 44, Height: 44}
 		enabled := state.Connected && state.CanNavigate && !s.controllerBusy && !state.Busy
 		s.controllerControl(canvas, key, actionKey1+actionID(i), glyphs[i], "", enabled, state.PressedKeys&(1<<uint(i)) != 0, colors)
-		s.controllerText(canvas, label, s.captionFont, colors.secondary, walk.Rectangle{X: center - cell/2, Y: y + 240, Width: cell, Height: 20}, true)
+		s.controllerText(canvas, label, s.captionFont, colors.secondary, walk.Rectangle{X: center - cell/2, Y: labelY, Width: cell, Height: 20}, true)
+	}
+	if compact {
+		return nil
 	}
 	y += panelHeight + 16
 	if wide {

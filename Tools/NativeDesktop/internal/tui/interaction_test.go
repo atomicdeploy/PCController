@@ -40,9 +40,9 @@ func TestSingleEnterCompletesHuhMenusWithoutASecondKeypress(t *testing.T) {
 		_, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		runTUICommand(t, model, command)
 		if model.settings.mode != settingsEditing ||
-			model.settings.section != settingsLamp {
+			model.settings.section != settingsDevice {
 			t.Fatalf(
-				"single Enter settings state = (%v, %q), want editing/lamp",
+				"single Enter settings state = (%v, %q), want editing/device",
 				model.settings.mode,
 				model.settings.section,
 			)
@@ -255,7 +255,7 @@ func TestCtrlCQuitsEveryWorkspaceExceptRawTerminal(t *testing.T) {
 
 func TestEverySettingsWorkspaceFitsResponsiveTerminal(t *testing.T) {
 	sections := []settingsSection{
-		settingsLamp,
+		settingsDevice,
 		settingsAppearance,
 		settingsWindow,
 		settingsNotifications,

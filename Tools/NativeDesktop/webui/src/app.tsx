@@ -6,9 +6,9 @@ import {
   useState
 } from "preact/hooks";
 import { registerSW } from "virtual:pwa-register";
-import type { RayanLampClient } from "./api";
+import type { PCControllerDesktopClient } from "./api";
 import type { Snapshot } from "./contracts";
-import { createRayanLampClient } from "./client-factory";
+import { createPCControllerDesktopClient } from "./client-factory";
 import {
   readConnectionPreferences,
   saveConnectionPreferences,
@@ -60,19 +60,19 @@ const navigation: Array<{
   label: string;
   icon: IconName;
 }> = [
-  { route: "dashboard", label: "Dashboard", icon: "lamp" },
+  { route: "dashboard", label: "Dashboard", icon: "device" },
   { route: "settings", label: "Settings", icon: "settings" },
   { route: "terminal", label: "Terminal", icon: "terminal" },
   { route: "diagnostics", label: "Diagnostics", icon: "diagnostics" },
   { route: "about", label: "About", icon: "about" }
 ];
 
-export function App({ api: suppliedAPI }: { api?: RayanLampClient } = {}) {
+export function App({ api: suppliedAPI }: { api?: PCControllerDesktopClient } = {}) {
   const [preferences, setPreferences] = useState<ConnectionPreferences>(
     readConnectionPreferences
   );
   const api = useMemo(
-    () => suppliedAPI ?? createRayanLampClient(preferences),
+    () => suppliedAPI ?? createPCControllerDesktopClient(preferences),
     // Preference announcements also act as a transport lifecycle generation.
     // Direct-mode timing/WebSocket edits intentionally announce the same URL
     // so the socket and fallback poll are recreated immediately.
@@ -157,7 +157,7 @@ export function App({ api: suppliedAPI }: { api?: RayanLampClient } = {}) {
         syncRef.current = sync;
         sync.start();
         const configuredPoll = parseDurationMilliseconds(
-          bootstrap.config.lamp.http_poll
+          bootstrap.config.device.http_poll
         );
         if (configuredPoll !== 0) {
           poll = window.setInterval(async () => {
@@ -186,7 +186,7 @@ export function App({ api: suppliedAPI }: { api?: RayanLampClient } = {}) {
         setFatalError(
           error instanceof Error
             ? error.message
-            : "The local Rayan Lamp controller is unavailable."
+            : "The local PCController controller is unavailable."
         );
       }
     })();
@@ -262,9 +262,9 @@ export function App({ api: suppliedAPI }: { api?: RayanLampClient } = {}) {
           aria-label={t("Open dashboard")}
           onClick={() => navigate("dashboard")}
         >
-          <span class="brand-mark"><Icon name="lamp" size={28} /></span>
+          <span class="brand-mark"><Icon name="device" size={28} /></span>
           <span class="brand-copy">
-            <strong>{t("Rayan Lamp")}</strong>
+            <strong>{t("PCController")}</strong>
             <small>{t("Local controller")}</small>
           </span>
         </button>
@@ -281,7 +281,7 @@ export function App({ api: suppliedAPI }: { api?: RayanLampClient } = {}) {
             onClick={() => setConnectionOpen(true)}
           >
             <Icon
-              name={activeClientKind.value === "direct" ? "lamp" : "network"}
+              name={activeClientKind.value === "direct" ? "device" : "network"}
               size={15}
             />
             <span>{t(activeClientLabel.value)}</span>
@@ -311,8 +311,8 @@ export function App({ api: suppliedAPI }: { api?: RayanLampClient } = {}) {
       <div class="app-stage">
         <header class="top-bar">
           <div class="mobile-brand">
-            <span class="brand-mark"><Icon name="lamp" size={22} /></span>
-            <strong>{t("Rayan Lamp")}</strong>
+            <span class="brand-mark"><Icon name="device" size={22} /></span>
+            <strong>{t("PCController")}</strong>
           </div>
           <div class="top-bar-actions">
             <button
@@ -323,7 +323,7 @@ export function App({ api: suppliedAPI }: { api?: RayanLampClient } = {}) {
             >
               <span class={`transport-glyph transport-${activeClientKind.value}`}>
                 <Icon
-                  name={activeClientKind.value === "direct" ? "lamp" : "network"}
+                  name={activeClientKind.value === "direct" ? "device" : "network"}
                   size={17}
                 />
               </span>
@@ -393,7 +393,7 @@ export function App({ api: suppliedAPI }: { api?: RayanLampClient } = {}) {
       <Modal
         open={updateReady}
         title={t("Dashboard update ready")}
-        description={t("A new bundled web interface is available from the running RayanLamp executable.")}
+        description={t("A new bundled web interface is available from the running PCControllerDesktop executable.")}
         onClose={() => setUpdateReady(false)}
       >
         <div class="modal-actions">
@@ -462,10 +462,10 @@ function LoadingView() {
   return (
     <div class="loading-view" role="status">
       <div class="loading-orbit" aria-hidden="true">
-        <Icon name="lamp" size={36} />
+        <Icon name="device" size={36} />
       </div>
-      <h1>{t("Connecting to Rayan Lamp")}</h1>
-      <p>{t("Selecting a transport and synchronizing confirmed lamp state…")}</p>
+      <h1>{t("Connecting to PCController")}</h1>
+      <p>{t("Selecting a transport and synchronizing confirmed device state…")}</p>
     </div>
   );
 }
@@ -486,7 +486,7 @@ function ConnectionError({
       <h1>{t("The dashboard could not reach its controller")}</h1>
       <p>{t(message)}</p>
       <p class="error-help">
-        {t("Coordinator mode needs the RayanLamp Go service. Direct mode needs this page served over HTTP and browser access to the lamp origin.")}
+        {t("Coordinator mode needs the PCControllerDesktop Go service. Direct mode needs this page served over HTTP and browser access to the device origin.")}
       </p>
       <div class="connection-error-actions">
         <Button kind="quiet" icon={<Icon name="network" />} onClick={onConfigure}>

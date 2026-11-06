@@ -1,4 +1,4 @@
-// Package sfx owns Rayan Lamp's shared bundled and user-imported sound assets.
+// Package sfx owns PCController's shared bundled and user-imported sound assets.
 package sfx
 
 import (
@@ -17,8 +17,8 @@ const (
 )
 
 var (
-	ErrWaveTooLarge = errors.New("sfx: WAV exceeds 4 MiB")
-	ErrInvalidWave  = errors.New("sfx: invalid PCM WAV")
+	ErrWaveTooLarge = errors.New("sfx: audio exceeds 4 MiB")
+	ErrInvalidWave  = errors.New("sfx: invalid audio")
 )
 
 // WaveInfo describes the validated PCM stream contained in one WAV asset.

@@ -14,8 +14,8 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"rayanlamp.local/app/internal/i18n"
-	"rayanlamp.local/app/internal/model"
+	"pccontroller.local/desktop/internal/i18n"
+	"pccontroller.local/desktop/internal/model"
 )
 
 const maxActivityEntries = 80
@@ -76,7 +76,7 @@ type Model struct {
 	commands    commandOverlay
 	device      deviceOverlay
 
-	lampRegion    region
+	deviceRegion  region
 	buttonRegions []actionRegion
 }
 
@@ -406,7 +406,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 					return m.startAction(item.action)
 				}
 			}
-			if m.lampRegion.contains(msg.X, msg.Y) {
+			if m.deviceRegion.contains(msg.X, msg.Y) {
 				return m.startAction(ActionToggle)
 			}
 		}
@@ -437,7 +437,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if errors.As(msg.err, &confirmationError) {
 				m.controllerError = compactError(confirmationError.Cause)
 				m.appendActivity(
-					activityLampCommand,
+					activityDeviceCommand,
 					activityLevelWarn,
 					m.actionTitle(msg.action)+" · "+
 						m.text("accepted; awaiting state confirmation"),
@@ -453,7 +453,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				m.controllerError = compactError(msg.err)
 			}
 			m.appendActivity(
-				activityLampCommand,
+				activityDeviceCommand,
 				activityLevelError,
 				m.actionTitle(msg.action)+" "+m.text("failed")+" · "+compactError(msg.err),
 			)
@@ -471,7 +471,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				m.acceptSnapshot(msg.snapshot, string(msg.action))
 			}
 			m.appendActivity(
-				activityLampCommand,
+				activityDeviceCommand,
 				activityLevelSuccess,
 				fmt.Sprintf(
 					"%s · %s %s",
@@ -596,7 +596,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Model) startAction(action Action) (tea.Model, tea.Cmd) {
 	if m.busy {
-		m.setNotice(m.text("One lamp command is already in flight"), true)
+		m.setNotice(m.text("One device command is already in flight"), true)
 		return m, nil
 	}
 	m.busy = true
@@ -606,7 +606,7 @@ func (m *Model) startAction(action Action) (tea.Model, tea.Cmd) {
 	m.stateRevision++
 	m.lastError = ""
 	m.appendActivity(
-		activityLampCommand,
+		activityDeviceCommand,
 		activityLevelInfo,
 		m.actionTitle(action)+" · "+m.text("sending…"),
 	)
@@ -738,14 +738,14 @@ func (m *Model) acceptSnapshot(snapshot model.Snapshot, reason string) {
 	m.lastError = snapshot.LastError
 
 	if !hadState || previous.State != snapshot.State {
-		detail := m.lampStateText()
+		detail := m.deviceStateText()
 		if source := strings.TrimSpace(snapshot.LastSource); source != "" {
 			detail += " " + m.text("via") + " " + source
 		} else if reason != "" {
 			detail += " " + m.text("via") + " " + reason
 		}
 		m.appendActivity(
-			activityLampState,
+			activityOutputState,
 			activityLevelSuccess,
 			detail,
 		)
@@ -956,7 +956,7 @@ func (m *Model) actionSuccess(action Action, snapshot model.Snapshot) string {
 	if action == ActionRefresh {
 		return m.text("State refreshed") + " · " + state
 	}
-	return m.text("Lamp is") + " " + state
+	return m.text("Device is") + " " + state
 }
 
 func actionSuccess(action Action, snapshot model.Snapshot) string {
@@ -966,7 +966,7 @@ func actionSuccess(action Action, snapshot model.Snapshot) string {
 	if action == ActionRefresh {
 		return "State refreshed · " + snapshot.State.String()
 	}
-	return "Lamp is " + snapshot.State.String()
+	return "Device is " + snapshot.State.String()
 }
 
 func compactError(err error) string {

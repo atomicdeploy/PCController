@@ -135,7 +135,7 @@ func TestRuntimeProductIconDoesNotReadEmbeddedICOCopy(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read %s: %v", name, err)
 		}
-		if strings.Contains(string(source), "RayanLamp.ico") {
+		if strings.Contains(string(source), "PCControllerDesktop.ico") {
 			t.Fatalf("%s still reads the duplicate raw product ICO", name)
 		}
 	}

@@ -74,7 +74,7 @@ if (!apply) {
 }
 const backupRef = 'refs/heads/backup/pre-date-repair-' + oldTip.slice(0, 12);
 git('update-ref', backupRef, oldTip, '0'.repeat(40));
-const backupBundle = path.join(root, '..', '..', 'work', 'history-recovery', 'RayanLamp-before-date-repair.bundle');
+const backupBundle = path.join(root, '..', '..', 'work', 'history-recovery', 'PCControllerDesktop-before-date-repair.bundle');
 if (fs.existsSync(backupBundle)) throw Error('Backup bundle already exists');
 git('bundle', 'create', backupBundle, backupRef);
 git('bundle', 'verify', backupBundle);

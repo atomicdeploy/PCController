@@ -161,10 +161,8 @@ func PreviewFrame(page Page, width, height int) string {
 }
 
 func ParsePage(value string) (Page, error) {
-	for index, definition := range pageDefinitions {
-		if value == definition.Key || equalFold(value, definition.Short) || equalFold(value, definition.Title) {
-			return Page(index), nil
-		}
+	if page, ok := pageForName(value); ok {
+		return page, nil
 	}
 	return 0, fmt.Errorf("unknown TUI page %q", value)
 }

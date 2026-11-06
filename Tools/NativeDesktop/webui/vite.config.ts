@@ -8,13 +8,13 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import designTokens from "../internal/design/tokens.json";
 import { xtermSchedulerGuard } from "./xterm-scheduler-guard";
-import { rayanLampManifest } from "./manifest";
+import { controllerManifest } from "./manifest";
 import {
   coordinatorExactProxyPattern,
   coordinatorFamilyProxyPattern
 } from "./src/coordinator-routes";
 
-const virtualDesignCSS = "virtual:rayanlamp-design.css";
+const virtualDesignCSS = "virtual:pccontroller-desktop-design.css";
 const resolvedDesignCSS = `\0${virtualDesignCSS}`;
 
 function cssTokenName(path: string[]): string {
@@ -43,18 +43,18 @@ function designTokenCSS(): string {
   return `:root {\n${declarations.join("\n")}\n}\n`;
 }
 
-const configuredOutput = process.env.RAYANLAMP_WEB_OUT_DIR?.trim();
-const staticExport = process.env.VITE_RAYANLAMP_STATIC_EXPORT === "true";
+const configuredOutput = process.env.PCCONTROLLER_DESKTOP_WEB_OUT_DIR?.trim();
+const staticExport = process.env.VITE_PCCONTROLLER_DESKTOP_STATIC_EXPORT === "true";
 const canonicalDefaultEdition = readFileSync(
   fileURLToPath(new URL("../build-edition.txt", import.meta.url)),
   "utf8"
 ).trim();
 const configuredEdition =
-  process.env.VITE_RAYANLAMP_BUILD_EDITION?.trim().toLowerCase() ||
+  process.env.VITE_PCCONTROLLER_DESKTOP_BUILD_EDITION?.trim().toLowerCase() ||
   (staticExport ? "production" : canonicalDefaultEdition);
 if (configuredEdition !== "develop" && configuredEdition !== "production") {
   throw new Error(
-    `VITE_RAYANLAMP_BUILD_EDITION must be develop or production; got ${JSON.stringify(configuredEdition)}`
+    `VITE_PCCONTROLLER_DESKTOP_BUILD_EDITION must be develop or production; got ${JSON.stringify(configuredEdition)}`
   );
 }
 const buildEdition = configuredEdition as "develop" | "production";
@@ -118,7 +118,7 @@ export default defineConfig({
   base: "./",
   plugins: [
     {
-      name: "rayanlamp-design-tokens",
+      name: "pccontroller-desktop-design-tokens",
       resolveId(id) {
         return id === virtualDesignCSS ? resolvedDesignCSS : undefined;
       },
@@ -127,7 +127,7 @@ export default defineConfig({
       }
     },
     {
-      name: "rayanlamp-build-edition",
+      name: "pccontroller-desktop-build-edition",
       generateBundle() {
         this.emitFile({
           type: "asset",
@@ -140,7 +140,7 @@ export default defineConfig({
       }
     },
     {
-      name: "rayanlamp-shared-assets",
+      name: "pccontroller-desktop-shared-assets",
       generateBundle() {
         if (!staticExport) return;
         this.emitFile({
@@ -206,7 +206,7 @@ export default defineConfig({
       strategies: "generateSW",
       filename: "sw.js",
       scope: "./",
-      manifest: rayanLampManifest,
+      manifest: controllerManifest,
       workbox: {
         cleanupOutdatedCaches: true,
         clientsClaim: false,
@@ -238,7 +238,7 @@ export default defineConfig({
                 "/app/session"
               ];
               const prefixes = [
-                "/lamp/",
+                "/device/",
                 "/window/",
                 "/terminal/",
                 "/ui/",
@@ -256,9 +256,9 @@ export default defineConfig({
     })
   ],
   define: {
-    "import.meta.env.VITE_RAYANLAMP_BUILD_EDITION":
+    "import.meta.env.VITE_PCCONTROLLER_DESKTOP_BUILD_EDITION":
       JSON.stringify(buildEdition),
-    "import.meta.env.VITE_RAYANLAMP_DEVELOPER_TOOLS":
+    "import.meta.env.VITE_PCCONTROLLER_DESKTOP_DEVELOPER_TOOLS":
       JSON.stringify(developerTools ? "true" : "false")
   },
   build: {

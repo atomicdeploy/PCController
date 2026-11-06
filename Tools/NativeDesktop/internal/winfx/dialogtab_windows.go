@@ -14,7 +14,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"rayanlamp.local/app/internal/design"
+	"pccontroller.local/desktop/internal/design"
 )
 
 const (
@@ -613,7 +613,7 @@ func paintDialogTab(hwnd, suppliedDC uintptr) bool {
 // MDL2 Assets, so Windows 10 and 11 retain the same visual vocabulary.
 func dialogTabGlyph(title string) (uint16, bool) {
 	switch strings.ToLower(strings.TrimSpace(title)) {
-	case "lamp", "چراغ":
+	case "device", "دستگاه":
 		return 0xEA80, true // Lightbulb
 	case "appearance", "ظاهر":
 		return 0xE790, true // Color
@@ -945,6 +945,7 @@ func newDialogTabPaintBuffer(
 }
 
 func releaseDialogTabPaintBuffer(hwnd uintptr) {
+	releaseDialogRasterCache()
 	if hwnd == 0 {
 		return
 	}
@@ -1332,6 +1333,9 @@ func fillDialogTabRoundRect(
 	radius int32,
 ) {
 	if dc == 0 || rect.Right <= rect.Left || rect.Bottom <= rect.Top {
+		return
+	}
+	if drawDialogAARoundRect(dc, dialogButtonRect{Left: rect.Left, Top: rect.Top, Right: rect.Right, Bottom: rect.Bottom}, color, color, 0, radius, 0, true) {
 		return
 	}
 	if radius <= 0 {

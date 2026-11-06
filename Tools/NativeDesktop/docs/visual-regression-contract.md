@@ -1,6 +1,6 @@
 # Visual regression contract
 
-This document is normative for RayanLamp's native Windows UI. Changes to
+This document is normative for PCControllerDesktop's native Windows UI. Changes to
 window chrome, DWM/Accent composition, `UpdateLayeredWindow`, GDI painting,
 popup caching, regions, text, icons, hover motion, or resize behavior MUST
 preserve these rules. A locally attractive screenshot is not sufficient when
@@ -13,11 +13,11 @@ developer remembering a previous fix.
 ## Terms
 
 - **Live material** means DWM, AccentPolicy, or another Windows compositor
-  effect sampling the current content behind an ordinary RayanLamp-owned HWND.
+  effect sampling the current content behind an ordinary PCControllerDesktop-owned HWND.
 - **Snapshot** means capturing desktop or other-window pixels and replaying
   them as fake blur/transparency. Production UI MUST NOT do this.
-- Offscreen buffers containing only RayanLamp-owned pixels are allowed.
-  Retaining RayanLamp's own premultiplied RGBA surface for a short opacity
+- Offscreen buffers containing only PCControllerDesktop-owned pixels are allowed.
+  Retaining PCControllerDesktop's own premultiplied RGBA surface for a short opacity
   transition is also allowed.
 - Test-only screenshots are allowed for visual verification. They MUST never
   become an input to production rendering.
@@ -162,18 +162,18 @@ snapping until the mouse was released.
 
 ### VIS-011: vector art remains vector until final device size
 
-Steady lamp artwork and icons with SVG sources are rendered at the exact target
+Steady device artwork and icons with SVG sources are rendered at the exact target
 device size. Raster resizing must use the shared alpha-correct high-quality
 resizer. Windows ICO resources must contain real, individually rendered sizes.
 
 Why: stretching one bitmap or letting default Windows scaling choose a large
-frame produced blurry lamps, menus, captions, and taskbar icons.
+frame produced blurry devices, menus, captions, and taskbar icons.
 
 ### VIS-012: state icons update as one system
 
 Main-window, tray, taskbar, caption, and dialog icon state must be updated
 together where applicable. Healthy state needs no `LIVE` label; offline state
-uses the offline lamp artwork.
+uses the offline device artwork.
 
 Why: updating only the tray left a stale taskbar icon and redundant status text.
 
@@ -229,7 +229,7 @@ queue before the settings callback returns. It MUST NOT rely on a later move,
 resize, activation, or focus change to reveal the requested material.
 
 For native chrome, immersive dark mode and the product caption icon MUST be
-restored after the final backdrop/frame mutation. The live lamp-state icon may
+restored after the final backdrop/frame mutation. The live device-state icon may
 occupy the large taskbar/Alt+Tab icon slot, but it MUST NOT become Walk's
 retained caption icon or replace the product icon on a DPI change.
 
@@ -242,7 +242,7 @@ after compact-mode and DPI transitions.
 ### VIS-017: dialog polish never replaces native control semantics
 
 Settings-page navigation may briefly present persistent offscreen buffers that
-contain only RayanLamp-owned page and child-control pixels. The transition
+contain only PCControllerDesktop-owned page and child-control pixels. The transition
 surface covers exactly the tab content rectangle, keeps the tab header live,
 and is removed only after the destination page has completed its final hidden
 layout and redraw. It MUST NOT capture the desktop, a DWM backdrop, or pixels
@@ -312,10 +312,10 @@ gate must reject a binary that omits that agreed ID. A generic system
 `IDI_APPLICATION` icon is only a last-resort runtime fallback for third-party
 hosts that do not embed an application icon.
 
-Per-window `WM_SETICON` updates may still present live lamp state in the
+Per-window `WM_SETICON` updates may still present live device state in the
 taskbar, Alt+Tab, and owned windows. They MUST NOT be the only icon assignment:
 Task Manager's collapsed/root process row, shell grouping, and any class-level
-fallback must retain the Rayan Lamp product identity at both system icon sizes.
+fallback must retain the PCController product identity at both system icon sizes.
 
 Why: Walk requested legacy resource ID 7 while goversioninfo emitted icon
 groups 2 and 32512. Later per-HWND state icons made child rows look correct,
@@ -332,7 +332,7 @@ exactly once. Purpose- or size-specific PWA artwork, such as a maskable icon or
 Apple-touch size, may remain distinct when its pixels or semantics genuinely
 differ.
 
-`assets/RayanLamp.ico` is the executable's PE-resource build input and MUST NOT
+`assets/PCControllerDesktop.ico` is the executable's PE-resource build input and MUST NOT
 also enter Go's runtime filesystem. Source animation frames and unused raster/
 ICO variants likewise stay unembedded unless a reviewed runtime consumer is
 added.
@@ -422,7 +422,7 @@ First-show-only and source-string checks do not cover later layout overwrites.
 | Reopened cached tray shows stale pixels | Cached HWND activated without hidden re-preparation | VIS-004 |
 | Tray hover becomes opaque or changes instantly | Opaque selection fill or no time-based hover state | VIS-005 |
 | Acrylic appears only after drag stops | Captured/rebuilt backdrop instead of live composition | VIS-001, VIS-006 |
-| Black rectangle or ring appears around lamp/text | Erased/opaque host pixels mixed with a per-pixel layer | VIS-003, VIS-004 |
+| Black rectangle or ring appears around device/text | Erased/opaque host pixels mixed with a per-pixel layer | VIS-003, VIS-004 |
 | White/black fringe around labels | ClearType/GDI pixels treated as one alpha channel | VIS-003 |
 | Double border or top gap | Native and custom chrome both reserved/drew an edge | VIS-007 |
 | Thick white border only in the GPU path | Captionless `WS_THICKFRAME` received classic GDI non-client paint | VIS-022 |
@@ -433,7 +433,7 @@ First-show-only and source-string checks do not cover later layout overwrites.
 | Transparent areas still consume clicks | Visual alpha changed without a real cross-process window region | VIS-008 |
 | Settings is black, unreadable, flickery, or has square button corners | Full-client glass or uncontrolled native erasing behind GDI controls | VIS-009 |
 | Snap never releases or works only once per drag | Latch-only snap state instead of per-`WM_MOVING` hysteresis | VIS-010 |
-| Lamp/menu/caption icon is blurry | Generic bitmap stretch or incomplete ICO pack | VIS-011 |
+| Device/menu/caption icon is blurry | Generic bitmap stretch or incomplete ICO pack | VIS-011 |
 | Tray changes but taskbar icon does not | State propagated to only one icon owner | VIS-012 |
 | Task Manager root/group row is generic while its child window is correct | Window class loaded a nonexistent resource ID and relied only on later per-HWND icons | VIS-019 |
 | Executable grows after adding a Web/native asset already used elsewhere | The same WAV/logo/ICO entered multiple embedded filesystems instead of one canonical asset owner | VIS-020 |
@@ -583,7 +583,40 @@ geometry/reopen tests. Main-renderer and popup HFONTs are checked at 96, 120,
 pages and diagnostics. Fixture HWNDs are topmost so unrelated windows do not
 invalidate screen evidence; no input is injected into another application.
 
+## VIS-025: native dialog chrome uses fractional coverage
+
+Rounded input/button HWNDs must not use binary `SetWindowRgn` masks for their
+visible contours. Settings chrome shares `dialograster_windows.go`: rounded
+gradient fills, borders/focus rings, tab highlights, checkbox marks, chevrons
+and recorder pills use premultiplied BGRA coverage at the final physical size.
+Keep existing canonical control radii and native-resolution text; do not blur
+or supersample entire controls to hide jagged geometry. The main/tray DWM corner
+ownership is unchanged.
+
+Rounded input corners blend into the aligned ancestor material, not the input's
+own solid brush or a guessed flat dialog color. The native input remains in
+charge of text, IME, selection, type-ahead and accessibility. The custom colored
+focus ring replaces only the native dotted focus ornament; clearing custom
+theming restores native keyboard cues and High Contrast behavior.
+
+The shared chrome cache is bounded to 64 DIBs / 16 MiB and cleared with native
+paint-buffer destruction/invalidation. Parent-material masks are refreshed from
+the live ancestor brush, never from screen capture; unchanged masks/colored
+rasters reuse resources between hover frames. Coverage tests include 96, 120,
+144 and 192 DPI, symmetric fractional edges, premultiplied channels, stroke-only
+transparent interiors, joined glyph strokes, real-HDC blending and cache bounds.
+
 ## Change gate
+
+Settings form geometry must reserve visible scrollbar footprints even for
+ordinary non-wrapping grids. Its content must never extend beneath a vertical
+scrollbar without an actual horizontal scroll range. Center row labels against
+the measured native dropdown HWND height, not a dialog-unit estimate that
+USER32 later clamps. Give spare form width to editors rather than label columns;
+compound snap controls own a separate row. Native viewport regression coverage
+switches every tab, resizes to normal/minimum/wide bounds, and changes English
+and Persian live without replacing native input or dialog ownership (VIS-017,
+VIS-018, VIS-023).
 
 Any edit to `internal/ui`, `internal/traymenu`, dialog paint code, or relevant
 `internal/winfx` composition/region helpers must:

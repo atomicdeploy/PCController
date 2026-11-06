@@ -33,7 +33,7 @@ func registerShellWithStore(
 	}
 	if err := install(executable); err != nil {
 		return &PartialError{
-			Completed: "the rayan-lamp URI protocol was registered",
+			Completed: "the pccontroller-desktop URI protocol was registered",
 			Failed:    "Jump List task installation",
 			Err:       err,
 		}
@@ -82,7 +82,7 @@ func unregisterShellWithStore(
 		return err
 	}
 	// The explicit AppUserModelID makes the Jump List and legacy toast
-	// metadata shared across every copy of RayanLamp. Re-check the URI's exact
+	// metadata shared across every copy of PCControllerDesktop. Re-check the URI's exact
 	// owner immediately before touching that shared state: another copy may
 	// have taken ownership after the initial idempotence/foreign-owner probe.
 	current, commandExists, err := store.GetString(protocolOpenPath, "")
@@ -121,7 +121,7 @@ func unregisterShellWithStore(
 		failed = append(failed, "legacy shell metadata cleanup")
 	}
 	if protocolErr == nil {
-		completed = append(completed, "the rayan-lamp URI protocol was removed")
+		completed = append(completed, "the pccontroller-desktop URI protocol was removed")
 	} else {
 		failed = append(failed, "URI protocol removal")
 	}

@@ -12,7 +12,7 @@ import (
 	"testing/fstest"
 	"time"
 
-	"rayanlamp.local/app/assets"
+	"pccontroller.local/desktop/assets"
 )
 
 func TestExportDirectoryIsDeterministicAndComplete(t *testing.T) {
@@ -369,10 +369,10 @@ func writeTestDistribution(t *testing.T, root string) {
 	files := map[string]string{
 		"index.html":             "<!doctype html><div id=\"app\"></div>",
 		"build-edition.json":     `{"edition":"production","developer_tools":false}`,
-		"manifest.webmanifest":   `{"name":"Rayan Lamp"}`,
+		"manifest.webmanifest":   `{"name":"PCController"}`,
 		"sw.js":                  "self.addEventListener('fetch',()=>{});",
 		"theme-init.js":          "document.documentElement.dataset.theme='dark';",
-		"assets/app-12345678.js": "console.log('Rayan Lamp');",
+		"assets/app-12345678.js": "console.log('PCController');",
 		"icons/app.png":          "not-a-real-png",
 	}
 	for name, content := range files {

@@ -8,7 +8,7 @@ import (
 
 	"github.com/lxn/win"
 
-	"rayanlamp.local/app/internal/winfx"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
 type backdropCommitOps struct {
@@ -97,7 +97,7 @@ func (s *Shell) commitBackdropTransition(nativeTitleBar bool) error {
 				return fmt.Errorf("invalidate backdrop foreground: %w", err)
 			}
 			// GlassDWM's top-level Invalidate reaches OnPaint, which calls
-			// UpdateLayeredWindow. RayanLamp paints through a child CustomWidget,
+			// UpdateLayeredWindow. PCControllerDesktop paints through a child CustomWidget,
 			// so explicitly dispatch that WM_PAINT now; paint() performs the
 			// equivalent UpdateLayeredWindow commit for per-pixel mode.
 			win.UpdateWindow(s.surface.Handle())

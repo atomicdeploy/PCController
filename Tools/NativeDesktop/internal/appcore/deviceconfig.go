@@ -1,6 +1,6 @@
 package appcore
 
-import "rayanlamp.local/app/internal/deviceconfig"
+import "pccontroller.local/desktop/internal/deviceconfig"
 
 // DeviceConfigSnapshot returns a read-only, explicitly allow-listed projection
 // of the parsed diagnostics cache plus current transport capability flags.

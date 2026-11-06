@@ -13,12 +13,12 @@ import (
 	"sync"
 	"unicode"
 
-	"rayanlamp.local/app/assets"
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/winfx"
+	"pccontroller.local/desktop/assets"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
-// Cue identifies one semantic Rayan Lamp sound.
+// Cue identifies one semantic PCController sound.
 type Cue string
 
 const (
@@ -43,10 +43,10 @@ type bundledDefinition struct {
 }
 
 var bundledDefinitions = []bundledDefinition{
-	{cue: CueOn, path: "sfx/on.wav", name: "Lamp on"},
-	{cue: CueOff, path: "sfx/off.wav", name: "Lamp off"},
-	{cue: CueMessage, path: "sfx/message.wav", name: "Lamp message"},
-	{cue: CueError, path: "sfx/error.wav", name: "Lamp error"},
+	{cue: CueOn, path: "sfx/on.wav", name: "Device on"},
+	{cue: CueOff, path: "sfx/off.wav", name: "Device off"},
+	{cue: CueMessage, path: "sfx/message.wav", name: "Device message"},
+	{cue: CueError, path: "sfx/error.wav", name: "Device error"},
 }
 
 // PlaybackFunc plays a complete validated PCM WAV byte stream. The production
@@ -299,7 +299,7 @@ func (m *Manager) Play(cue Cue) error {
 	return m.playback(cached.data)
 }
 
-// ImportFile validates and imports a regular WAV file without loading more
+// ImportFile validates and imports a regular audio file without loading more
 // than MaxWaveBytes+1 into memory.
 func (m *Manager) ImportFile(path string) (ImportedAsset, error) {
 	path = strings.TrimSpace(path)
@@ -329,11 +329,15 @@ func (m *Manager) ImportFile(path string) (ImportedAsset, error) {
 	return m.Import(filepath.Base(path), data)
 }
 
-// Import stores a valid PCM WAV at most once under its lowercase SHA-256 ID.
+// Import decodes supported audio and stores PCM WAV once under its SHA-256 ID.
 // Caller-owned bytes are never retained.
-func (m *Manager) Import(name string, wave []byte) (ImportedAsset, error) {
+func (m *Manager) Import(name string, source []byte) (ImportedAsset, error) {
 	if m == nil {
 		return ImportedAsset{}, errors.New("sfx: manager is nil")
+	}
+	wave, err := decodeImport(source)
+	if err != nil {
+		return ImportedAsset{}, err
 	}
 	info, err := ValidateWave(wave)
 	if err != nil {

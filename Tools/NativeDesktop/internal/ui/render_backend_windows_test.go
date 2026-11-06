@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/windx"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/windx"
 )
 
 func TestNormalizedRenderingBackend(t *testing.T) {

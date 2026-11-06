@@ -9,8 +9,8 @@ import (
 	"sync"
 	"testing"
 
-	"rayanlamp.local/app/assets"
-	"rayanlamp.local/app/internal/config"
+	"pccontroller.local/desktop/assets"
+	"pccontroller.local/desktop/internal/config"
 )
 
 func TestUIAudioAssetIsSessionProtectedAndExact(t *testing.T) {
@@ -187,7 +187,7 @@ func TestUIAudioImportStoresOncePatchesConfigAndRedactsSecrets(t *testing.T) {
 	}
 }
 
-func TestUIAudioImportRejectsNonWaveMediaTypeBeforeCallback(t *testing.T) {
+func TestUIAudioImportRejectsUnsupportedMediaTypeBeforeCallback(t *testing.T) {
 	source := newTestEventSource()
 	handler := &recordedHandler{result: source.Config()}
 	called := false
@@ -218,6 +218,19 @@ func TestUIAudioImportRejectsNonWaveMediaTypeBeforeCallback(t *testing.T) {
 	response.Body.Close()
 	if response.StatusCode != http.StatusUnsupportedMediaType || called {
 		t.Fatalf("status = %d, callback=%v", response.StatusCode, called)
+	}
+}
+
+func TestAudioImportMediaTypes(t *testing.T) {
+	for _, value := range []string{"audio/wav", "audio/x-wav", "audio/mpeg", "audio/mp3", "audio/flac", "audio/x-flac"} {
+		if !supportedAudioMediaType(value) {
+			t.Fatalf("rejected %s", value)
+		}
+	}
+	for _, value := range []string{"", "application/octet-stream", "text/html", "audio/aac", "video/mp4", "audio/ogg", "application/ogg"} {
+		if supportedAudioMediaType(value) {
+			t.Fatalf("accepted %s", value)
+		}
 	}
 }
 

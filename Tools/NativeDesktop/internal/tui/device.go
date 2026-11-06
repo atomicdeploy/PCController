@@ -11,7 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
-	"rayanlamp.local/app/internal/deviceconfig"
+	"pccontroller.local/desktop/internal/deviceconfig"
 )
 
 type deviceOverlayMode uint8
@@ -29,7 +29,7 @@ const (
 	deviceActionRefresh  deviceAction = "refresh"
 	deviceActionConnect  deviceAction = "connect"
 	deviceActionTerminal deviceAction = "terminal"
-	deviceActionLamp     deviceAction = "lamp-settings"
+	deviceActionDevice   deviceAction = "device-settings"
 	deviceActionBack     deviceAction = "back"
 )
 
@@ -136,7 +136,7 @@ func (m *Model) buildDeviceActions() tea.Cmd {
 		huh.NewOption(m.text("↻ Refresh all audited device parameters"), deviceActionRefresh),
 		huh.NewOption(m.text("🔌 Connect / probe firmware terminal"), deviceActionConnect),
 		huh.NewOption(m.text("⌨ Open expert device terminal"), deviceActionTerminal),
-		huh.NewOption(m.text("💡 Edit coordinator lamp connection"), deviceActionLamp),
+		huh.NewOption(m.text("💡 Edit coordinator device connection"), deviceActionDevice),
 		huh.NewOption(m.text("← Return to dashboard"), deviceActionBack),
 	}
 	field := huh.NewSelect[deviceAction]().
@@ -245,9 +245,9 @@ func (m *Model) selectDeviceAction(action deviceAction) tea.Cmd {
 	case deviceActionTerminal:
 		m.closeDeviceSettings()
 		return m.openTerminal()
-	case deviceActionLamp:
+	case deviceActionDevice:
 		m.closeDeviceSettings()
-		return m.openSettingsAt(settingsLamp)
+		return m.openSettingsAt(settingsDevice)
 	default:
 		return m.beginDeviceAction(action)
 	}

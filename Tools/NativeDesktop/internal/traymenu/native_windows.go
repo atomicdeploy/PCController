@@ -4,9 +4,7 @@ package traymenu
 
 import (
 	"errors"
-	"fmt"
 	"runtime"
-	"strings"
 
 	"github.com/lxn/win"
 	"golang.org/x/sys/windows"
@@ -15,49 +13,12 @@ import (
 const tpmLayoutRTL = uint32(0x8000)
 
 func showNative(options Options, anchor, workArea Rect) (Result, error) {
-	menu := win.CreatePopupMenu()
-	if menu == 0 {
-		return Result{}, errors.New("traymenu: CreatePopupMenu failed")
+	native, err := buildNativeMenu(options, monitorDPI(monitorFor(anchor, options.Owner), options.Owner))
+	if err != nil {
+		return Result{}, err
 	}
-	defer win.DestroyMenu(menu)
-
-	commandActions := make(map[uint32]ActionID, len(options.Items))
-	command := uint32(1)
-	for index, item := range options.Items {
-		if item.Separator {
-			if err := appendNativeMenu(menu, win.MF_SEPARATOR, 0, nil); err != nil {
-				return Result{}, fmt.Errorf("traymenu: append separator %d: %w", index, err)
-			}
-			continue
-		}
-
-		flags := uint32(win.MF_STRING)
-		if item.Disabled {
-			flags |= win.MF_DISABLED | win.MF_GRAYED
-		}
-		if item.Checked {
-			flags |= win.MF_CHECKED
-		}
-		label := item.Label
-		if shortcut := strings.TrimSpace(item.Shortcut); shortcut != "" {
-			if options.RightToLeft {
-				// TPM_LAYOUTRTL mirrors the native popup, but shortcut names
-				// are technical key sequences and must remain logically LTR.
-				shortcut = "\u200e" + shortcut + "\u200e"
-			}
-			label += "\t" + shortcut
-		}
-		text, err := windows.UTF16FromString(label)
-		if err != nil {
-			return Result{}, fmt.Errorf("traymenu: encode native item %d: %w", index, err)
-		}
-		if err := appendNativeMenu(menu, flags, command, &text[0]); err != nil {
-			return Result{}, fmt.Errorf("traymenu: append native item %d: %w", index, err)
-		}
-		runtime.KeepAlive(text)
-		commandActions[command] = item.ID
-		command++
-	}
+	defer native.close()
+	menu, commandActions := native.handle, native.actions
 
 	owner := win.HWND(options.Owner)
 	var temporaryOwner win.HWND
@@ -66,7 +27,7 @@ func showNative(options Options, anchor, workArea Rect) (Result, error) {
 	}
 	if owner == 0 {
 		className, _ := windows.UTF16FromString("STATIC")
-		windowName, _ := windows.UTF16FromString("RayanLamp tray menu")
+		windowName, _ := windows.UTF16FromString("PCControllerDesktop tray menu")
 		temporaryOwner = win.CreateWindowEx(
 			win.WS_EX_TOOLWINDOW,
 			&className[0],

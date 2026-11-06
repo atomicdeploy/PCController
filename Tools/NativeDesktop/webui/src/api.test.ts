@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { APIError, RayanLampAPI, unwrapResponse } from "./api";
+import { APIError, PCControllerDesktopAPI, unwrapResponse } from "./api";
 import { testBootstrap, testConfig } from "./test/fixtures";
 
 function jsonResponse(value: unknown, status = 200): Response {
@@ -9,7 +9,7 @@ function jsonResponse(value: unknown, status = 200): Response {
   });
 }
 
-describe("RayanLampAPI", () => {
+describe("PCControllerDesktopAPI", () => {
   it("establishes an HttpOnly-cookie session and applies CSRF only to mutations", async () => {
     const requests: Array<[RequestInfo | URL, RequestInit | undefined]> = [];
     vi.stubGlobal(
@@ -35,7 +35,7 @@ describe("RayanLampAPI", () => {
       })
     );
 
-    const api = new RayanLampAPI();
+    const api = new PCControllerDesktopAPI();
     await api.bootstrap();
     await api.patchConfig({ ui: { theme: "dark" } }, 7);
 
@@ -44,10 +44,10 @@ describe("RayanLampAPI", () => {
     expect(requests[0][1]?.credentials).toBe("same-origin");
 
     const bootstrapHeaders = new Headers(requests[1][1]?.headers);
-    expect(bootstrapHeaders.has("X-RayanLamp-CSRF")).toBe(false);
+    expect(bootstrapHeaders.has("X-PCControllerDesktop-CSRF")).toBe(false);
 
     const patchHeaders = new Headers(requests[2][1]?.headers);
-    expect(patchHeaders.get("X-RayanLamp-CSRF")).toBe("csrf-test");
+    expect(patchHeaders.get("X-PCControllerDesktop-CSRF")).toBe("csrf-test");
     expect(patchHeaders.get("If-Match")).toBe("7");
     expect(String(requests[2][1]?.body)).not.toContain("local_api_token");
   });
@@ -59,7 +59,7 @@ describe("RayanLampAPI", () => {
     });
     const fetchMock = vi.fn(() => response);
     vi.stubGlobal("fetch", fetchMock);
-    const api = new RayanLampAPI();
+    const api = new PCControllerDesktopAPI();
 
     const first = api.establishSession(true);
     const second = api.establishSession(true);
@@ -108,7 +108,7 @@ describe("RayanLampAPI", () => {
       })
     );
 
-    const api = new RayanLampAPI();
+    const api = new PCControllerDesktopAPI();
     await api.bootstrap();
     await api.getConfig();
     await api.patchConfig({ ui: { theme: "system" } }, 1);
@@ -127,7 +127,7 @@ describe("RayanLampAPI", () => {
     await api.diagnostics("/info");
     await api.uiDiagnostics();
     await api.refreshUIDiagnostics();
-    await api.notify("Lamp", "Test");
+    await api.notify("Device", "Test");
     await api.playAudio();
     await api.importAudio(
       new File([new Uint8Array([1, 2, 3])], "test.wav", {
@@ -141,10 +141,10 @@ describe("RayanLampAPI", () => {
       "/ui/config",
       "/ui/config",
       "/status",
-      "/lamp/toggle",
-      "/lamp/on",
-      "/lamp/off",
-      "/lamp/refresh",
+      "/device/toggle",
+      "/device/on",
+      "/device/off",
+      "/device/refresh",
       "/reconnect",
       "/window/show",
       "/window/hide",
@@ -181,7 +181,7 @@ describe("RayanLampAPI", () => {
       })
     );
 
-    const api = new RayanLampAPI();
+    const api = new PCControllerDesktopAPI();
     await api.playAudio("off", 2);
     const file = new File([new Uint8Array([82, 73, 70, 70])], "custom.wav", {
       type: "audio/wav"
@@ -199,9 +199,9 @@ describe("RayanLampAPI", () => {
     });
     const importHeaders = new Headers(requests[2][1]?.headers);
     expect(importHeaders.get("Content-Type")).toBe("audio/wav");
-    expect(importHeaders.get("X-RayanLamp-Filename")).toBe("custom.wav");
+    expect(importHeaders.get("X-PCControllerDesktop-Filename")).toBe("custom.wav");
     expect(importHeaders.get("If-Match")).toBe("7");
-    expect(importHeaders.get("X-RayanLamp-CSRF")).toBe("csrf-audio");
+    expect(importHeaders.get("X-PCControllerDesktop-CSRF")).toBe("csrf-audio");
     expect(requests[2][1]?.body).toBe(file);
   });
 
@@ -253,7 +253,7 @@ describe("RayanLampAPI", () => {
       })
     );
 
-    const api = new RayanLampAPI();
+    const api = new PCControllerDesktopAPI();
     const begun = await api.beginHotkeyCapture();
     const renewed = await api.renewHotkeyCapture(begun.lease_id);
     const probed = await api.probeHotkey(
@@ -296,7 +296,7 @@ describe("RayanLampAPI", () => {
     expect(requests[4][1]?.keepalive).toBe(true);
     for (const [, init] of requests.slice(1)) {
       expect(
-        new Headers(init?.headers).get("X-RayanLamp-CSRF")
+        new Headers(init?.headers).get("X-PCControllerDesktop-CSRF")
       ).toBe("csrf-hotkeys");
     }
   });
@@ -319,7 +319,7 @@ describe("RayanLampAPI", () => {
         return jsonResponse({
           ok: true,
           result: {
-            executable: "C:\\Portable\\RayanLamp.exe",
+            executable: "C:\\Portable\\PCControllerDesktop.exe",
             shell_registered: true,
             com_registered: false
           }
@@ -327,7 +327,7 @@ describe("RayanLampAPI", () => {
       })
     );
 
-    const api = new RayanLampAPI();
+    const api = new PCControllerDesktopAPI();
     await expect(api.integrationRegistrationStatus()).resolves.toMatchObject({
       shell_registered: true
     });
@@ -345,7 +345,7 @@ describe("RayanLampAPI", () => {
       method: "integration.shell.register"
     });
     expect(
-      new Headers(requests[2][1]?.headers).get("X-RayanLamp-CSRF")
+      new Headers(requests[2][1]?.headers).get("X-PCControllerDesktop-CSRF")
     ).toBe("csrf-registration");
   });
 });

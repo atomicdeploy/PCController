@@ -223,6 +223,20 @@ func TestPeripheralCatalogUsesExplicitBoardProfileWithoutLegacyMotionAliases(t *
 	}
 	seenSeat := false
 	for _, control := range settings.Controls {
+		if control.Kind == "relay" || control.Kind == "mosfet" {
+			want := []string{"on", "off"}
+			if control.Kind == "mosfet" {
+				want = append(want, "decrease", "increase", "toggle")
+			}
+			if len(control.Actions) != len(want) {
+				t.Fatalf("RPC action count: %+v", control)
+			}
+			for i, verb := range want {
+				if control.Actions[i].Verb != verb || control.Actions[i].ID != control.Key+"."+verb {
+					t.Fatalf("RPC action order for %s: %+v", control.Key, control.Actions)
+				}
+			}
+		}
 		if control.Key == "motion.a" || control.Key == "motion.b" || control.Key == "relay.1" {
 			t.Fatalf("catalog advertised ambiguous legacy control %+v", control)
 		}

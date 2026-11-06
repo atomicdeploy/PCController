@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"rayanlamp.local/app/internal/comserver"
-	"rayanlamp.local/app/internal/ipc"
-	"rayanlamp.local/app/internal/shellintegration"
+	"pccontroller.local/desktop/internal/comserver"
+	"pccontroller.local/desktop/internal/ipc"
+	"pccontroller.local/desktop/internal/shellintegration"
 )
 
 func TestRegistrationStatusIsReadOnlyAndCurrentExecutableSpecific(t *testing.T) {
@@ -15,10 +15,10 @@ func TestRegistrationStatusIsReadOnlyAndCurrentExecutableSpecific(t *testing.T) 
 	var mutationCalls int
 	dispatcher.registration = &registrationController{actions: registrationActions{
 		executable: func() (string, error) {
-			return `C:\Portable\RayanLamp.exe`, nil
+			return `C:\Portable\PCControllerDesktop.exe`, nil
 		},
 		shellRegistered: func(executable string) (bool, error) {
-			return executable == `C:\Portable\RayanLamp.exe`, nil
+			return executable == `C:\Portable\PCControllerDesktop.exe`, nil
 		},
 		comRegistered: func(executable string) (bool, error) {
 			return false, nil
@@ -52,7 +52,7 @@ func TestRegistrationStatusIsReadOnlyAndCurrentExecutableSpecific(t *testing.T) 
 	if !ok {
 		t.Fatalf("status type = %T", result)
 	}
-	if status.Executable != `C:\Portable\RayanLamp.exe` ||
+	if status.Executable != `C:\Portable\PCControllerDesktop.exe` ||
 		!status.ShellRegistered || status.COMRegistered {
 		t.Fatalf("registration status = %+v", status)
 	}
@@ -73,7 +73,7 @@ func TestRegistrationActionsReturnFreshStatus(t *testing.T) {
 	var shellRegistered, comRegistered bool
 	dispatcher.registration = &registrationController{actions: registrationActions{
 		executable: func() (string, error) {
-			return `C:\Portable\RayanLamp.exe`, nil
+			return `C:\Portable\PCControllerDesktop.exe`, nil
 		},
 		shellRegistered: func(string) (bool, error) {
 			return shellRegistered, nil
@@ -130,7 +130,7 @@ func TestRegistrationPartialFailureIsCodedAndRetainsState(t *testing.T) {
 	partialCause := errors.New("Jump Lists disabled by policy")
 	dispatcher.registration = &registrationController{actions: registrationActions{
 		executable: func() (string, error) {
-			return `C:\Portable\RayanLamp.exe`, nil
+			return `C:\Portable\PCControllerDesktop.exe`, nil
 		},
 		shellRegistered: func(string) (bool, error) {
 			return shellRegistered, nil

@@ -9,8 +9,8 @@ import (
 	"github.com/lxn/walk"
 	"github.com/lxn/win"
 
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/winfx"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
 const minimumInteractiveAlpha byte = 8

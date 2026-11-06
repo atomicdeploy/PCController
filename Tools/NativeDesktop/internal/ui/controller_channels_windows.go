@@ -5,7 +5,30 @@ package ui
 import (
 	"fmt"
 	"github.com/lxn/walk"
+	"pccontroller.local/desktop/presentation"
+	"sort"
 )
+
+// Keep Off physically left of On, regardless of the host catalog order.
+func orderedControllerActions(actions []presentation.Action) []presentation.Action {
+	result := append([]presentation.Action(nil), actions...)
+	rank := func(verb string) int {
+		switch verb {
+		case "off":
+			return 0
+		case "on":
+			return 1
+		case "decrease":
+			return 2
+		case "increase":
+			return 3
+		default:
+			return 4
+		}
+	}
+	sort.SliceStable(result, func(i, j int) bool { return rank(result[i].Verb) < rank(result[j].Verb) })
+	return result
+}
 
 // Cards share the donor compositor and activation lifecycle with the front
 // panel. Actions are catalog IDs, never inferred commands from display names.
@@ -34,12 +57,30 @@ func (s *Shell) paintControllerChannels(canvas *walk.Canvas, bounds walk.Rectang
 		x, y := bounds.X+(slot%columns)*(cw+12), bounds.Y+50+(slot/columns)*174
 		rect := walk.Rectangle{X: x, Y: y, Width: cw, Height: 162}
 		s.controllerCard(canvas, rect, colors)
-		header := walk.Rectangle{X: x + 8, Y: y + 8, Width: cw - 52, Height: 32}
+		header := walk.Rectangle{X: x + 8, Y: y + 8, Width: cw - 76, Height: 32}
+		nameRect := walk.Rectangle{X: x + 72, Y: y + 10, Width: cw - 148, Height: 28}
+		iconRect := walk.Rectangle{X: x + 42, Y: y + 10, Width: 24, Height: 28}
 		slider := walk.Rectangle{X: x + 20, Y: y + 70, Width: cw - 40, Height: 30}
-		s.controllerChannelHits = append(s.controllerChannelHits, controllerChannelHit{key: ch.Key, rect: rect, header: header, slider: slider, channel: ch})
+		s.controllerChannelHits = append(s.controllerChannelHits, controllerChannelHit{key: ch.Key, rect: rect, header: header, name: nameRect, icon: iconRect, slider: slider, channel: ch})
 		editID := actionChannelFirst + actionID(slot*8+7)
 		s.controllerActionIDs[editID] = "edit:" + ch.Key
-		s.controllerControl(canvas, walk.Rectangle{X: x + cw - 42, Y: y + 10, Width: 30, Height: 28}, editID, "\uE70F", "", s.canEditControllerChannel(), false, colors)
+		editing := s.controllerInline != nil && s.controllerInline.key == ch.Key
+		if editing {
+			s.controllerActionIDs[editID] = "inline-save:"
+			s.controllerSmallAction(canvas, walk.Rectangle{X: x + cw - 68, Y: y + 10, Width: 28, Height: 28}, editID, "\uE73E", s.canSaveControllerInline(), false, colors)
+			cancelID := actionChannelFirst + actionID(slot*8+6)
+			s.controllerActionIDs[cancelID] = "inline-cancel:"
+			s.controllerSmallAction(canvas, walk.Rectangle{X: x + cw - 38, Y: y + 10, Width: 28, Height: 28}, cancelID, "\uE711", !s.controllerBusy, false, colors)
+		} else {
+			s.controllerSmallAction(canvas, walk.Rectangle{X: x + cw - 38, Y: y + 10, Width: 28, Height: 28}, editID, "\uE70F", s.canEditControllerChannel(), false, colors)
+		}
+		// A dedicated grip makes arrangement discoverable without stealing the
+		// slider or the caption's click-to-rename gesture.
+		for row := 0; row < 3; row++ {
+			for col := 0; col < 2; col++ {
+				controllerFill(canvas, walk.Rectangle{X: x + 12 + col*5, Y: y + 18 + row*5, Width: 2, Height: 2}, colors.secondary, 1)
+			}
+		}
 		color := colors.secondary
 		if ch.Known {
 			if ch.State == "on" {
@@ -48,14 +89,20 @@ func (s *Shell) paintControllerChannels(canvas *walk.Canvas, bounds walk.Rectang
 				color = colors.danger
 			}
 		}
-		controllerFill(canvas, walk.Rectangle{X: x + 16, Y: y + 20, Width: 8, Height: 8}, color, 4)
+		controllerFill(canvas, walk.Rectangle{X: x + 28, Y: y + 20, Width: 8, Height: 8}, color, 4)
 		glyph := "\uE945"
 		if ch.Kind == "mosfet" {
 			glyph = "\uE706"
 		}
-		glyph = controllerChannelGlyph(ch.Icon, glyph)
-		s.controllerGlyph(canvas, glyph, colors.accent, walk.Rectangle{X: x + 34, Y: y + 10, Width: 24, Height: 28})
-		s.controllerText(canvas, ch.Name, s.bodyFont, colors.text, walk.Rectangle{X: x + 66, Y: y + 10, Width: cw - 112, Height: 28}, false)
+		icon := ch.Icon
+		if editing {
+			icon = s.controllerInline.icon
+		}
+		glyph = controllerChannelGlyph(icon, glyph)
+		s.controllerGlyph(canvas, glyph, colors.accent, iconRect)
+		if !editing {
+			s.controllerText(canvas, ch.Name, s.bodyFont, colors.text, nameRect, false)
+		}
 		percent := ch.Percent
 		pending := s.controllerBusy && s.controllerPendingPWM.key == ch.Key
 		if pending {
@@ -94,10 +141,10 @@ func (s *Shell) paintControllerChannels(canvas *walk.Canvas, bounds walk.Rectang
 		} else {
 			s.controllerText(canvas, ch.Key, s.captionFont, colors.secondary, slider, false)
 		}
-		if s.controllerGesture.dragging && pointInRect(s.controllerGesture.point, rect) {
+		if s.controllerGesture.dragging && s.controllerDropTarget(s.controllerGesture.point) == ch.Key {
 			controllerFill(canvas, walk.Rectangle{X: x + 12, Y: y + 2, Width: cw - 24, Height: 3}, colors.accent, 1)
 		}
-		actions := ch.Actions
+		actions := orderedControllerActions(ch.Actions)
 		if len(actions) > 5 {
 			actions = actions[:5]
 		}
@@ -149,6 +196,7 @@ func (s *Shell) paintControllerChannels(canvas *walk.Canvas, bounds walk.Rectang
 			}
 		}
 	}
+	s.positionControllerInline()
 	if pages > 1 {
 		y := bounds.Y + bounds.Height - 36
 		s.controllerControl(canvas, walk.Rectangle{X: bounds.X, Y: y, Width: 36, Height: 36}, actionChannelPrevious, "\uE76B", "", s.controllerPage > 0, false, colors)
@@ -159,4 +207,19 @@ func (s *Shell) paintControllerChannels(canvas *walk.Canvas, bounds walk.Rectang
 		s.controllerText(canvas, s.controllerState.Error, s.captionFont, colors.danger, walk.Rectangle{X: bounds.X + 174, Y: bounds.Y + bounds.Height - 36, Width: bounds.Width - 174, Height: 36}, false)
 	}
 	return nil
+}
+
+func controllerSmallActionGlyphBounds(r walk.Rectangle) walk.Rectangle {
+	return walk.Rectangle{X: r.X + 4, Y: r.Y + 4, Width: r.Width - 8, Height: r.Height - 8}
+}
+
+func (s *Shell) controllerSmallAction(c *walk.Canvas, r walk.Rectangle, action actionID, glyph string, enabled, active bool, p palette) {
+	s.controllerControl(c, r, action, "", "", enabled, active, p)
+	ink := p.text
+	if !enabled {
+		ink = p.secondary
+	} else if active {
+		ink = p.accentHover
+	}
+	s.controllerGlyph(c, glyph, ink, controllerSmallActionGlyphBounds(r))
 }

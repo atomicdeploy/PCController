@@ -1,5 +1,5 @@
 // Package shellintegration contains the optional Windows shell integrations
-// for RayanLamp. Parsing custom-protocol activations is platform independent so
+// for PCControllerDesktop. Parsing custom-protocol activations is platform independent so
 // callers and tests use exactly the same bounded command allowlist.
 package shellintegration
 
@@ -12,25 +12,25 @@ import (
 )
 
 const (
-	// Scheme is RayanLamp's optional custom URI protocol.
-	Scheme = "rayan-lamp"
+	// Scheme is PCControllerDesktop's optional custom URI protocol.
+	Scheme = "pccontroller-desktop"
 
 	// AppUserModelID is shared by the native window, notifications, and shell
 	// integrations. It must remain stable once released.
-	AppUserModelID = "YektaYar.RayanLamp"
+	AppUserModelID = "DRSDavidSoft.PCController"
 
 	maxURIBytes = 2048
 )
 
 var (
 	ErrUnsupported = errors.New("shellintegration: Windows shell integration is unavailable")
-	ErrInvalidURI  = errors.New("shellintegration: invalid rayan-lamp URI")
+	ErrInvalidURI  = errors.New("shellintegration: invalid pccontroller-desktop URI")
 )
 
 var uriActions = map[string]string{
-	"on":          "lamp.on",
-	"off":         "lamp.off",
-	"toggle":      "lamp.toggle",
+	"on":          "device.on",
+	"off":         "device.off",
+	"toggle":      "device.toggle",
 	"show":        "window.show",
 	"hide":        "window.hide",
 	"reconnect":   "reconnect",
@@ -44,7 +44,7 @@ var uriActions = map[string]string{
 // intentionally exposes no arbitrary method names, parameters, queries, or
 // fragments.
 //
-// The canonical form is rayan-lamp://on. The RFC-style rayan-lamp:/on form is
+// The canonical form is pccontroller-desktop://on. The RFC-style pccontroller-desktop:/on form is
 // also accepted for clients that do not represent an action as an authority.
 func ParseURI(raw string) (string, error) {
 	if raw == "" {

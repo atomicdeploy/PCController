@@ -21,7 +21,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-const pipePrefix = `\\.\pipe\RayanLamp.`
+const pipePrefix = `\\.\pipe\PCControllerDesktop.`
 
 type Server struct {
 	listener  net.Listener
@@ -193,7 +193,7 @@ func Call(ctx context.Context, request Request) (Response, error) {
 	}
 	conn, err := winio.DialPipeContext(ctx, name)
 	if err != nil {
-		return Response{}, fmt.Errorf("connect to RayanLamp: %w", err)
+		return Response{}, fmt.Errorf("connect to PCControllerDesktop: %w", err)
 	}
 	defer conn.Close()
 	if deadline, ok := ctx.Deadline(); ok {

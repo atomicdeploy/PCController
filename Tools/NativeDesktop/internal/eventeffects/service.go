@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/model"
-	"rayanlamp.local/app/internal/sfx"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/model"
+	"pccontroller.local/desktop/internal/sfx"
 )
 
 const (
@@ -200,7 +200,7 @@ func (s *Service) ResolveAudio(cue string) (sfx.Asset, error) {
 	return s.sounds.Resolve(sfx.Cue(cue))
 }
 
-// ImportAudio stores one validated, content-addressed custom WAV.
+// ImportAudio stores one validated, content-addressed custom sound.
 func (s *Service) ImportAudio(name string, wave []byte) (sfx.ImportedAsset, error) {
 	if s == nil || s.sounds == nil {
 		return sfx.ImportedAsset{}, errors.New("eventeffects: sound assets are unavailable")
@@ -208,7 +208,7 @@ func (s *Service) ImportAudio(name string, wave []byte) (sfx.ImportedAsset, erro
 	return s.sounds.Import(name, wave)
 }
 
-// ImportAudioFile validates and stores one local PCM WAV for TUI/IPC callers.
+// ImportAudioFile validates and stores one local audio file for TUI/IPC callers.
 func (s *Service) ImportAudioFile(path string) (sfx.ImportedAsset, error) {
 	if s == nil || s.sounds == nil {
 		return sfx.ImportedAsset{}, errors.New("eventeffects: sound assets are unavailable")
@@ -274,7 +274,7 @@ func (s *Service) handleAudio(event model.Event) {
 		if count > 10 {
 			count = 10
 		}
-		// A beep event is an explicit audible command from the lamp. It remains
+		// A beep event is an explicit audible command from the device. It remains
 		// audible even when incidental notification sounds are disabled, which
 		// matches the GUI shell.
 		s.enqueue(audioJob{cue: CueMessage, count: count})

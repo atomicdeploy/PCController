@@ -11,20 +11,20 @@ import (
 	"sync/atomic"
 	"time"
 
-	"rayanlamp.local/app/internal/buildinfo"
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/deviceterminal"
-	"rayanlamp.local/app/internal/lamp"
-	"rayanlamp.local/app/internal/model"
+	"pccontroller.local/desktop/internal/buildinfo"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/device"
+	"pccontroller.local/desktop/internal/deviceterminal"
+	"pccontroller.local/desktop/internal/model"
 )
 
-var ErrStopped = errors.New("RayanLamp core is stopped")
+var ErrStopped = errors.New("PCControllerDesktop core is stopped")
 
 type Core struct {
 	configMu      sync.RWMutex
 	cfg           config.Config
-	client        *lamp.Client
-	clientFactory func(config.Config) (*lamp.Client, error)
+	client        *device.Client
+	clientFactory func(config.Config) (*device.Client, error)
 	clientEpoch   uint64
 
 	stateMu sync.RWMutex
@@ -34,11 +34,11 @@ type Core struct {
 
 	diagnostics *diagnosticsState
 	terminal    *deviceterminal.Manager
-	// terminalDial is nil in production, where TerminalConnect uses the lamp
+	// terminalDial is nil in production, where TerminalConnect uses the device
 	// client's cached-resolution dialer. Keeping the seam private lets
 	// lifecycle race tests stop a dial at an exact point without changing the
 	// public API or the terminal manager.
-	terminalDial  func(context.Context, *lamp.Client, int) (net.Conn, error)
+	terminalDial  func(context.Context, *device.Client, int) (net.Conn, error)
 	terminalOpMu  sync.Mutex
 	terminalOps   map[uint64]terminalConnectOperation
 	terminalOpID  uint64
@@ -90,34 +90,34 @@ func New(cfg config.Config) (*Core, error) {
 	if err := cfg.Normalize(); err != nil {
 		return nil, err
 	}
-	client, err := newLampClient(cfg)
+	client, err := newDeviceClient(cfg)
 	if err != nil {
 		return nil, err
 	}
 	return &Core{
 		cfg:           cfg,
 		client:        client,
-		clientFactory: newLampClient,
+		clientFactory: newDeviceClient,
 		clientEpoch:   1,
 		state: model.Snapshot{
 			State:     model.StateUnknown,
-			DeviceURL: cfg.Lamp.BaseURL,
+			DeviceURL: cfg.Device.BaseURL,
 		},
-		diagnostics: newDiagnosticsState(cfg.Lamp.BaseURL),
+		diagnostics: newDiagnosticsState(cfg.Device.BaseURL),
 		terminal:    deviceterminal.New(deviceterminal.DefaultScrollbackBytes),
 		terminalOps: make(map[uint64]terminalConnectOperation),
 		subs:        make(map[uint64]chan model.Event),
 	}, nil
 }
 
-// ValidateConfig performs the same normalization and lamp-client validation
+// ValidateConfig performs the same normalization and device-client validation
 // used by ApplyConfig without changing runtime state.
 func ValidateConfig(cfg config.Config) error {
 	cfg = cloneConfig(cfg)
 	if err := cfg.Normalize(); err != nil {
 		return err
 	}
-	_, err := newLampClient(cfg)
+	_, err := newDeviceClient(cfg)
 	return err
 }
 
@@ -127,18 +127,18 @@ func cloneConfig(cfg config.Config) config.Config {
 	return cfg
 }
 
-func newLampClient(cfg config.Config) (*lamp.Client, error) {
-	return lamp.New(
-		cfg.Lamp.BaseURL,
-		lamp.WithHTTPClient(&http.Client{Timeout: cfg.Lamp.RequestTimeout.Value()}),
-		lamp.WithReconnectPolicy(lamp.ReconnectPolicy{
-			Initial:    cfg.Lamp.ReconnectMin.Value(),
-			Maximum:    cfg.Lamp.ReconnectMax.Value(),
+func newDeviceClient(cfg config.Config) (*device.Client, error) {
+	return device.New(
+		cfg.Device.BaseURL,
+		device.WithHTTPClient(&http.Client{Timeout: cfg.Device.RequestTimeout.Value()}),
+		device.WithReconnectPolicy(device.ReconnectPolicy{
+			Initial:    cfg.Device.ReconnectMin.Value(),
+			Maximum:    cfg.Device.ReconnectMax.Value(),
 			Multiplier: 2,
 			Jitter:     0.2,
 			ResetAfter: time.Minute,
 		}),
-		lamp.WithUserAgent(buildinfo.Name+"/"+buildinfo.Version),
+		device.WithUserAgent(buildinfo.Name+"/"+buildinfo.Version),
 	)
 }
 
@@ -238,13 +238,13 @@ func (c *Core) startNetworkLocked() {
 	client := c.client
 	c.configMu.RUnlock()
 
-	if cfg.Lamp.WebSocket {
+	if cfg.Device.WebSocket {
 		run.start(func(ctx context.Context) {
-			_ = client.Listen(ctx, lamp.Handlers{
+			_ = client.Listen(ctx, device.Handlers{
 				OnEvent: func(event model.Event) {
-					c.handleLampEventForGeneration(generation, event)
+					c.handleDeviceEventForGeneration(generation, event)
 				},
-				OnConnection: func(status lamp.ConnectionStatus) {
+				OnConnection: func(status device.ConnectionStatus) {
 					c.handleConnectionForGeneration(generation, status)
 				},
 			})
@@ -270,7 +270,7 @@ func (c *Core) startNetworkLocked() {
 		})
 	}
 
-	if interval := cfg.Lamp.HTTPPoll.Value(); interval > 0 {
+	if interval := cfg.Device.HTTPPoll.Value(); interval > 0 {
 		run.start(func(ctx context.Context) {
 			c.poll(ctx, client, generation, interval)
 		})
@@ -284,16 +284,16 @@ func (c *Core) currentGenerationLocked(generation uint64) bool {
 	return c.started && generation == c.generation
 }
 
-func (c *Core) handleLampEventForGeneration(generation uint64, event model.Event) {
+func (c *Core) handleDeviceEventForGeneration(generation uint64, event model.Event) {
 	c.lifecycleMu.Lock()
 	defer c.lifecycleMu.Unlock()
 	if !c.currentGenerationLocked(generation) {
 		return
 	}
-	c.handleLampEvent(event)
+	c.handleDeviceEvent(event)
 }
 
-func (c *Core) handleConnectionForGeneration(generation uint64, status lamp.ConnectionStatus) {
+func (c *Core) handleConnectionForGeneration(generation uint64, status device.ConnectionStatus) {
 	c.lifecycleMu.Lock()
 	defer c.lifecycleMu.Unlock()
 	if !c.currentGenerationLocked(generation) {
@@ -302,7 +302,7 @@ func (c *Core) handleConnectionForGeneration(generation uint64, status lamp.Conn
 	c.handleConnection(status)
 }
 
-func (c *Core) poll(ctx context.Context, client *lamp.Client, generation uint64, interval time.Duration) {
+func (c *Core) poll(ctx context.Context, client *device.Client, generation uint64, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -321,9 +321,9 @@ func (c *Core) poll(ctx context.Context, client *lamp.Client, generation uint64,
 
 func (c *Core) refreshForGeneration(
 	ctx context.Context,
-	client *lamp.Client,
+	client *device.Client,
 	generation uint64,
-) (model.LampState, error) {
+) (model.OutputState, error) {
 	state, err := client.Get(ctx)
 	c.lifecycleMu.Lock()
 	defer c.lifecycleMu.Unlock()
@@ -365,9 +365,9 @@ func (c *Core) ApplyConfig(cfg config.Config) error {
 
 	c.lifecycleMu.Lock()
 	c.configMu.RLock()
-	lampChanged := c.cfg.Lamp != cfg.Lamp
+	deviceChanged := c.cfg.Device != cfg.Device
 	c.configMu.RUnlock()
-	if !lampChanged {
+	if !deviceChanged {
 		c.configMu.Lock()
 		c.cfg = cloneConfig(cfg)
 		c.configMu.Unlock()
@@ -378,7 +378,7 @@ func (c *Core) ApplyConfig(cfg config.Config) error {
 
 	factory := c.clientFactory
 	if factory == nil {
-		factory = newLampClient
+		factory = newDeviceClient
 	}
 	client, err := factory(cfg)
 	if err != nil {
@@ -411,11 +411,11 @@ func (c *Core) ApplyConfig(cfg config.Config) error {
 	previousState := c.state.State
 	c.state = model.Snapshot{
 		State:     model.StateUnknown,
-		DeviceURL: cfg.Lamp.BaseURL,
+		DeviceURL: cfg.Device.BaseURL,
 	}
 	snapshot := c.state
 	c.stateMu.Unlock()
-	c.resetDiagnostics(cfg.Lamp.BaseURL)
+	c.resetDiagnostics(cfg.Device.BaseURL)
 	c.publish(model.Event{
 		Kind:          model.EventSnapshot,
 		Snapshot:      snapshot,
@@ -440,7 +440,7 @@ func (c *Core) closeIdleConnections() {
 	}
 }
 
-func (c *Core) Refresh(ctx context.Context) (model.LampState, error) {
+func (c *Core) Refresh(ctx context.Context) (model.OutputState, error) {
 	client, epoch, err := c.currentClient()
 	if err != nil {
 		return model.StateUnknown, err
@@ -460,15 +460,15 @@ func (c *Core) Refresh(ctx context.Context) (model.LampState, error) {
 	return state, nil
 }
 
-func (c *Core) On(ctx context.Context) (model.LampState, error) {
+func (c *Core) On(ctx context.Context) (model.OutputState, error) {
 	return c.set(ctx, model.StateOn)
 }
 
-func (c *Core) Off(ctx context.Context) (model.LampState, error) {
+func (c *Core) Off(ctx context.Context) (model.OutputState, error) {
 	return c.set(ctx, model.StateOff)
 }
 
-func (c *Core) Toggle(ctx context.Context) (model.LampState, error) {
+func (c *Core) Toggle(ctx context.Context) (model.OutputState, error) {
 	c.commandMu.Lock()
 	defer c.commandMu.Unlock()
 
@@ -486,13 +486,13 @@ func (c *Core) Toggle(ctx context.Context) (model.LampState, error) {
 	return c.setLocked(ctx, model.StateOn)
 }
 
-func (c *Core) set(ctx context.Context, target model.LampState) (model.LampState, error) {
+func (c *Core) set(ctx context.Context, target model.OutputState) (model.OutputState, error) {
 	c.commandMu.Lock()
 	defer c.commandMu.Unlock()
 	return c.setLocked(ctx, target)
 }
 
-func (c *Core) setLocked(ctx context.Context, target model.LampState) (model.LampState, error) {
+func (c *Core) setLocked(ctx context.Context, target model.OutputState) (model.OutputState, error) {
 	client, epoch, err := c.currentClient()
 	if err != nil {
 		return model.StateUnknown, err
@@ -500,14 +500,14 @@ func (c *Core) setLocked(ctx context.Context, target model.LampState) (model.Lam
 	command := target.String()
 	c.setPending(command)
 
-	var state model.LampState
+	var state model.OutputState
 	switch target {
 	case model.StateOn:
 		state, err = client.On(ctx)
 	case model.StateOff:
 		state, err = client.Off(ctx)
 	default:
-		err = errors.New("invalid target lamp state")
+		err = errors.New("invalid target device state")
 	}
 	if err != nil {
 		c.updateClientEpoch(epoch, func() {
@@ -556,18 +556,18 @@ func (c *Core) decorateTerminalSnapshot(
 	useConfiguredPort := snapshot.State == deviceterminal.StateDisconnected ||
 		snapshot.Port <= 0
 	if useConfiguredHost {
-		if parsed, err := url.Parse(cfg.Lamp.BaseURL); err == nil &&
+		if parsed, err := url.Parse(cfg.Device.BaseURL); err == nil &&
 			parsed.Hostname() != "" {
 			snapshot.Host = parsed.Hostname()
 		}
 	}
-	if useConfiguredPort && cfg.Lamp.TelnetPort > 0 {
-		snapshot.Port = cfg.Lamp.TelnetPort
+	if useConfiguredPort && cfg.Device.TelnetPort > 0 {
+		snapshot.Port = cfg.Device.TelnetPort
 	}
 	return snapshot
 }
 
-// TerminalConnect manually opens the configured lamp's Telnet-style port. It
+// TerminalConnect manually opens the configured device's Telnet-style port. It
 // never auto-connects during normal application startup because the audited
 // firmware accepts only one client and exposes no authentication.
 func (c *Core) TerminalConnect(
@@ -593,12 +593,12 @@ func (c *Core) TerminalConnect(
 		c.lifecycleOpMu.Unlock()
 		return c.TerminalStatus(), ErrStopped
 	}
-	parsed, err := url.Parse(cfg.Lamp.BaseURL)
+	parsed, err := url.Parse(cfg.Device.BaseURL)
 	if err != nil || parsed.Hostname() == "" {
 		c.lifecycleOpMu.Unlock()
-		return c.TerminalStatus(), errors.New("lamp terminal hostname is invalid")
+		return c.TerminalStatus(), errors.New("device terminal hostname is invalid")
 	}
-	timeout := cfg.Lamp.RequestTimeout.Value()
+	timeout := cfg.Device.RequestTimeout.Value()
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
@@ -609,12 +609,12 @@ func (c *Core) TerminalConnect(
 	snapshot, err := c.terminal.Connect(
 		dialContext,
 		parsed.Hostname(),
-		cfg.Lamp.TelnetPort,
+		cfg.Device.TelnetPort,
 		func(connectContext context.Context) (net.Conn, error) {
 			if terminalDial != nil {
-				return terminalDial(connectContext, client, cfg.Lamp.TelnetPort)
+				return terminalDial(connectContext, client, cfg.Device.TelnetPort)
 			}
-			return client.DialTCP(connectContext, cfg.Lamp.TelnetPort)
+			return client.DialTCP(connectContext, cfg.Device.TelnetPort)
 		},
 	)
 	cancel()
@@ -724,7 +724,7 @@ func (c *Core) TerminalRead(
 	return result, err
 }
 
-func (c *Core) currentClient() (*lamp.Client, uint64, error) {
+func (c *Core) currentClient() (*device.Client, uint64, error) {
 	c.configMu.RLock()
 	defer c.configMu.RUnlock()
 	if c.client == nil {
@@ -743,7 +743,7 @@ func (c *Core) updateClientEpoch(epoch uint64, update func()) bool {
 	return true
 }
 
-func (c *Core) handleLampEvent(event model.Event) {
+func (c *Core) handleDeviceEvent(event model.Event) {
 	switch event.Kind {
 	case model.EventSnapshot:
 		c.mergeState(event.Snapshot.State, "websocket", true, true)
@@ -757,7 +757,7 @@ func (c *Core) handleLampEvent(event model.Event) {
 	}
 }
 
-func (c *Core) handleConnection(status lamp.ConnectionStatus) {
+func (c *Core) handleConnection(status device.ConnectionStatus) {
 	c.stateMu.Lock()
 	c.state.WebSocketOnline = status.Online
 	c.state.ReconnectAttempt = status.Attempt
@@ -776,7 +776,7 @@ func (c *Core) handleConnection(status lamp.ConnectionStatus) {
 	})
 }
 
-func (c *Core) mergeState(state model.LampState, source string, remote, reachable bool) {
+func (c *Core) mergeState(state model.OutputState, source string, remote, reachable bool) {
 	if state == model.StateUnknown {
 		return
 	}

@@ -274,12 +274,14 @@ func ProfileDescriptors(mode string, exposeRawRelays bool, legacyNames map[strin
 			continue
 		}
 		if descriptor.Kind == "pwm" {
+			// Catalog order is also the presentation order for RPC/Web clients:
+			// explicit state first, descending/ascending adjustment, then toggle.
 			actions := []ActionDescriptor{
 				{ID: descriptor.Key + ".on", Verb: "on", Name: "On"},
 				{ID: descriptor.Key + ".off", Verb: "off", Name: "Off"},
-				{ID: descriptor.Key + ".toggle", Verb: "toggle", Name: "Toggle"},
-				{ID: descriptor.Key + ".increase", Verb: "increase", Name: "Increase"},
 				{ID: descriptor.Key + ".decrease", Verb: "decrease", Name: "Decrease"},
+				{ID: descriptor.Key + ".increase", Verb: "increase", Name: "Increase"},
+				{ID: descriptor.Key + ".toggle", Verb: "toggle", Name: "Toggle"},
 			}
 			addControl(descriptor, "mosfet", actions)
 			continue

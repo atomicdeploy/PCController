@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"rayanlamp.local/app/internal/commands"
+	"pccontroller.local/desktop/internal/commands"
 )
 
 type integrationRegistrationRequest struct {

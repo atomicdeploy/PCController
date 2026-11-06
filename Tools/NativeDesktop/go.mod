@@ -1,4 +1,4 @@
-module rayanlamp.local/app
+module pccontroller.local/desktop
 
 go 1.25.8
 
@@ -13,11 +13,14 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/gorilla/websocket v1.5.3
+	github.com/hajimehoshi/go-mp3 v0.3.4
 	github.com/kettek/apng v0.0.0-20250827064933-2bb5f5fcf253
 	github.com/lxn/walk v0.0.0-20210112085537-c389da54e794
 	github.com/lxn/win v0.0.0-20210218163916-a377121e959e
+	github.com/mewkiz/flac v1.0.14
 	github.com/srwiley/oksvg v0.0.0-20221011165216-be6e8873101c
 	github.com/srwiley/rasterx v0.0.0-20220730225603-2ab79fcdd4ef
+	golang.org/x/image v0.23.0
 	golang.org/x/sys v0.47.0
 )
 
@@ -33,13 +36,15 @@ require (
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
+	github.com/icza/bitio v1.1.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.0 // indirect
 	github.com/mattn/go-runewidth v0.0.24 // indirect
+	github.com/mewkiz/pkg v0.0.0-20250417130911-3f050ff8c56d // indirect
+	github.com/mewpkg/term v0.0.0-20241026122259-37a80af23985 // indirect
 	github.com/mitchellh/hashstructure/v2 v2.0.2 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
-	golang.org/x/image v0.0.0-20211028202545-6944b10bf410 // indirect
 	golang.org/x/net v0.39.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/text v0.24.0 // indirect

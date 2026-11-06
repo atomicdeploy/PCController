@@ -19,7 +19,7 @@ type associationStore interface {
 
 type currentUserRegistryStore struct{}
 
-// Register creates the optional per-user rayan-lamp URI association. It does
+// Register creates the optional per-user pccontroller-desktop URI association. It does
 // not replace an association owned by a different executable.
 func Register(executable string) error {
 	return registerWithStore(currentUserRegistryStore{}, executable)

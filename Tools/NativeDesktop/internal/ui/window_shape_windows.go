@@ -5,8 +5,8 @@ package ui
 import (
 	"image"
 
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/winfx"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
 func (s *Shell) applyPresentedAlphaRegion(surface *image.RGBA) error {
@@ -45,7 +45,7 @@ func (s *Shell) applyConfiguredWindowCorners(ui config.UIConfig) error {
 	if transparentFramelessWindow(ui) {
 		// The next layered presentation supplies the exact alpha-derived HRGN.
 		// DWM rounding must be explicitly disabled first; otherwise Windows 11
-		// retains a full-HWND shadow behind the alpha-shaped lamp.
+		// retains a full-HWND shadow behind the alpha-shaped device.
 		return winfx.SetDWMWindowCornerPreference(s.HWND(), false)
 	}
 	if err := s.clearPresentedAlphaRegion(); err != nil {

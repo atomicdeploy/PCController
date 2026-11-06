@@ -17,7 +17,7 @@ function Assert-True {
 }
 
 $escape = [char]27
-$styled = Format-RayanLampTerminalMessage `
+$styled = Format-PCControllerDesktopTerminalMessage `
     -Level Success `
     -Message 'release ready' `
     -Ansi:$true `
@@ -25,26 +25,26 @@ $styled = Format-RayanLampTerminalMessage `
 Assert-True (($styled.ToCharArray() | Where-Object { $_ -eq $escape }).Count -eq 2) `
     'Styled status output contains an unexpected escape sequence.'
 $stripped = $styled -replace "$escape\[[0-9;]*m", ''
-$successGlyph = Get-RayanLampEmojiGlyph -Name Success
+$successGlyph = Get-PCControllerDesktopEmojiGlyph -Name Success
 Assert-True ($styled.StartsWith("$escape[1;32m$successGlyph OK$escape[0m ")) `
     'Styled success output does not use the expected SGR sequence and reset.'
 Assert-True ($stripped -eq "$successGlyph OK release ready") `
     'Styled output does not reduce to the expected readable text.'
 
-$plain = Format-RayanLampTerminalMessage `
+$plain = Format-PCControllerDesktopTerminalMessage `
     -Level Artifact `
-    -Message 'dist/RayanLamp.exe' `
+    -Message 'dist/PCControllerDesktop.exe' `
     -Ansi:$false `
     -Emoji:$false
 Assert-True (-not $plain.Contains([string]$escape)) `
     'Plain output leaked an ANSI escape character.'
-Assert-True ($plain -eq 'ARTIFACT: dist/RayanLamp.exe') `
+Assert-True ($plain -eq 'ARTIFACT: dist/PCControllerDesktop.exe') `
     'Plain output does not use the stable ASCII fallback.'
 
 foreach ($level in @(
     'Start', 'Step', 'Success', 'Info', 'Artifact', 'Warning'
 )) {
-    $ansiSample = Format-RayanLampTerminalMessage `
+    $ansiSample = Format-PCControllerDesktopTerminalMessage `
         -Level $level `
         -Message 'sample' `
         -Ansi:$true `
@@ -57,7 +57,7 @@ foreach ($level in @(
     Assert-True ($ansiSample -match "$escape\[[0-9;]+m.*$escape\[0m ") `
         "$level output has an incomplete or malformed SGR sequence."
 
-    $asciiSample = Format-RayanLampTerminalMessage `
+    $asciiSample = Format-PCControllerDesktopTerminalMessage `
         -Level $level `
         -Message 'sample' `
         -Ansi:$false `
@@ -68,27 +68,27 @@ foreach ($level in @(
         "$level plain output is not ASCII-safe."
 }
 
-$oldNoColor = Get-RayanLampEnvironmentValue -Name 'NO_COLOR'
+$oldNoColor = Get-PCControllerDesktopEnvironmentValue -Name 'NO_COLOR'
 $hadNoColor = $null -ne (Get-Item Env:NO_COLOR -ErrorAction SilentlyContinue)
-$oldForceColor = Get-RayanLampEnvironmentValue -Name 'FORCE_COLOR'
+$oldForceColor = Get-PCControllerDesktopEnvironmentValue -Name 'FORCE_COLOR'
 $hadForceColor = $null -ne (Get-Item Env:FORCE_COLOR -ErrorAction SilentlyContinue)
-$oldEmoji = Get-RayanLampEnvironmentValue -Name 'RAYANLAMP_EMOJI'
+$oldEmoji = Get-PCControllerDesktopEnvironmentValue -Name 'PCCONTROLLER_DESKTOP_EMOJI'
 $hadEmoji = $null -ne (
-    Get-Item Env:RAYANLAMP_EMOJI -ErrorAction SilentlyContinue
+    Get-Item Env:PCCONTROLLER_DESKTOP_EMOJI -ErrorAction SilentlyContinue
 )
-$oldTerm = Get-RayanLampEnvironmentValue -Name 'TERM'
+$oldTerm = Get-PCControllerDesktopEnvironmentValue -Name 'TERM'
 $hadTerm = $null -ne (Get-Item Env:TERM -ErrorAction SilentlyContinue)
 try {
     $env:NO_COLOR = '1'
     $env:FORCE_COLOR = '1'
-    Assert-True (-not (Test-RayanLampVT100)) `
+    Assert-True (-not (Test-PCControllerDesktopVT100)) `
         'NO_COLOR must override forced color.'
-    $env:RAYANLAMP_EMOJI = 'never'
-    Assert-True (-not (Test-RayanLampEmoji)) `
-        'RAYANLAMP_EMOJI=never must disable emoji.'
-    $env:RAYANLAMP_EMOJI = 'not-a-mode'
+    $env:PCCONTROLLER_DESKTOP_EMOJI = 'never'
+    Assert-True (-not (Test-PCControllerDesktopEmoji)) `
+        'PCCONTROLLER_DESKTOP_EMOJI=never must disable emoji.'
+    $env:PCCONTROLLER_DESKTOP_EMOJI = 'not-a-mode'
     $env:TERM = 'dumb'
-    Assert-True (-not (Test-RayanLampEmoji)) `
+    Assert-True (-not (Test-PCControllerDesktopEmoji)) `
         'An unknown emoji mode must fall back to automatic terminal policy.'
 }
 finally {
@@ -105,10 +105,10 @@ finally {
         Remove-Item Env:FORCE_COLOR -ErrorAction SilentlyContinue
     }
     if ($hadEmoji) {
-        $env:RAYANLAMP_EMOJI = $oldEmoji
+        $env:PCCONTROLLER_DESKTOP_EMOJI = $oldEmoji
     }
     else {
-        Remove-Item Env:RAYANLAMP_EMOJI -ErrorAction SilentlyContinue
+        Remove-Item Env:PCCONTROLLER_DESKTOP_EMOJI -ErrorAction SilentlyContinue
     }
     if ($hadTerm) {
         $env:TERM = $oldTerm
@@ -147,5 +147,5 @@ Get-ChildItem -LiteralPath $PSScriptRoot -Filter '*.ps1' -File |
     }
 Assert-True (-not $parseFailed) 'One or more PowerShell tools failed to parse.'
 
-Write-RayanLampStatus -Level Success `
+Write-PCControllerDesktopStatus -Level Success `
     -Message 'PowerShell parsing, VT100, reset, fallback, and NO_COLOR checks passed.'

@@ -11,7 +11,7 @@ import (
 func TestRegistrationSpecQuotesExecutableAndURI(t *testing.T) {
 	t.Parallel()
 
-	executable := makeTestExecutable(t, "Rayan Lamp.exe")
+	executable := makeTestExecutable(t, "PCController.exe")
 	spec, err := makeRegistrationSpec(executable)
 	if err != nil {
 		t.Fatal(err)
@@ -62,7 +62,7 @@ func TestRegistrationCommandRejectsUnsafeOrNonFilePaths(t *testing.T) {
 func TestRegistrationOwnershipComparisonIsCaseInsensitiveButExact(t *testing.T) {
 	t.Parallel()
 
-	owned := `"C:\Program Files\RayanLamp\RayanLamp.exe" /uri "%1"`
+	owned := `"C:\Program Files\PCControllerDesktop\PCControllerDesktop.exe" /uri "%1"`
 	if !registrationOwnedBy(
 		"  "+strings.ToUpper(owned)+"  ",
 		owned,
@@ -70,13 +70,13 @@ func TestRegistrationOwnershipComparisonIsCaseInsensitiveButExact(t *testing.T) 
 		t.Fatal("equivalent Windows registration was not recognized")
 	}
 	if registrationOwnedBy(
-		`"C:\Other\RayanLamp.exe" /uri "%1"`,
+		`"C:\Other\PCControllerDesktop.exe" /uri "%1"`,
 		owned,
 	) {
 		t.Fatal("different executable was recognized as owner")
 	}
 	if registrationOwnedBy(
-		`"C:\Program Files\RayanLamp\RayanLamp.exe" "%1"`,
+		`"C:\Program Files\PCControllerDesktop\PCControllerDesktop.exe" "%1"`,
 		owned,
 	) {
 		t.Fatal("different activation command was recognized as owner")
@@ -86,7 +86,7 @@ func TestRegistrationOwnershipComparisonIsCaseInsensitiveButExact(t *testing.T) 
 func TestOwnershipErrorSupportsErrorsIs(t *testing.T) {
 	t.Parallel()
 
-	err := &OwnershipError{RegisteredCommand: `"C:\Other\RayanLamp.exe" "%1"`}
+	err := &OwnershipError{RegisteredCommand: `"C:\Other\PCControllerDesktop.exe" "%1"`}
 	if !errors.Is(err, ErrRegistrationOwned) {
 		t.Fatalf("OwnershipError does not wrap ErrRegistrationOwned: %v", err)
 	}

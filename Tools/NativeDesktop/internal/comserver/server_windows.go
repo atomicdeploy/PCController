@@ -16,7 +16,7 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
-	"rayanlamp.local/app/internal/ipc"
+	"pccontroller.local/desktop/internal/ipc"
 )
 
 const (
@@ -189,7 +189,7 @@ func (e hresultError) Error() string {
 	return fmt.Sprintf("comserver: %s failed with HRESULT 0x%08X", e.operation, e.code)
 }
 
-// Run registers RayanLamp's class factory for the lifetime of ctx and pumps a
+// Run registers PCControllerDesktop's class factory for the lifetime of ctx and pumps a
 // single-threaded COM apartment on a locked OS thread. It also exits after the
 // last activated object and LockServer reference are released.
 func Run(ctx context.Context, handler ipc.Handler) error {
@@ -864,7 +864,7 @@ func fillException(info *exceptionInfo, err error) {
 		return
 	}
 	*info = exceptionInfo{ResultCode: -2147467259} // E_FAIL
-	source, _ := allocateBSTR("RayanLamp")
+	source, _ := allocateBSTR("PCControllerDesktop")
 	description := "Automation command failed"
 	if err != nil {
 		description = err.Error()

@@ -5,7 +5,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'terminal.ps1')
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$destination = 'AtomicDeploy/RayanLamp'
+$destination = 'AtomicDeploy/PCController'
 $remoteURL = "https://github.com/$destination.git"
 
 function Invoke-Checked {
@@ -36,7 +36,7 @@ try {
     $repos = (Invoke-Checked gh @('repo', 'list', 'AtomicDeploy', '--limit', '1000', '--json', 'nameWithOwner')) -join "`n"
     $exists = @($repos | ConvertFrom-Json | Where-Object { $_.nameWithOwner -ieq $destination }).Count -gt 0
     if (-not $exists) {
-        Invoke-Checked gh @('repo', 'create', $destination, '--public', '--description', 'Native Windows lamp controller with live glass UI, TUI and synchronized web dashboard')
+        Invoke-Checked gh @('repo', 'create', $destination, '--public', '--description', 'Native Windows device controller with live glass UI, TUI and synchronized web dashboard')
     }
     $visibility = Invoke-Checked gh @('repo', 'view', $destination, '--json', 'visibility', '--jq', '.visibility')
     if ($visibility -ne 'PUBLIC') { throw 'Destination is not public; refusing to change its visibility implicitly.' }
@@ -49,12 +49,12 @@ try {
     } else {
         Invoke-Checked git @('remote', 'add', 'origin', $remoteURL)
     }
-    Write-RayanLampStatus -Level Start -Message "Publishing main to public $destination."
+    Write-PCControllerDesktopStatus -Level Start -Message "Publishing main to public $destination."
     Invoke-Checked git @('push', '--set-upstream', 'origin', 'main')
     $local = Invoke-Checked git @('rev-parse', 'HEAD')
     $remote = Invoke-Checked git @('ls-remote', 'origin', 'refs/heads/main')
     if (($remote -split '\s+')[0] -ne $local) { throw 'Remote main SHA does not match local HEAD.' }
-    Write-RayanLampStatus -Level Success -Message "Verified remote main at $local. Check GitHub Actions for CI results."
+    Write-PCControllerDesktopStatus -Level Success -Message "Verified remote main at $local. Check GitHub Actions for CI results."
 } finally {
     Pop-Location
 }

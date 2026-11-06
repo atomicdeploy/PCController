@@ -13,7 +13,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"rayanlamp.local/app/internal/design"
+	"pccontroller.local/desktop/internal/design"
 )
 
 const (
@@ -630,38 +630,9 @@ func updateDialogFieldRegion(hwnd uintptr) {
 	if hwnd == 0 || !isWindow(hwnd) {
 		return
 	}
-	var window dialogFieldRect
-	ok, _, _ := dialogFieldGetWindowRect.Call(
-		hwnd,
-		uintptr(unsafe.Pointer(&window)),
-	)
-	width := window.Right - window.Left
-	height := window.Bottom - window.Top
-	if ok == 0 || width < 1 || height < 1 {
-		return
-	}
-	radius := dialogFieldRadius(
-		width,
-		height,
-		dialogFieldTraits(dialogWindowStyle(hwnd)).Multiline,
-		dialogFieldDPI(hwnd),
-	)
-	region, _, _ := dialogFieldCreateRoundRectRgn.Call(
-		0,
-		0,
-		uintptr(width+1),
-		uintptr(height+1),
-		uintptr(radius*2),
-		uintptr(radius*2),
-	)
-	if region == 0 {
-		return
-	}
-	applied, _, _ := dialogFieldSetWindowRgn.Call(hwnd, region, 1)
-	if applied == 0 {
-		_, _, _ = dialogFieldDeleteObject.Call(region)
-	}
-	runtime.KeepAlive(&window)
+	// A rounded HRGN discards all fractional edge coverage. Chrome now blends
+	// against the aligned parent material inside the rectangular native HWND.
+	_, _, _ = dialogFieldSetWindowRgn.Call(hwnd, 0, 1)
 }
 
 func paintDialogFieldChrome(hwnd, suppliedDC uintptr) bool {
@@ -744,6 +715,7 @@ func paintDialogFieldChrome(hwnd, suppliedDC uintptr) bool {
 
 	_, _, _ = dialogFieldSetBkMode.Call(dc, dialogFieldBkTransparent)
 	rect := dialogFieldRect{Right: width, Bottom: height}
+	restoreDialogAACorners(hwnd, dc, width, height, radius, state.Dark)
 	strokeDialogFieldRoundRect(dc, rect, border, radius, stroke)
 
 	// The inset highlight gives the field depth without obscuring native edit
@@ -778,6 +750,9 @@ func strokeDialogFieldRoundRect(
 	radius, stroke int32,
 ) {
 	if dc == 0 || rect.Right <= rect.Left || rect.Bottom <= rect.Top {
+		return
+	}
+	if drawDialogAARoundRect(dc, dialogButtonRect{Left: rect.Left, Top: rect.Top, Right: rect.Right, Bottom: rect.Bottom}, 0, 0, color, radius, max(1, stroke), false) {
 		return
 	}
 	pen, _, _ := dialogFieldGetStockObject.Call(dialogFieldDCPen)
@@ -908,6 +883,7 @@ func releaseDialogFieldPaintBuffer(hwnd uintptr) {
 	if hwnd == 0 {
 		return
 	}
+	releaseDialogRasterCache()
 	dialogFieldBufferMu.Lock()
 	buffer := dialogFieldBuffers[hwnd]
 	delete(dialogFieldBuffers, hwnd)

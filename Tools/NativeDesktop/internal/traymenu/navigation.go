@@ -13,6 +13,12 @@ type navigator struct {
 func newNavigator(items []Item) navigator {
 	n := navigator{items: items, selected: -1}
 	n.selected = n.first()
+	for index, item := range items {
+		if item.Default && n.selectable(index) {
+			n.selected = index
+			break
+		}
+	}
 	return n
 }
 

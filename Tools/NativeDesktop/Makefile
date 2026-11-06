@@ -25,7 +25,7 @@ windows-sdk-cross:
 
 verify-windows:
 	go run ./tools/verify-pe \
-		--file ./dist/RayanLamp.exe \
+		--file ./dist/PCControllerDesktop.exe \
 		--arch "$(ARCH)" \
 		--edition "$(EDITION)" \
 		--build-number "$(BUILD_NUMBER)"

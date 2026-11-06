@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	browserSessionCookie = "RayanLampSession"
+	browserSessionCookie = "PCControllerDesktopSession"
 	browserSessionTTL    = 8 * time.Hour
 	maxBrowserSessions   = 64
 )

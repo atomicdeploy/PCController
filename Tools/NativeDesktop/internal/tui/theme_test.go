@@ -11,7 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"rayanlamp.local/app/internal/design"
+	"pccontroller.local/desktop/internal/design"
 )
 
 func TestThemePaletteUsesCanonicalDesignTokens(t *testing.T) {

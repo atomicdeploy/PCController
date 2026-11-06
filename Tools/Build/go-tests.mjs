@@ -46,6 +46,7 @@ function parseArguments(argv) {
 		packages: [],
 		run: '',
 		retest: false,
+		keepGoing: false,
 		dryRun: false,
 		help: false
 	}
@@ -63,6 +64,7 @@ function parseArguments(argv) {
 			case '--package': options.packages.push(take(argument)); break
 			case '--run': options.run = take(argument); break
 			case '--retest': options.retest = true; break
+			case '--keep-going': options.keepGoing = true; break
 			case '--dry-run': options.dryRun = true; break
 			case '--help':
 			case '-h': options.help = true; break
@@ -83,6 +85,7 @@ Usage: node Tools/Build/go-tests.mjs [options]
   --package NAME Only test this import path or module-relative package (repeatable)
   --run REGEXP   Only run tests matching this Go test expression
   --retest       Re-run unchanged binaries without rebuilding them
+  --keep-going   Collect all package failures; still fail and never cache a failing pass
   --dry-run      Show the stable plan without compiling or running tests`
 }
 
@@ -326,10 +329,10 @@ export function main(argv = process.argv.slice(2), env = process.env) {
 		} else {
 			process.stdout.write('♻️ Reusing unchanged stable test executables.\n')
 		}
-		for (const item of plan) {
+		runTestPlan(plan, item => {
 			process.stdout.write(`🧪 ${item.importPath}\n`)
 			run(item.binary, ['-test.count=1', ...(options.run ? ['-test.run', options.run] : [])], { cwd: item.directory, env })
-		}
+		}, options.keepGoing)
 		writeJSON(cachePath, {
 			sourceSHA256: identity.sha256,
 			goVersion: identity.goVersion,
@@ -339,6 +342,17 @@ export function main(argv = process.argv.slice(2), env = process.env) {
 		process.stdout.write(`✅ Stable-path Go tests passed; cache ${cachePath}\n`)
 		return 0
 	})
+}
+
+export function runTestPlan(plan, execute, keepGoing = false) {
+	const failures = []
+	for (const item of plan) {
+		try { execute(item) } catch (error) {
+			if (!keepGoing) throw error
+			failures.push(`${item.importPath}: ${error.message}`)
+		}
+	}
+	if (failures.length) throw new Error(`${failures.length} Go test package(s) failed:\n${failures.join('\n')}`)
 }
 
 const isMain = process.argv[1] && resolve(process.argv[1]) === resolve(SCRIPT)

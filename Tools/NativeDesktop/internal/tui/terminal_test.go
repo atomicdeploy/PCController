@@ -14,7 +14,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
-	"rayanlamp.local/app/internal/deviceterminal"
+	"pccontroller.local/desktop/internal/deviceterminal"
 )
 
 type fakeTerminalTransport struct {
@@ -43,7 +43,7 @@ func newFakeTerminalTransport() *fakeTerminalTransport {
 		fakeTransport: &fakeTransport{},
 		terminal: deviceterminal.Snapshot{
 			State:   deviceterminal.StateDisconnected,
-			Host:    "rayanlamp.local",
+			Host:    "pccontroller-desktop.local",
 			Port:    deviceterminal.DefaultPort,
 			Session: 1,
 		},
@@ -397,12 +397,12 @@ func TestAPITransportTerminalRoutes(t *testing.T) {
 		}
 		if request.URL.Path == "/terminal/output" {
 			_, _ = io.WriteString(writer, `{"ok":true,"result":{
-				"snapshot":{"state":"connected","host":"lamp","port":23,"session":7},
+				"snapshot":{"state":"connected","host":"device","port":23,"session":7},
 				"chunks":[]}}`)
 			return
 		}
 		_, _ = io.WriteString(writer, `{"ok":true,"result":{
-			"state":"connected","host":"lamp","port":23,"session":7}}`)
+			"state":"connected","host":"device","port":23,"session":7}}`)
 	}))
 	defer server.Close()
 

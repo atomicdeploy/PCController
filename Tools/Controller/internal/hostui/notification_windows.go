@@ -18,17 +18,18 @@ import (
 )
 
 type windowsNotifier struct {
-	mu       sync.RWMutex
-	appID    string
-	logoURI  string
-	logoErr  error
-	iconURIs map[string]string
-	iconErrs map[string]error
-	status   NotificationStatus
-	deliver  func(context.Context, []byte, string) error
-	balloon  func(context.Context, Notification, error) error
-	dialog   func(context.Context, Notification, error) error
-	gate     chan struct{}
+	preference string
+	mu         sync.RWMutex
+	appID      string
+	logoURI    string
+	logoErr    error
+	iconURIs   map[string]string
+	iconErrs   map[string]error
+	status     NotificationStatus
+	deliver    func(context.Context, []byte, string) error
+	balloon    func(context.Context, Notification, error) error
+	dialog     func(context.Context, Notification, error) error
+	gate       chan struct{}
 }
 
 func newPlatformNotifier(options NotifierOptions) Notifier {
@@ -39,16 +40,17 @@ func newPlatformNotifier(options NotifierOptions) Notifier {
 	logoURI, logoErr := resolveWindowsToastLogo(options.LogoPath)
 	iconURIs, iconErrs := resolveWindowsToastEventIcons(options.LogoPath)
 	return &windowsNotifier{
-		appID:    appID,
-		logoURI:  logoURI,
-		logoErr:  logoErr,
-		iconURIs: iconURIs,
-		iconErrs: iconErrs,
-		status:   NotificationStatus{Supported: true, Available: true, Branded: logoErr == nil, Backend: "winrt-toast"},
-		deliver:  deliverWindowsToast,
-		balloon:  showWindowsBalloon,
-		dialog:   showWindowsNotificationDialog,
-		gate:     make(chan struct{}, 1),
+		preference: strings.ToLower(strings.TrimSpace(options.Delivery)),
+		appID:      appID,
+		logoURI:    logoURI,
+		logoErr:    logoErr,
+		iconURIs:   iconURIs,
+		iconErrs:   iconErrs,
+		status:     NotificationStatus{Supported: true, Available: true, Branded: logoErr == nil, Backend: "winrt-toast"},
+		deliver:    deliverWindowsToast,
+		balloon:    showWindowsBalloon,
+		dialog:     showWindowsNotificationDialog,
+		gate:       make(chan struct{}, 1),
 	}
 }
 
@@ -127,6 +129,9 @@ func resolveWindowsToastLogo(value string) (string, error) {
 }
 
 func (notifier *windowsNotifier) Notify(ctx context.Context, notification Notification) error {
+	if notifier.preference == "off" {
+		return nil
+	}
 	select {
 	case notifier.gate <- struct{}{}:
 		defer func() { <-notifier.gate }()
@@ -138,7 +143,10 @@ func (notifier *windowsNotifier) Notify(ctx context.Context, notification Notifi
 	if notifier.logoErr != nil {
 		err = notifier.logoErr
 	}
-	if icon := strings.ToLower(strings.TrimSpace(notification.Icon)); err == nil && icon != "" {
+	if notifier.preference == "balloon" {
+		err, imageURI = nil, ""
+	}
+	if icon := strings.ToLower(strings.TrimSpace(notification.Icon)); notifier.preference != "balloon" && err == nil && icon != "" {
 		var ok bool
 		imageURI, ok = notifier.iconURIs[icon]
 		if !ok {
@@ -153,14 +161,19 @@ func (notifier *windowsNotifier) Notify(ctx context.Context, notification Notifi
 	if err == nil {
 		payload, err = buildToastXML(notification, imageURI)
 	}
-	if err == nil {
-		err = notifier.deliver(ctx, payload, notifier.appID)
-	}
 	backend := "winrt-toast"
+	if err == nil {
+		if notifier.preference == "balloon" {
+			backend = "legacy-balloon"
+			err = notifier.balloon(ctx, notification, nil)
+		} else {
+			err = notifier.deliver(ctx, payload, notifier.appID)
+		}
+	}
 	degraded := false
 	branded := true
 	fallbackReason := ""
-	if err != nil {
+	if err != nil && notifier.preference != "toast" && notifier.preference != "balloon" {
 		fallbackReason = err.Error()
 		balloonErr := notifier.balloon(ctx, notification, err)
 		if balloonErr == nil {

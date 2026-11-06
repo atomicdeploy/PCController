@@ -10,7 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"rayanlamp.local/app/sdk"
+	"pccontroller.local/desktop/sdk"
 )
 
 const (
@@ -71,7 +71,7 @@ func executeWith(
 		return failure(
 			StatusInternal,
 			"internal_error",
-			"RayanLamp SDK client factory is unavailable",
+			"PCControllerDesktop SDK client factory is unavailable",
 		)
 	}
 	if len(method) == 0 || len(method) > 64 ||
@@ -144,7 +144,7 @@ func executeWith(
 		return failure(
 			StatusInternal,
 			"internal_error",
-			"unable to encode RayanLamp SDK response",
+			"unable to encode PCControllerDesktop SDK response",
 		)
 	}
 	return StatusOK, data
@@ -184,7 +184,7 @@ func transportFailure(err error) (int32, []byte) {
 	switch {
 	case errors.Is(err, context.DeadlineExceeded),
 		errors.Is(err, context.Canceled):
-		return failure(StatusTimeout, "timeout", "RayanLamp SDK call timed out")
+		return failure(StatusTimeout, "timeout", "PCControllerDesktop SDK call timed out")
 	case errors.Is(err, sdk.ErrUnsupported):
 		return failure(
 			StatusUnsupported,
@@ -195,7 +195,7 @@ func transportFailure(err error) (int32, []byte) {
 		return failure(
 			StatusUnavailable,
 			"unavailable",
-			"the authoritative RayanLamp primary is unavailable",
+			"the authoritative PCControllerDesktop primary is unavailable",
 		)
 	}
 }

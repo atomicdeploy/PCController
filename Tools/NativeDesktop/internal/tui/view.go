@@ -9,7 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"rayanlamp.local/app/internal/model"
+	"pccontroller.local/desktop/internal/model"
 )
 
 const (
@@ -20,7 +20,7 @@ const (
 
 func (m *Model) View() tea.View {
 	m.buttonRegions = m.buttonRegions[:0]
-	m.lampRegion = region{}
+	m.deviceRegion = region{}
 	if m.terminalActive() {
 		return m.renderTerminalOverlay()
 	}
@@ -65,22 +65,22 @@ func (m *Model) View() tea.View {
 		panelHeight := min(mainPanelHeight, mainBudget)
 		leftWidth := max(31, outerWidth*2/5)
 		rightWidth := outerWidth - leftWidth - 1
-		lamp := m.renderLampPanel(leftWidth, panelHeight)
+		device := m.renderDevicePanel(leftWidth, panelHeight)
 		controlX := offsetX + leftWidth + 1
-		lampX := offsetX
+		deviceX := offsetX
 		if m.rtl() {
 			controlX = offsetX
-			lampX = offsetX + rightWidth + 1
+			deviceX = offsetX + rightWidth + 1
 		}
 		controls, regions := m.renderControlPanel(rightWidth, panelHeight, controlX, mainY)
 		m.buttonRegions = append(m.buttonRegions, regions...)
-		m.lampRegion = region{
-			x: lampX, y: mainY,
+		m.deviceRegion = region{
+			x: deviceX, y: mainY,
 			width: leftWidth, height: panelHeight,
 		}
-		joined := lipgloss.JoinHorizontal(lipgloss.Top, lamp, " ", controls)
+		joined := lipgloss.JoinHorizontal(lipgloss.Top, device, " ", controls)
 		if m.rtl() {
-			joined = lipgloss.JoinHorizontal(lipgloss.Top, controls, " ", lamp)
+			joined = lipgloss.JoinHorizontal(lipgloss.Top, controls, " ", device)
 		}
 		sections = append(sections, joined)
 	} else {
@@ -88,14 +88,14 @@ func (m *Model) View() tea.View {
 			10,
 			m.height-headerHeight-helpHeight-noticeHeight-3,
 		)
-		compact, regions, lampRegion := m.renderCompactPanel(
+		compact, regions, deviceRegion := m.renderCompactPanel(
 			outerWidth,
 			available,
 			offsetX,
 			mainY,
 		)
 		m.buttonRegions = append(m.buttonRegions, regions...)
-		m.lampRegion = lampRegion
+		m.deviceRegion = deviceRegion
 		sections = append(sections, compact)
 	}
 
@@ -141,7 +141,7 @@ func (m *Model) configuredView(content string) tea.View {
 	if m.options.Mouse {
 		view.MouseMode = tea.MouseModeCellMotion
 	}
-	view.WindowTitle = m.text("Rayan Lamp") + " · " + m.text("Terminal")
+	view.WindowTitle = m.text("PCController") + " · " + m.text("Terminal")
 	view.ForegroundColor = m.styles.palette.text
 	view.BackgroundColor = m.styles.palette.background
 	if m.settingsActive() ||
@@ -255,14 +255,14 @@ func (m *Model) renderMicroView(width, height int) tea.View {
 		return m.configuredView(strings.Join(lines, "\n"))
 	}
 
-	lines := []string{microIdentity(m.text("RAYANLAMP"), width)}
+	lines := []string{microIdentity(m.text("PCController"), width)}
 	if height >= 2 {
-		state := m.lampStateText()
+		state := m.deviceStateText()
 		if m.controllerError != "" {
 			state = m.text("Offline")
 		}
 		lines = append(lines, fitText(state, width))
-		m.lampRegion = region{x: 0, y: 1, width: width, height: 1}
+		m.deviceRegion = region{x: 0, y: 1, width: width, height: 1}
 	}
 	if height >= 3 {
 		lines = append(lines, fitText(m.text("t toggle · o on · f off"), width))
@@ -301,7 +301,7 @@ func (m *Model) renderUltraCompactView(width, offsetX int) tea.View {
 		Foreground(stateTextColor).
 		Background(stateColor).
 		Render(strings.ToUpper(state))
-	title := styleOn(m.styles.title, background).Render(m.text("RAYAN LAMP"))
+	title := styleOn(m.styles.title, background).Render(m.text("PCController"))
 	gap := max(1, width-lipgloss.Width(title)-lipgloss.Width(statePill))
 	first := title + backgroundRun(background, strings.Repeat(" ", gap)) + statePill
 	if m.rtl() {
@@ -311,14 +311,14 @@ func (m *Model) renderUltraCompactView(width, offsetX int) tea.View {
 		first = title
 	}
 
-	lamp := m.renderLampStatusOn(background)
-	lampLine := placeHorizontalOn(
+	device := m.renderDeviceStatusOn(background)
+	deviceLine := placeHorizontalOn(
 		width,
 		lipgloss.Center,
-		styleOn(m.styles.value, background).Render("◉  ")+lamp,
+		styleOn(m.styles.value, background).Render("◉  ")+device,
 		background,
 	)
-	m.lampRegion = region{x: offsetX, y: 2, width: width, height: 1}
+	m.deviceRegion = region{x: offsetX, y: 2, width: width, height: 1}
 
 	specs := []buttonSpec{
 		{ActionToggle, m.text("T TOGGLE"), m.styles.buttonHot},
@@ -334,10 +334,10 @@ func (m *Model) renderUltraCompactView(width, offsetX int) tea.View {
 	m.buttonRegions = append(m.buttonRegions, regions...)
 
 	lines := []string{
-		fitStyledLine(first, width, m.text("RAYAN LAMP")),
+		fitStyledLine(first, width, m.text("PCController")),
 		styleOn(m.styles.muted, background).
 			Render(fitText(m.transport.Label(), width)),
-		lampLine,
+		deviceLine,
 		buttons,
 	}
 	if m.height >= 6 {
@@ -384,7 +384,7 @@ func (m *Model) renderHeader(width int) string {
 		Foreground(stateTextColor).
 		Background(stateColor).
 		Render("● " + strings.ToUpper(state))
-	title := styleOn(m.styles.title, background).Render("◉  " + m.text("RAYAN / LAMP"))
+	title := styleOn(m.styles.title, background).Render("◉  " + m.text("PCController"))
 
 	innerWidth := max(8, width-m.styles.header.GetHorizontalFrameSize())
 	gap := max(1, innerWidth-lipgloss.Width(title)-lipgloss.Width(connection))
@@ -397,7 +397,7 @@ func (m *Model) renderHeader(width int) string {
 			title
 	}
 	if lipgloss.Width(firstLine) > innerWidth {
-		firstLine = styleOn(m.styles.title, background).Render(m.text("RAYAN LAMP")) +
+		firstLine = styleOn(m.styles.title, background).Render(m.text("PCController")) +
 			backgroundRun(background, "  ") +
 			connection
 	}
@@ -411,20 +411,20 @@ func (m *Model) renderHeader(width int) string {
 	return m.styles.header.Width(width).Render(firstLine + "\n" + secondLine)
 }
 
-func (m *Model) renderLampPanel(width, height int) string {
+func (m *Model) renderDevicePanel(width, height int) string {
 	background := m.styles.palette.surfaceAlt
 	innerWidth := max(8, width-m.styles.panelHot.GetHorizontalFrameSize())
-	title := styleOn(m.styles.panelTitle, background).Render(m.text("LAMP"))
+	title := styleOn(m.styles.panelTitle, background).Render(m.text("DEVICE"))
 	art := placeHorizontalOn(
 		innerWidth,
 		lipgloss.Center,
-		m.renderLampArt(false),
+		m.renderDeviceArt(false),
 		background,
 	)
 	status := placeHorizontalOn(
 		innerWidth,
 		lipgloss.Center,
-		m.renderLampStatusOn(background),
+		m.renderDeviceStatusOn(background),
 		background,
 	)
 	hint := placeHorizontalOn(
@@ -464,12 +464,12 @@ func (m *Model) renderCompactPanel(
 	style := m.styles.panelHot.Width(width).Height(height)
 	innerWidth := max(8, width-style.GetHorizontalFrameSize())
 	title := styleOn(m.styles.panelTitle, background).
-		Render(m.text("LAMP CONTROL"))
+		Render(m.text("DEVICE CONTROL"))
 
 	var lines []string
 	lines = append(lines, title)
 	if innerWidth >= 48 && height >= 12 {
-		art := m.renderLampArt(true)
+		art := m.renderDeviceArt(true)
 		info, local := m.renderControlContent(
 			max(26, innerWidth-17),
 			background,
@@ -489,13 +489,13 @@ func (m *Model) renderCompactPanel(
 			local[index].x += contentX
 			local[index].y += contentY
 		}
-		lamp := region{
+		device := region{
 			x:      absoluteX + 3,
 			y:      absoluteY + 3,
 			width:  min(15, innerWidth),
 			height: min(5, max(1, height-4)),
 		}
-		return style.Render(strings.Join(lines, "\n")), local, lamp
+		return style.Render(strings.Join(lines, "\n")), local, device
 	}
 
 	lines = append(
@@ -503,7 +503,7 @@ func (m *Model) renderCompactPanel(
 		placeHorizontalOn(
 			innerWidth,
 			lipgloss.Center,
-			m.renderLampStatusOn(background),
+			m.renderDeviceStatusOn(background),
 			background,
 		),
 	)
@@ -533,13 +533,13 @@ func (m *Model) renderCompactPanel(
 		local[index].x += contentX
 		local[index].y += contentY
 	}
-	lamp := region{
+	device := region{
 		x:      absoluteX + 3,
 		y:      absoluteY + 3,
 		width:  innerWidth,
 		height: 1,
 	}
-	return style.Render(strings.Join(lines, "\n")), local, lamp
+	return style.Render(strings.Join(lines, "\n")), local, device
 }
 
 func (m *Model) renderControlContent(
@@ -683,7 +683,7 @@ func (m *Model) renderActivityPanel(width, height int) string {
 	return m.styles.panel.Width(width).Height(height).Render(content)
 }
 
-func (m *Model) renderLampArt(compact bool) string {
+func (m *Model) renderDeviceArt(compact bool) string {
 	symbol := "?"
 	color := m.styles.palette.bad
 	glow := "·"
@@ -743,12 +743,12 @@ func (m *Model) renderLampArt(compact bool) string {
 		Render(art)
 }
 
-func (m *Model) renderLampStatus() string {
-	return m.renderLampStatusOn(m.styles.palette.background)
+func (m *Model) renderDeviceStatus() string {
+	return m.renderDeviceStatusOn(m.styles.palette.background)
 }
 
-func (m *Model) renderLampStatusOn(background color.Color) string {
-	label := m.lampStateText()
+func (m *Model) renderDeviceStatusOn(background color.Color) string {
+	label := m.deviceStateText()
 	if m.controllerError != "" {
 		label += " · " + m.text("LAST KNOWN")
 	}
@@ -837,7 +837,7 @@ func (m *Model) renderKVOn(
 			Render(value)
 }
 
-func (m *Model) lampStateText() string {
+func (m *Model) deviceStateText() string {
 	switch m.snapshot.State {
 	case model.StateOn:
 		return m.text("On")
@@ -873,7 +873,7 @@ func fitStyledLine(value string, width int, fallback ...string) string {
 	}
 	// Styled lines are only used in the tiny header. Falling back to the plain
 	// product name avoids slicing ANSI escape sequences.
-	plain := "RAYAN LAMP"
+	plain := "PCController"
 	if len(fallback) != 0 {
 		plain = fallback[0]
 	}

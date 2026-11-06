@@ -8,7 +8,7 @@ func setColorCapableTestTerminal(t *testing.T) {
 	t.Helper()
 	for _, name := range []string{
 		"TERM", "NO_COLOR", "NO_EMOJI", "CLICOLOR", "CLICOLOR_FORCE",
-		"FORCE_COLOR", "RAYANLAMP_FORCE_COLOR", "RAYANLAMP_EMOJI",
+		"FORCE_COLOR", "PCCONTROLLER_DESKTOP_FORCE_COLOR", "PCCONTROLLER_DESKTOP_EMOJI",
 	} {
 		t.Setenv(name, "")
 	}

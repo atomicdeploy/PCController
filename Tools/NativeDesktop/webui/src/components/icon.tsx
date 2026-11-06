@@ -1,7 +1,7 @@
 import type { JSX } from "preact";
 
 export type IconName =
-  | "lamp"
+  | "device"
   | "settings"
   | "diagnostics"
   | "about"
@@ -26,7 +26,7 @@ export type IconName =
   | "info";
 
 const paths: Record<IconName, JSX.Element> = {
-  lamp: (
+  device: (
     <>
       <path d="M12 2.75a6.75 6.75 0 0 0-4.2 12.03c.75.6 1.2 1.3 1.3 2.22h5.8c.1-.92.55-1.62 1.3-2.22A6.75 6.75 0 0 0 12 2.75Z" />
       <path d="M9.25 19h5.5M10 21.25h4" />

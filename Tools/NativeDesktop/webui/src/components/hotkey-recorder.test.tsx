@@ -36,7 +36,7 @@ describe("hotkey chord recorder", () => {
   it("shows existing shortcuts as individual key chips", () => {
     const { container } = render(
       <HotkeyRecorder
-        label="Toggle lamp"
+        label="Toggle device"
         value="Ctrl+Alt+L"
         onCommit={() => undefined}
       />
@@ -53,14 +53,14 @@ describe("hotkey chord recorder", () => {
   it("previews modifiers locally and commits only a completed canonical chord", () => {
     const onCommit = vi.fn();
     render(
-      <HotkeyRecorder label="Toggle lamp" value="" onCommit={onCommit} />
+      <HotkeyRecorder label="Toggle device" value="" onCommit={onCommit} />
     );
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Record Toggle lamp shortcut" })
+      screen.getByRole("button", { name: "Record Toggle device shortcut" })
     );
     const recorder = screen.getByRole("button", {
-      name: "Cancel recording for Toggle lamp"
+      name: "Cancel recording for Toggle device"
     });
 
     fireEvent.keyDown(recorder, {
@@ -87,17 +87,17 @@ describe("hotkey chord recorder", () => {
     const onCommit = vi.fn();
     const view = render(
       <HotkeyRecorder
-        label="Toggle lamp"
+        label="Toggle device"
         value="Ctrl+Alt+L"
         onCommit={onCommit}
       />
     );
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Record Toggle lamp shortcut" })
+      screen.getByRole("button", { name: "Record Toggle device shortcut" })
     );
     const recorder = screen.getByRole("button", {
-      name: "Cancel recording for Toggle lamp"
+      name: "Cancel recording for Toggle device"
     });
     fireEvent.keyDown(recorder, {
       key: "Control",
@@ -107,7 +107,7 @@ describe("hotkey chord recorder", () => {
 
     view.rerender(
       <HotkeyRecorder
-        label="Toggle lamp"
+        label="Toggle device"
         value="Ctrl+Shift+N"
         onCommit={onCommit}
       />
@@ -115,7 +115,7 @@ describe("hotkey chord recorder", () => {
 
     expect(onCommit).not.toHaveBeenCalled();
     expect(
-      screen.getByRole("button", { name: "Record Toggle lamp shortcut" })
+      screen.getByRole("button", { name: "Record Toggle device shortcut" })
     ).toBeTruthy();
     expect(screen.getByRole("status").textContent).toContain(
       "Shortcut changed elsewhere. Recording cancelled."
@@ -126,7 +126,7 @@ describe("hotkey chord recorder", () => {
 
     view.rerender(
       <HotkeyRecorder
-        label="Toggle lamp"
+        label="Toggle device"
         value="Ctrl+Alt+T"
         onCommit={onCommit}
       />
@@ -142,7 +142,7 @@ describe("hotkey chord recorder", () => {
       const [current, setCurrent] = useState("Ctrl+Alt+L");
       return (
         <HotkeyRecorder
-          label="Toggle lamp"
+          label="Toggle device"
           value={current}
           onCommit={(next) => {
             onCommit(next);
@@ -154,11 +154,11 @@ describe("hotkey chord recorder", () => {
     render(<ControlledRecorder />);
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Record Toggle lamp shortcut" })
+      screen.getByRole("button", { name: "Record Toggle device shortcut" })
     );
     fireEvent.keyDown(
       screen.getByRole("button", {
-        name: "Cancel recording for Toggle lamp"
+        name: "Cancel recording for Toggle device"
       }),
       {
         key: "k",
@@ -263,7 +263,7 @@ describe("hotkey chord recorder", () => {
       <HotkeyRecorder
         label="Show window"
         value=""
-        conflicts={[{ label: "Toggle lamp", value: "Ctrl+Alt+L" }]}
+        conflicts={[{ label: "Toggle device", value: "Ctrl+Alt+L" }]}
         onCommit={onCommit}
       />
     );
@@ -282,7 +282,7 @@ describe("hotkey chord recorder", () => {
     });
 
     expect(screen.getByRole("alert").textContent).toContain(
-      "Already assigned to Toggle lamp"
+      "Already assigned to Toggle device"
     );
     expect(onCommit).not.toHaveBeenCalled();
 
@@ -351,7 +351,7 @@ describe("hotkey chord recorder", () => {
     }));
     render(
       <HotkeyRecorder
-        label="Toggle lamp"
+        label="Toggle device"
         value="Ctrl+Alt+L"
         captureActive
         onCaptureStart={() => ({ active: true })}
@@ -362,11 +362,11 @@ describe("hotkey chord recorder", () => {
     );
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Record Toggle lamp shortcut" })
+      screen.getByRole("button", { name: "Record Toggle device shortcut" })
     );
     fireEvent.keyDown(
       screen.getByRole("button", {
-        name: "Cancel recording for Toggle lamp"
+        name: "Cancel recording for Toggle device"
       }),
       { key: "k", code: "KeyK", ctrlKey: true, shiftKey: true }
     );
@@ -381,7 +381,7 @@ describe("hotkey chord recorder", () => {
     expect(onCaptureStop).not.toHaveBeenCalled();
     expect(
       screen.getByRole("button", {
-        name: "Cancel recording for Toggle lamp"
+        name: "Cancel recording for Toggle device"
       })
     ).toBeTruthy();
   });
@@ -395,7 +395,7 @@ describe("hotkey chord recorder", () => {
     const onCommit = vi.fn(() => apply);
     render(
       <HotkeyRecorder
-        label="Toggle lamp"
+        label="Toggle device"
         value="Ctrl+Alt+L"
         captureActive
         onCaptureStart={() => ({ active: true })}
@@ -406,11 +406,11 @@ describe("hotkey chord recorder", () => {
     );
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Record Toggle lamp shortcut" })
+      screen.getByRole("button", { name: "Record Toggle device shortcut" })
     );
     fireEvent.keyDown(
       screen.getByRole("button", {
-        name: "Cancel recording for Toggle lamp"
+        name: "Cancel recording for Toggle device"
       }),
       { key: "k", code: "KeyK", ctrlKey: true, shiftKey: true }
     );
@@ -418,7 +418,7 @@ describe("hotkey chord recorder", () => {
     await waitFor(() => expect(onCommit).toHaveBeenCalledWith("Ctrl+Shift+K"));
     expect((
       screen.getByRole("button", {
-        name: "Applying Toggle lamp shortcut"
+        name: "Applying Toggle device shortcut"
       })
     ) as HTMLButtonElement).toHaveProperty("disabled", true);
     expect(screen.getByRole("status").textContent).toContain("Applying");
@@ -432,14 +432,14 @@ describe("hotkey chord recorder", () => {
       expect(onCaptureStop).toHaveBeenCalledWith("complete")
     );
     expect(
-      screen.getByRole("button", { name: "Record Toggle lamp shortcut" })
+      screen.getByRole("button", { name: "Record Toggle device shortcut" })
     ).toBeTruthy();
   });
 
   it("stops a handed-off controlled recorder without releasing the shared capture", () => {
     const onCaptureStop = vi.fn();
     const props = {
-      label: "Toggle lamp",
+      label: "Toggle device",
       value: "Ctrl+Alt+L",
       onCaptureStart: () => ({ active: true }),
       onCaptureStop,
@@ -448,12 +448,12 @@ describe("hotkey chord recorder", () => {
     const view = render(<HotkeyRecorder {...props} captureActive />);
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Record Toggle lamp shortcut" })
+      screen.getByRole("button", { name: "Record Toggle device shortcut" })
     );
     view.rerender(<HotkeyRecorder {...props} captureActive={false} />);
 
     expect(
-      screen.getByRole("button", { name: "Record Toggle lamp shortcut" })
+      screen.getByRole("button", { name: "Record Toggle device shortcut" })
     ).toBeTruthy();
     expect(onCaptureStop).not.toHaveBeenCalled();
   });

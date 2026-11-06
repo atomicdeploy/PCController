@@ -3,7 +3,7 @@ import { signal } from "@preact/signals";
 export type WebTheme = "system" | "light" | "dark";
 export type ResolvedWebTheme = "light" | "dark";
 
-export const webThemeStorageKey = "rayanlamp.web.theme";
+export const webThemeStorageKey = "pccontroller-desktop.web.theme";
 
 const lightThemeColor = "#eef4f8";
 const darkThemeColor = "#0b1724";

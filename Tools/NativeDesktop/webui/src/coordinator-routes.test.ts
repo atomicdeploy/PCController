@@ -15,7 +15,7 @@ describe("coordinator development proxy routes", () => {
   });
 
   it("matches routed families without swallowing SPA assets", () => {
-    expect(family.test("/lamp/toggle")).toBe(true);
+    expect(family.test("/device/toggle")).toBe(true);
     expect(family.test("/ui/terminal?session=1")).toBe(true);
     expect(family.test("/audio/play")).toBe(true);
     expect(family.test("/app/assets/index.js")).toBe(false);

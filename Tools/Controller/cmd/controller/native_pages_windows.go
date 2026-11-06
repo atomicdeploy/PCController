@@ -13,7 +13,7 @@ import (
 	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/shell"
-	"rayanlamp.local/app/desktop"
+	"pccontroller.local/desktop/desktop"
 	"strconv"
 	"strings"
 	"sync"

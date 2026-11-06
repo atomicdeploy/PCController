@@ -18,7 +18,7 @@ $distRoot = [IO.Path]::GetFullPath(
 )
 $packagePath = Join-Path $webRoot 'package.json'
 $lockPath = Join-Path $webRoot 'package-lock.json'
-$editionEnvironmentName = 'VITE_RAYANLAMP_BUILD_EDITION'
+$editionEnvironmentName = 'VITE_PCCONTROLLER_DESKTOP_BUILD_EDITION'
 $editionEnvironmentExisted = Test-Path -LiteralPath "Env:$editionEnvironmentName"
 $previousEditionEnvironment = [Environment]::GetEnvironmentVariable(
     $editionEnvironmentName,
@@ -48,31 +48,31 @@ foreach ($requiredPath in @($packagePath, $lockPath)) {
 Push-Location $webRoot
 try {
     Set-Item -LiteralPath "Env:$editionEnvironmentName" -Value $Edition
-    Write-RayanLampStatus -Level Step `
-        -Icon (Get-RayanLampEmojiGlyph -Name Dependencies) -Label 'DEPS' `
+    Write-PCControllerDesktopStatus -Level Step `
+        -Icon (Get-PCControllerDesktopEmojiGlyph -Name Dependencies) -Label 'DEPS' `
         -Message 'Installing the locked Web UI dependency graph.'
     & npm ci --no-audit --no-fund
     if ($LASTEXITCODE -ne 0) {
         throw 'npm ci failed.'
     }
-    Write-RayanLampStatus -Level Step `
-        -Icon (Get-RayanLampEmojiGlyph -Name Typecheck) -Label 'TYPECHECK' `
+    Write-PCControllerDesktopStatus -Level Step `
+        -Icon (Get-PCControllerDesktopEmojiGlyph -Name Typecheck) -Label 'TYPECHECK' `
         -Message 'Checking the Web UI TypeScript contract.'
     & npm run typecheck
     if ($LASTEXITCODE -ne 0) {
         throw 'Frontend typecheck failed.'
     }
     if (-not $SkipTests) {
-        Write-RayanLampStatus -Level Step `
-            -Icon (Get-RayanLampEmojiGlyph -Name Test) -Label 'TEST' `
+        Write-PCControllerDesktopStatus -Level Step `
+            -Icon (Get-PCControllerDesktopEmojiGlyph -Name Test) -Label 'TEST' `
             -Message 'Running Web UI unit tests.'
         & npm test
         if ($LASTEXITCODE -ne 0) {
             throw 'Frontend unit tests failed.'
         }
     }
-    Write-RayanLampStatus -Level Step `
-        -Icon (Get-RayanLampEmojiGlyph -Name Web) -Label 'WEB' `
+    Write-PCControllerDesktopStatus -Level Step `
+        -Icon (Get-PCControllerDesktopEmojiGlyph -Name Web) -Label 'WEB' `
         -Message "Building the $Edition SPA/PWA bundle."
     & npm run build
     if ($LASTEXITCODE -ne 0) {
@@ -143,6 +143,6 @@ if ($Edition -eq 'production') {
     }
 }
 
-Write-RayanLampStatus -Level Success `
+Write-PCControllerDesktopStatus -Level Success `
     -Message "Built and validated the $Edition SPA/PWA at $distRoot"
 Write-Output $distRoot

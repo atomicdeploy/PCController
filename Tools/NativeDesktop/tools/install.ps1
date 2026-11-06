@@ -18,8 +18,8 @@ if ([string]::IsNullOrWhiteSpace($localAppData)) {
     throw 'The current user LocalAppData directory is unavailable.'
 }
 $programsRoot = Join-Path $localAppData 'Programs'
-$installPath = [IO.Path]::GetFullPath((Join-Path $programsRoot 'RayanLamp'))
-$installedExecutable = Join-Path $installPath 'RayanLamp.exe'
+$installPath = [IO.Path]::GetFullPath((Join-Path $programsRoot 'PCControllerDesktop'))
+$installedExecutable = Join-Path $installPath 'PCControllerDesktop.exe'
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $expectedRunValue = '"{0}"' -f $installedExecutable
 
@@ -35,10 +35,10 @@ function Resolve-SourceExecutable {
             if ($executables.Count -ne 1 -or
                 -not [string]::Equals(
                     $executables[0].Name,
-                    'RayanLamp.exe',
+                    'PCControllerDesktop.exe',
                     [StringComparison]::OrdinalIgnoreCase
                 )) {
-                throw 'A source directory must contain exactly one executable: RayanLamp.exe.'
+                throw 'A source directory must contain exactly one executable: PCControllerDesktop.exe.'
             }
             return [IO.Path]::GetFullPath($executables[0].FullName)
         }
@@ -48,26 +48,26 @@ function Resolve-SourceExecutable {
     $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
     $candidates = @(
         @(
-            (Join-Path $PSScriptRoot 'RayanLamp.exe'),
-            (Join-Path $projectRoot 'dist\RayanLamp.exe')
+            (Join-Path $PSScriptRoot 'PCControllerDesktop.exe'),
+            (Join-Path $projectRoot 'dist\PCControllerDesktop.exe')
         ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }
     )
     if ($candidates.Count -ne 1) {
-        throw 'Specify -SourcePath. Automatic discovery requires exactly one RayanLamp.exe.'
+        throw 'Specify -SourcePath. Automatic discovery requires exactly one PCControllerDesktop.exe.'
     }
     return [IO.Path]::GetFullPath($candidates[0])
 }
 
-function Assert-RayanLampExecutable {
+function Assert-PCControllerDesktopExecutable {
     param([Parameter(Mandatory = $true)][string]$LiteralPath)
 
     if (-not (Test-Path -LiteralPath $LiteralPath -PathType Leaf) -or
         -not [string]::Equals(
             [IO.Path]::GetFileName($LiteralPath),
-            'RayanLamp.exe',
+            'PCControllerDesktop.exe',
             [StringComparison]::OrdinalIgnoreCase
         )) {
-        throw "The source is not the unified RayanLamp.exe: $LiteralPath"
+        throw "The source is not the unified PCControllerDesktop.exe: $LiteralPath"
     }
 }
 
@@ -75,7 +75,7 @@ function Assert-ExactInstallPath {
     param([Parameter(Mandatory = $true)][string]$LiteralPath)
 
     $expected = [IO.Path]::GetFullPath(
-        (Join-Path $localAppData 'Programs\RayanLamp')
+        (Join-Path $localAppData 'Programs\PCControllerDesktop')
     )
     $actual = [IO.Path]::GetFullPath($LiteralPath)
     if (-not [string]::Equals(
@@ -90,7 +90,7 @@ function Assert-ExactInstallPath {
 function Test-ShellRegistrationOwnedBy {
     param([Parameter(Mandatory = $true)][string]$Executable)
 
-    $commandKey = 'Registry::HKEY_CURRENT_USER\Software\Classes\rayan-lamp\shell\open\command'
+    $commandKey = 'Registry::HKEY_CURRENT_USER\Software\Classes\pccontroller-desktop\shell\open\command'
     if (-not (Test-Path -LiteralPath $commandKey)) {
         return $false
     }
@@ -161,9 +161,9 @@ function Get-StartWithWindowsRegistration {
         $command = (
             Get-ItemProperty `
                 -LiteralPath $runKey `
-                -Name 'RayanLamp' `
+                -Name 'PCControllerDesktop' `
                 -ErrorAction Stop
-        ).RayanLamp
+        ).PCControllerDesktop
         return [PSCustomObject]@{
             Exists = $true
             Command = [string]$command
@@ -208,7 +208,7 @@ function Wait-ControllerShutdown {
         }
         Start-Sleep -Milliseconds 100
     } while ([DateTime]::UtcNow -lt $deadline)
-    throw 'The running RayanLamp primary did not release IPC before the upgrade timeout.'
+    throw 'The running PCControllerDesktop primary did not release IPC before the upgrade timeout.'
 }
 
 function Move-DirectoryWithRetry {
@@ -234,11 +234,11 @@ function Move-DirectoryWithRetry {
 }
 
 $sourceExecutable = Resolve-SourceExecutable -Requested $SourcePath
-Assert-RayanLampExecutable -LiteralPath $sourceExecutable
+Assert-PCControllerDesktopExecutable -LiteralPath $sourceExecutable
 Assert-ExactInstallPath -LiteralPath $installPath
 if ([string]::Equals(
     $sourceExecutable,
-    [IO.Path]::GetFullPath((Join-Path $installPath 'RayanLamp.exe')),
+    [IO.Path]::GetFullPath((Join-Path $installPath 'PCControllerDesktop.exe')),
     [StringComparison]::OrdinalIgnoreCase
 )) {
     throw 'The source executable is already installed.'
@@ -246,10 +246,10 @@ if ([string]::Equals(
 
 New-Item -ItemType Directory -Force -Path $programsRoot | Out-Null
 $stagingPath = Join-Path $programsRoot (
-    'RayanLamp.install.' + [Guid]::NewGuid().ToString('N')
+    'PCControllerDesktop.install.' + [Guid]::NewGuid().ToString('N')
 )
 $backupPath = Join-Path $programsRoot (
-    'RayanLamp.backup.' + [Guid]::NewGuid().ToString('N')
+    'PCControllerDesktop.backup.' + [Guid]::NewGuid().ToString('N')
 )
 $movedExisting = $false
 $installedNew = $false
@@ -272,7 +272,7 @@ if ($StartWithWindows) {
     if ($runRegistration.Exists -and
         -not (Test-StartWithWindowsRegistrationOwned -Registration $runRegistration)) {
         throw (
-            'The current-user RayanLamp startup value belongs to another command ' +
+            'The current-user PCControllerDesktop startup value belongs to another command ' +
             "and was preserved: $($runRegistration.Command)"
         )
     }
@@ -280,9 +280,9 @@ if ($StartWithWindows) {
 
 try {
     New-Item -ItemType Directory -Path $stagingPath | Out-Null
-    $stagedExecutable = Join-Path $stagingPath 'RayanLamp.exe'
+    $stagedExecutable = Join-Path $stagingPath 'PCControllerDesktop.exe'
     Copy-Item -LiteralPath $sourceExecutable -Destination $stagedExecutable
-    Assert-RayanLampExecutable -LiteralPath $stagedExecutable
+    Assert-PCControllerDesktopExecutable -LiteralPath $stagedExecutable
     $sourceHash = (Get-FileHash -LiteralPath $sourceExecutable -Algorithm SHA256).Hash
     $stagedHash = (Get-FileHash -LiteralPath $stagedExecutable -Algorithm SHA256).Hash
     if (-not [string]::Equals(
@@ -295,11 +295,11 @@ try {
 
     if (Test-Path -LiteralPath $installPath) {
         if (-not $Force) {
-            throw 'RayanLamp is already installed. Pass -Force for an in-place upgrade.'
+            throw 'PCControllerDesktop is already installed. Pass -Force for an in-place upgrade.'
         }
-        $oldController = Join-Path $installPath 'RayanLamp.exe'
+        $oldController = Join-Path $installPath 'PCControllerDesktop.exe'
         $controllerPrefix = @('cli')
-        $legacyController = Join-Path $installPath 'rayanlampctl.exe'
+        $legacyController = Join-Path $installPath 'desktopctl.exe'
         if (Test-Path -LiteralPath $legacyController -PathType Leaf) {
             $oldController = $legacyController
             $controllerPrefix = @()
@@ -327,14 +327,14 @@ try {
                     -Registration $runRegistration
             )) {
                 throw (
-                    'The current-user RayanLamp startup value changed ownership ' +
+                    'The current-user PCControllerDesktop startup value changed ownership ' +
                     "during installation and was preserved: $($runRegistration.Command)"
                 )
             }
         }
         else {
             New-Item -Path $runKey -Force | Out-Null
-            Set-ItemProperty -Path $runKey -Name 'RayanLamp' -Type String `
+            Set-ItemProperty -Path $runKey -Name 'PCControllerDesktop' -Type String `
                 -Value $expectedRunValue
             $runRegisteredThisRun = $true
         }
@@ -370,9 +370,9 @@ try {
     if ($movedExisting -and (Test-Path -LiteralPath $backupPath)) {
         Remove-Item -LiteralPath $backupPath -Recurse -Force
     }
-    Write-RayanLampStatus -Level Success `
-        -Icon (Get-RayanLampEmojiGlyph -Name Lamp) -Label 'INSTALLED' `
-        -Message "RayanLamp is installed for the current user at $installPath"
+    Write-PCControllerDesktopStatus -Level Success `
+        -Icon (Get-PCControllerDesktopEmojiGlyph -Name Device) -Label 'INSTALLED' `
+        -Message "PCControllerDesktop is installed for the current user at $installPath"
 }
 catch {
     $installFailure = $_
@@ -382,12 +382,12 @@ catch {
             if (Test-StartWithWindowsRegistrationOwned -Registration $runRegistration) {
                 Remove-ItemProperty `
                     -LiteralPath $runKey `
-                    -Name 'RayanLamp' `
+                    -Name 'PCControllerDesktop' `
                     -ErrorAction Stop
             }
             elseif ($runRegistration.Exists) {
                 Write-Warning (
-                    'Installer rollback preserved a RayanLamp startup value that ' +
+                    'Installer rollback preserved a PCControllerDesktop startup value that ' +
                     "changed ownership: $($runRegistration.Command)"
                 )
             }
@@ -405,7 +405,7 @@ catch {
         if ($LASTEXITCODE -ne 0) {
             Write-Warning (
                 'Installer rollback could not remove the newly registered COM ' +
-                'Automation server. Run RayanLamp.exe /unregister-com to retry.'
+                'Automation server. Run PCControllerDesktop.exe /unregister-com to retry.'
             )
         }
     }
@@ -415,7 +415,7 @@ catch {
         if ($LASTEXITCODE -ne 0) {
             Write-Warning (
                 'Installer rollback could not remove every newly registered shell ' +
-                'integration. Run RayanLamp.exe /unregister-shell to retry.'
+                'integration. Run PCControllerDesktop.exe /unregister-shell to retry.'
             )
         }
     }

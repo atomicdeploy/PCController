@@ -29,6 +29,49 @@ func newTestWindowsNotifier(t *testing.T) *windowsNotifier {
 	return newPlatformNotifier(NotifierOptions{AppID: "PCController.Tests", LogoPath: logo}).(*windowsNotifier)
 }
 
+func TestWindowsNotifierExplicitDeliveryDoesNotSubstituteBackend(t *testing.T) {
+	for _, preference := range []string{"toast", "balloon", "off"} {
+		t.Run(preference, func(t *testing.T) {
+			n := newTestWindowsNotifier(t)
+			n.preference = preference
+			toast, balloon, dialog := 0, 0, 0
+			n.deliver = func(context.Context, []byte, string) error { toast++; return errors.New("toast unavailable") }
+			n.balloon = func(context.Context, Notification, error) error { balloon++; return nil }
+			n.dialog = func(context.Context, Notification, error) error { dialog++; return nil }
+			err := n.Notify(context.Background(), Notification{Title: "Test", Body: "No physical delivery"})
+			switch preference {
+			case "toast":
+				if err == nil || toast != 1 || balloon != 0 {
+					t.Fatalf("err=%v toast=%d balloon=%d", err, toast, balloon)
+				}
+			case "balloon":
+				if err != nil || toast != 0 || balloon != 1 {
+					t.Fatalf("err=%v toast=%d balloon=%d", err, toast, balloon)
+				}
+			case "off":
+				if err != nil || toast != 0 || balloon != 0 || n.Status().Accepted != 0 {
+					t.Fatal("off delivered a notification")
+				}
+			}
+			if dialog != 0 {
+				t.Fatal("explicit selection opened fallback dialog")
+			}
+		})
+	}
+}
+
+func TestWindowsNotifierSilentDesktopDoesNotDuplicateCustomWAV(t *testing.T) {
+	n := newTestWindowsNotifier(t)
+	var payload string
+	n.deliver = func(_ context.Context, xml []byte, _ string) error { payload = string(xml); return nil }
+	if err := n.Notify(context.Background(), Notification{Title: "PCController", Body: "Mode changed", Silent: true}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(payload, `<audio silent="true"></audio>`) {
+		t.Fatal(payload)
+	}
+}
+
 func TestWindowsNotifierRunnerCanBeInjectedWithoutDisplayingToast(t *testing.T) {
 	notifier := newTestWindowsNotifier(t)
 	called := false

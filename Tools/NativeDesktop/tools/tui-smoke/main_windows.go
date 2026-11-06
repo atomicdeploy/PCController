@@ -1,6 +1,6 @@
 //go:build windows
 
-// tui-smoke drives the shipped RayanLamp terminal UI through a real Windows
+// tui-smoke drives the shipped PCControllerDesktop terminal UI through a real Windows
 // pseudoconsole. It intentionally lives outside internal/tui: the smoke test
 // observes the same executable, terminal detection, VT stream, resize events,
 // and keyboard byte path that an interactive terminal uses.
@@ -115,8 +115,8 @@ func parseOptions() options {
 	flag.StringVar(
 		&opts.executable,
 		"exe",
-		filepath.Join("dist", "RayanLamp.exe"),
-		"RayanLamp executable to launch",
+		filepath.Join("dist", "PCControllerDesktop.exe"),
+		"PCControllerDesktop executable to launch",
 	)
 	flag.StringVar(
 		&opts.configPath,
@@ -193,10 +193,10 @@ func run(opts options) (runErr error) {
 	if err != nil {
 		return fmt.Errorf("resolve smoke launcher: %w", err)
 	}
-	// RayanLamp deliberately audits its console ownership before entering TUI
-	// mode. Keeping this tiny launcher attached to ConPTY while RayanLamp runs
+	// PCControllerDesktop deliberately audits its console ownership before entering TUI
+	// mode. Keeping this tiny launcher attached to ConPTY while PCControllerDesktop runs
 	// gives that audit the same parent/child topology as cmd.exe or Windows
-	// Terminal; launching RayanLamp as ConPTY's sole client would make its
+	// Terminal; launching PCControllerDesktop as ConPTY's sole client would make its
 	// legacy detached-launch fallback allocate or attach a different console.
 	conPTYArgs := append([]string{launcher, conPTYChildMode}, args...)
 	process, err := startPseudoConsole(
@@ -234,14 +234,14 @@ func run(opts options) (runErr error) {
 		return err
 	}
 	if exitCode != 0 {
-		return fmt.Errorf("RayanLamp exited with code %d", exitCode)
+		return fmt.Errorf("PCControllerDesktop exited with code %d", exitCode)
 	}
 	if err := runner.verifyCleanup(); err != nil {
 		return err
 	}
 
 	fmt.Printf(
-		"✅ RayanLamp TUI passed %d ConPTY checks in %s\n",
+		"✅ PCControllerDesktop TUI passed %d ConPTY checks in %s\n",
 		len(runner.steps),
 		time.Since(runner.started).Round(time.Millisecond),
 	)
@@ -284,7 +284,7 @@ func isolatedConfigPath(opts options) (string, func(), error) {
 		return path, func() {}, nil
 	}
 
-	directory, err := os.MkdirTemp("", "rayanlamp-tui-smoke-")
+	directory, err := os.MkdirTemp("", "pccontroller-desktop-tui-smoke-")
 	if err != nil {
 		return "", func() {}, fmt.Errorf("create isolated config directory: %w", err)
 	}
@@ -313,7 +313,7 @@ func removeTemporaryConfigDirectory(directory string) {
 		relative == "" ||
 		relative == ".." ||
 		strings.HasPrefix(relative, ".."+string(filepath.Separator)) ||
-		!strings.HasPrefix(filepath.Base(absolute), "rayanlamp-tui-smoke-") {
+		!strings.HasPrefix(filepath.Base(absolute), "pccontroller-desktop-tui-smoke-") {
 		return
 	}
 	_ = os.RemoveAll(absolute)
@@ -400,10 +400,10 @@ func (r *smokeRunner) exercise() error {
 	if err := r.resize(80, 24, []string{"STATUS & CONTROL"}); err != nil {
 		return err
 	}
-	if err := r.resize(40, 12, []string{"RAYAN LAMP"}); err != nil {
+	if err := r.resize(40, 12, []string{"PCController"}); err != nil {
 		return err
 	}
-	if err := r.resize(23, 7, []string{"RAYANLAMP"}); err != nil {
+	if err := r.resize(23, 7, []string{"PCCONTROLLER_DESKTOP"}); err != nil {
 		return err
 	}
 	if err := r.resize(120, 40, []string{"STATUS & CONTROL"}); err != nil {
@@ -488,7 +488,7 @@ func (r *smokeRunner) requireRepaint(label, key string) error {
 		if exited, code, err := r.process.exitStatus(); err != nil {
 			return err
 		} else if exited {
-			return fmt.Errorf("%s: RayanLamp exited early with code %d", label, code)
+			return fmt.Errorf("%s: PCControllerDesktop exited early with code %d", label, code)
 		}
 		time.Sleep(processPollInterval)
 	}
@@ -534,7 +534,7 @@ func (r *smokeRunner) expect(label string, needles []string, mark int) error {
 			return err
 		} else if exited {
 			return fmt.Errorf(
-				"%s: RayanLamp exited early with code %d; output tail: %q",
+				"%s: PCControllerDesktop exited early with code %d; output tail: %q",
 				label,
 				code,
 				plainTail(plain, 600),
@@ -746,8 +746,8 @@ func startPseudoConsole(
 	}
 	_ = windows.CloseHandle(processInfo.Thread)
 
-	input := os.NewFile(uintptr(inputWrite), "rayanlamp-conpty-input")
-	output := os.NewFile(uintptr(outputRead), "rayanlamp-conpty-output")
+	input := os.NewFile(uintptr(inputWrite), "pccontroller-desktop-conpty-input")
+	output := os.NewFile(uintptr(outputRead), "pccontroller-desktop-conpty-output")
 	if input == nil || output == nil {
 		_ = windows.TerminateProcess(processInfo.Process, forcedTermination)
 		_ = windows.CloseHandle(processInfo.Process)
@@ -819,14 +819,14 @@ func (p *pseudoConsoleProcess) readOutput() {
 func (p *pseudoConsoleProcess) exitStatus() (bool, uint32, error) {
 	event, err := windows.WaitForSingleObject(p.process, 0)
 	if err != nil {
-		return false, 0, fmt.Errorf("poll RayanLamp process: %w", err)
+		return false, 0, fmt.Errorf("poll PCControllerDesktop process: %w", err)
 	}
 	if event != windows.WAIT_OBJECT_0 {
 		return false, 0, nil
 	}
 	var exitCode uint32
 	if err := windows.GetExitCodeProcess(p.process, &exitCode); err != nil {
-		return false, 0, fmt.Errorf("read RayanLamp exit code: %w", err)
+		return false, 0, fmt.Errorf("read PCControllerDesktop exit code: %w", err)
 	}
 	return true, exitCode, nil
 }
@@ -834,7 +834,7 @@ func (p *pseudoConsoleProcess) exitStatus() (bool, uint32, error) {
 func (p *pseudoConsoleProcess) wait(timeout time.Duration) (uint32, error) {
 	if timeout <= 0 {
 		p.terminate()
-		return 0, errors.New("RayanLamp exit exceeded the total smoke timeout")
+		return 0, errors.New("PCControllerDesktop exit exceeded the total smoke timeout")
 	}
 	milliseconds := timeout.Milliseconds()
 	if milliseconds > int64(^uint32(0)-1) {
@@ -842,18 +842,18 @@ func (p *pseudoConsoleProcess) wait(timeout time.Duration) (uint32, error) {
 	}
 	event, err := windows.WaitForSingleObject(p.process, uint32(milliseconds))
 	if err != nil {
-		return 0, fmt.Errorf("wait for RayanLamp: %w", err)
+		return 0, fmt.Errorf("wait for PCControllerDesktop: %w", err)
 	}
 	if event == waitTimeoutResult {
 		p.terminate()
-		return 0, fmt.Errorf("RayanLamp did not exit within %s after q", timeout.Round(time.Millisecond))
+		return 0, fmt.Errorf("PCControllerDesktop did not exit within %s after q", timeout.Round(time.Millisecond))
 	}
 	if event != windows.WAIT_OBJECT_0 {
-		return 0, fmt.Errorf("wait for RayanLamp returned unexpected status %#x", event)
+		return 0, fmt.Errorf("wait for PCControllerDesktop returned unexpected status %#x", event)
 	}
 	var exitCode uint32
 	if err := windows.GetExitCodeProcess(p.process, &exitCode); err != nil {
-		return 0, fmt.Errorf("read RayanLamp exit code: %w", err)
+		return 0, fmt.Errorf("read PCControllerDesktop exit code: %w", err)
 	}
 	return exitCode, nil
 }

@@ -1,5 +1,5 @@
 import { useState } from "preact/hooks";
-import type { RayanLampClient } from "../api";
+import type { PCControllerDesktopClient } from "../api";
 import type { Snapshot } from "../contracts";
 import {
   appPhase,
@@ -14,7 +14,7 @@ import {
 } from "../store";
 import { Button, Card } from "../components/controls";
 import { Icon } from "../components/icon";
-import { LampVisual } from "../components/lamp-visual";
+import { DeviceVisual } from "../components/device-visual";
 import { Modal } from "../components/modal";
 import {
   browserConsole,
@@ -32,7 +32,7 @@ export function Dashboard({
   api,
   onSnapshot = applySnapshot
 }: {
-  api: RayanLampClient;
+  api: PCControllerDesktopClient;
   onSnapshot?: (next: Snapshot) => void;
 }) {
   const [reconnectOpen, setReconnectOpen] = useState(false);
@@ -41,7 +41,7 @@ export function Dashboard({
   const displayName =
     device?.device_name ||
     device?.description?.friendly_name ||
-    t("Rayan Lamp");
+    t("PCController");
   const busy = Boolean(commandPending.value || current.pending_command);
 
   const run = async (
@@ -61,7 +61,7 @@ export function Dashboard({
     const commandStarted = performance.now();
     browserConsole.event(
       "info",
-      "lamp.command",
+      "device.command",
       `Sending ${command.replace("/", " ")} command`,
       {
         source: api.kind,
@@ -74,7 +74,7 @@ export function Dashboard({
       onSnapshot(next);
       browserConsole.event(
         "success",
-        "lamp.command",
+        "device.command",
         `${command.replace("/", " ")} command completed`,
         {
           source: api.kind,
@@ -88,7 +88,7 @@ export function Dashboard({
     } catch (error) {
       browserConsole.event(
         "error",
-        "lamp.command",
+        "device.command",
         `${command.replace("/", " ")} command failed`,
         {
           source: api.kind,
@@ -101,7 +101,7 @@ export function Dashboard({
       showToast(
         "error",
         t("Command failed"),
-        error instanceof Error ? t(error.message) : t("The lamp did not respond.")
+        error instanceof Error ? t(error.message) : t("The device did not respond.")
       );
     } finally {
       commandPending.value = "";
@@ -123,32 +123,32 @@ export function Dashboard({
       </header>
 
       <div class="dashboard-grid">
-        <Card class="lamp-hero">
-          <div class="lamp-hero-copy">
+        <Card class="device-hero">
+          <div class="device-hero-copy">
             <span class="eyebrow">
               {device?.hostname || current.device_url
                 ? <BidiLtr>{device?.hostname || current.device_url}</BidiLtr>
-                : t("Configured lamp")}
+                : t("Configured device")}
             </span>
             <h2>{stateLabel.value}</h2>
             <p>{stateDetail(current.last_error, current.pending_command)}</p>
           </div>
           <button
             type="button"
-            class="lamp-toggle"
+            class="device-toggle"
             aria-label={
-              current.state === "on" ? t("Turn lamp off") : t("Turn lamp on")
+              current.state === "on" ? t("Turn device off") : t("Turn device on")
             }
             disabled={!isOnline.value || busy}
             onClick={() => void run("toggle")}
           >
-            <LampVisual
+            <DeviceVisual
               state={current.state}
               offline={!isOnline.value}
               busy={busy}
             />
           </button>
-          <div class="hero-actions" aria-label={t("Lamp controls")}>
+          <div class="hero-actions" aria-label={t("Device controls")}>
             <Button
               kind="primary"
               icon={<Icon name="power" />}
@@ -156,7 +156,7 @@ export function Dashboard({
               busy={commandPending.value === "toggle"}
               onClick={() => void run("toggle")}
             >
-              {t("Toggle lamp")}
+              {t("Toggle device")}
             </Button>
             <Button
               disabled={!isOnline.value || busy || current.state === "on"}
@@ -229,7 +229,7 @@ export function Dashboard({
                 icon={<Icon name="refresh" />}
                 busy={commandPending.value === "refresh"}
                 disabled={busy}
-                onClick={() => void run("refresh", t("Lamp state refreshed"))}
+                onClick={() => void run("refresh", t("Device state refreshed"))}
               >
                 {t("Refresh")}
               </Button>
@@ -280,7 +280,7 @@ export function Dashboard({
 
       <Modal
         open={reconnectOpen}
-        title={t("Reconnect to Rayan Lamp?")}
+        title={t("Reconnect to PCController?")}
         description={t("The current HTTP and WebSocket transports will restart. The cached .local address is retained unless the connection fails.")}
         onClose={() => setReconnectOpen(false)}
       >
@@ -342,9 +342,9 @@ function phaseLabel(phase: string): string {
 }
 
 function stateDetail(lastError?: string, pending?: string): string {
-  if (pending) return t("Applying {command}…", { command: pending.replace("lamp.", "") });
+  if (pending) return t("Applying {command}…", { command: pending.replace("device.", "") });
   if (lastError) return t(lastError);
-  return t("Press the lamp or use an explicit action below.");
+  return t("Press the device or use an explicit action below.");
 }
 
 function formatTime(value?: string): string {

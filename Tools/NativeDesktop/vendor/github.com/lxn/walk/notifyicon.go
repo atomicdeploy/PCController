@@ -34,10 +34,16 @@ func notifyIconWndProc(hwnd win.HWND, msg uint32, wParam, lParam uintptr) (resul
 	case win.WM_RBUTTONUP:
 		ni.publishMouseEvent(&ni.mouseUpPublisher, RightButton)
 
-		win.SendMessage(hwnd, msg, wParam, win.WM_CONTEXTMENU)
+		if ni.contextMenu.Actions().Len() != 0 {
+			win.SendMessage(hwnd, msg, wParam, win.WM_CONTEXTMENU)
+		}
+
+	case win.NIN_SELECT, win.NIN_KEYSELECT:
+		ni.publishMouseEvent(&ni.mouseUpPublisher, LeftButton)
 
 	case win.WM_CONTEXTMENU:
 		if ni.contextMenu.Actions().Len() == 0 {
+			ni.publishMouseEvent(&ni.mouseUpPublisher, RightButton)
 			break
 		}
 

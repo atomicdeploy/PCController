@@ -5,7 +5,7 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 project_root="$(cd -- "$script_dir/.." && pwd -P)"
 sdk_root="$project_root/dist-sdk"
 build_info="$project_root/internal/buildinfo/buildinfo.go"
-resource_template="$project_root/resources/RayanLamp.dll.rc.in"
+resource_template="$project_root/resources/PCControllerDesktop.dll.rc.in"
 native_root="$project_root/sdk/native"
 
 architecture="amd64"
@@ -16,7 +16,7 @@ force=0
 
 usage() {
     cat <<'EOF'
-Cross-build the optional attach-only RayanLamp Windows SDK DLL.
+Cross-build the optional attach-only PCControllerDesktop Windows SDK DLL.
 
 Usage:
   tools/build-sdk-linux.sh [options]
@@ -30,7 +30,7 @@ Options:
   --help                        Show this help
 
 ARM64 is intentionally unsupported until a reproducible LLVM-MinGW toolchain
-is pinned. The ordinary CGO-free ARM64 RayanLamp.exe build is unaffected.
+is pinned. The ordinary CGO-free ARM64 PCControllerDesktop.exe build is unaffected.
 EOF
 }
 
@@ -104,7 +104,7 @@ if [[ "$architecture" == "all" && -n "$cc_path" ]]; then
 fi
 
 for required in "$build_info" "$resource_template" \
-    "$native_root/RayanLamp.h" "$native_root/RayanLamp.c"; do
+    "$native_root/PCControllerDesktop.h" "$native_root/PCControllerDesktop.c"; do
     [[ -f "$required" ]] || die "missing SDK source: $required"
 done
 
@@ -182,17 +182,17 @@ build_target() {
         die "SDK output already exists: $output_dir (pass --force to replace it)"
     fi
     mkdir -p -- "$sdk_root"
-    temp_root="$(mktemp -d "${TMPDIR:-/tmp}/RayanLamp-sdk.XXXXXXXX")"
+    temp_root="$(mktemp -d "${TMPDIR:-/tmp}/PCControllerDesktop-sdk.XXXXXXXX")"
     trap 'rm -rf -- "$temp_root"' RETURN
     publish="$temp_root/publish"
-    archive="$temp_root/RayanLampGo.a"
-    generated_header="$temp_root/RayanLampGo.h"
-    rc_file="$temp_root/RayanLamp.dll.rc"
-    resource_object="$temp_root/RayanLamp.dll.o"
-    dll="$publish/RayanLamp.dll"
-    import_library="$publish/libRayanLamp.dll.a"
-    definition="$native_root/RayanLamp_${target}.def"
-    smoke="$temp_root/RayanLamp-dll-smoke.exe"
+    archive="$temp_root/PCControllerDesktopGo.a"
+    generated_header="$temp_root/PCControllerDesktopGo.h"
+    rc_file="$temp_root/PCControllerDesktop.dll.rc"
+    resource_object="$temp_root/PCControllerDesktop.dll.o"
+    dll="$publish/PCControllerDesktop.dll"
+    import_library="$publish/libPCControllerDesktop.dll.a"
+    definition="$native_root/PCControllerDesktop_${target}.def"
+    smoke="$temp_root/PCControllerDesktop-dll-smoke.exe"
     mkdir -p -- "$publish"
 
     sed \
@@ -201,14 +201,14 @@ build_target() {
         -e "s/@PRODUCT_VERSION@/$product_version/g" \
         "$resource_template" > "$rc_file"
 
-    printf 'Building attach-only RayanLamp SDK for Windows/%s\n' "$target"
+    printf 'Building attach-only PCControllerDesktop SDK for Windows/%s\n' "$target"
     (
         cd -- "$project_root"
         env GOOS=windows GOARCH="$target" CGO_ENABLED=1 \
             CC="$compiler" CXX="$cxx" \
             go build -trimpath -buildvcs=false -buildmode=c-archive \
-                -tags rayanlamp_sdk,rayanlamp_production -ldflags '-s -w' \
-                -o "$archive" ./cmd/RayanLampDLL
+                -tags pccontroller_desktop_sdk,pccontroller_desktop_production -ldflags '-s -w' \
+                -o "$archive" ./cmd/PCControllerDesktopDLL
     )
     [[ -f "$generated_header" ]] ||
         die "Go did not create $generated_header"
@@ -221,10 +221,10 @@ build_target() {
         "-Wl,--out-implib,$import_library" \
         -I "$native_root" -I "$temp_root" \
         -o "$dll" \
-        "$native_root/RayanLamp.c" \
+        "$native_root/PCControllerDesktop.c" \
         "$resource_object" "$archive" "$definition" \
         -lwinmm -lws2_32 -lntdll
-    cp -- "$native_root/RayanLamp.h" "$publish/RayanLamp.h"
+    cp -- "$native_root/PCControllerDesktop.h" "$publish/PCControllerDesktop.h"
 
     (
         cd -- "$project_root"
@@ -253,7 +253,7 @@ build_target() {
     rm -rf -- "$temp_root"
     printf 'SDK artifact: %s\n' "$output_dir"
     printf 'SHA-256: '
-    sha256sum -- "$output_dir/RayanLamp.dll" | awk '{print $1}'
+    sha256sum -- "$output_dir/PCControllerDesktop.dll" | awk '{print $1}'
 }
 
 if [[ "$architecture" == "all" ]]; then

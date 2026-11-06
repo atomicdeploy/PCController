@@ -8,8 +8,8 @@ import (
 
 	"github.com/lxn/walk"
 
-	"rayanlamp.local/app/internal/i18n"
-	"rayanlamp.local/app/internal/winfx"
+	"pccontroller.local/desktop/internal/i18n"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
 const defaultMainFontFamily = "Segoe UI"

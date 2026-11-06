@@ -70,7 +70,7 @@ func TestEmojiHasASCIIFallbackAndExplicitOverride(t *testing.T) {
 		t.Fatalf("redirected Symbol() = %q, want ASCII fallback", got)
 	}
 
-	t.Setenv("RAYANLAMP_EMOJI", "always")
+	t.Setenv("PCCONTROLLER_DESKTOP_EMOJI", "always")
 	if got := Symbol(&output, "✅", "[OK]"); got != "✅" {
 		t.Fatalf("forced Symbol() = %q, want emoji", got)
 	}
@@ -115,8 +115,8 @@ func clearPolicyEnvironment(t *testing.T) {
 		"CLICOLOR",
 		"CLICOLOR_FORCE",
 		"FORCE_COLOR",
-		"RAYANLAMP_FORCE_COLOR",
-		"RAYANLAMP_EMOJI",
+		"PCCONTROLLER_DESKTOP_FORCE_COLOR",
+		"PCCONTROLLER_DESKTOP_EMOJI",
 	} {
 		value, present := os.LookupEnv(name)
 		if err := os.Unsetenv(name); err != nil {

@@ -16,7 +16,7 @@ const maxDimension = 4096
 
 // RenderSVG rasterizes SVG data into a transparent RGBA image at exactly the
 // requested device-pixel dimensions. No intermediate fixed-size bitmap is
-// scaled, which keeps the lamp sharp at every supported DPI.
+// scaled, which keeps the device sharp at every supported DPI.
 func RenderSVG(data []byte, width, height int) (*image.RGBA, error) {
 	if len(data) == 0 {
 		return nil, errors.New("vector: empty SVG")

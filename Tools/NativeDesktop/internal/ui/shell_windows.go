@@ -2,7 +2,7 @@
 
 // Package ui owns the Windows main window, tray presence, animation, global
 // hotkeys, notifications, and the small amount of HWND message integration
-// needed by RayanLamp.
+// needed by PCControllerDesktop.
 package ui
 
 import (
@@ -25,24 +25,24 @@ import (
 	"github.com/lxn/win"
 	"golang.org/x/sys/windows"
 
-	"rayanlamp.local/app/assets"
-	"rayanlamp.local/app/internal/animation"
-	"rayanlamp.local/app/internal/appcore"
-	"rayanlamp.local/app/internal/automation"
-	"rayanlamp.local/app/internal/commands"
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/dialogs"
-	"rayanlamp.local/app/internal/i18n"
-	"rayanlamp.local/app/internal/ipc"
-	"rayanlamp.local/app/internal/model"
-	"rayanlamp.local/app/internal/notify"
-	"rayanlamp.local/app/internal/sfx"
-	"rayanlamp.local/app/internal/shellintegration"
-	"rayanlamp.local/app/internal/traymenu"
-	"rayanlamp.local/app/internal/vector"
-	"rayanlamp.local/app/internal/winfx"
-	"rayanlamp.local/app/internal/wmipc"
-	"rayanlamp.local/app/presentation"
+	"pccontroller.local/desktop/assets"
+	"pccontroller.local/desktop/internal/animation"
+	"pccontroller.local/desktop/internal/appcore"
+	"pccontroller.local/desktop/internal/automation"
+	"pccontroller.local/desktop/internal/commands"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/dialogs"
+	"pccontroller.local/desktop/internal/i18n"
+	"pccontroller.local/desktop/internal/ipc"
+	"pccontroller.local/desktop/internal/model"
+	"pccontroller.local/desktop/internal/notify"
+	"pccontroller.local/desktop/internal/sfx"
+	"pccontroller.local/desktop/internal/shellintegration"
+	"pccontroller.local/desktop/internal/traymenu"
+	"pccontroller.local/desktop/internal/vector"
+	"pccontroller.local/desktop/internal/winfx"
+	"pccontroller.local/desktop/internal/wmipc"
+	"pccontroller.local/desktop/presentation"
 )
 
 const (
@@ -107,26 +107,35 @@ type audioJob struct {
 }
 
 type Shell struct {
-	controller               *presentation.Options
-	controllerState          presentation.Snapshot
-	controllerBusy           bool
-	controllerIconFonts      map[int]*walk.Font
-	controllerChannels       bool
-	controllerPreferences    bool
-	controllerPage           int
-	controllerActionIDs      map[actionID]string
-	controllerChannelHits    []controllerChannelHit
-	controllerGesture        controllerChannelGesture
-	controllerPendingPWM     controllerChannelGesture
-	controllerTrayStatus     string
-	controllerMinimumHeight  int
-	controllerSegmentLevels  [4][8]float64
-	controllerSegmentTargets [4][8]float64
-	controllerSegmentsReady  bool
-	core                     *appcore.Core
-	dispatcher               *commands.Dispatcher
-	configPath               string
-	log                      Logger
+	controllerOwner             *Shell
+	controllerWidgetID          string
+	controllerWidgets           map[string]*Shell
+	controllerChartRasters      map[int]*controllerChartRaster
+	controllerHistory           []controllerTelemetryPoint
+	controller                  *presentation.Options
+	controllerState             presentation.Snapshot
+	controllerBusy              bool
+	controllerIconFonts         map[int]*walk.Font
+	controllerChannels          bool
+	controllerPreferences       bool
+	controllerPage              int
+	controllerActionIDs         map[actionID]string
+	controllerChannelHits       []controllerChannelHit
+	controllerGesture           controllerChannelGesture
+	controllerGestureGeneration uint64
+	controllerInline            *controllerInlineEdit
+	controllerPendingPWM        controllerChannelGesture
+	controllerTrayStatus        string
+	controllerTrayIcons         map[string]walk.Image
+	controllerMinimumHeight     int
+	controllerSegmentLevels     [4][8]float64
+	controllerSegmentTargets    [4][8]float64
+	controllerSegmentsReady     bool
+	controllerNotifications     chan controllerNotification
+	core                        *appcore.Core
+	dispatcher                  *commands.Dispatcher
+	configPath                  string
+	log                         Logger
 
 	mw                   *walk.MainWindow
 	surface              *walk.CustomWidget
@@ -210,11 +219,11 @@ type Shell struct {
 	currentAnimationFrame int
 	animationActive       bool
 	animationEpoch        atomic.Uint64
-	lampOnSVG             []byte
-	lampOffSVG            []byte
+	deviceOnSVG           []byte
+	deviceOffSVG          []byte
 	vectorOnBitmap        *walk.Bitmap
 	vectorOffBitmap       *walk.Bitmap
-	vectorLampSize        int
+	vectorDeviceSize      int
 	artworkSources        map[artworkID]image.Image
 	artworkBitmaps        map[artworkBitmapKey]artworkBitmapEntry
 	artworkCacheTick      uint64
@@ -324,6 +333,16 @@ func newShell(core *appcore.Core, dispatcher *commands.Dispatcher, configPath st
 			}
 		}
 	}
+	if controller != nil {
+		if executable, err := os.Executable(); err == nil {
+			persistence, err := winfx.NewNamedStartWithWindowsPersistence("PCController", executable, shell.cfg.Integration.StartWithWindows, "gui")
+			if err != nil {
+				shell.logf("initialize PCController startup preference: %v", err)
+			} else {
+				shell.startWithWindowsPersistence = persistence
+			}
+		}
+	}
 	if err := shell.createWindow(); err != nil {
 		cancel()
 		shell.dispose()
@@ -349,9 +368,13 @@ func newShell(core *appcore.Core, dispatcher *commands.Dispatcher, configPath st
 		shell.logf("notification initialization: %v", err)
 	}
 
-	shell.automation = automation.New(shell.cfg.Automation, func(message string) {
-		shell.logf("%s", message)
-	})
+	if controller != nil {
+		shell.controllerNotifications = make(chan controllerNotification, 32)
+		go shell.runControllerNotifications()
+		shell.automation = automation.NewController(shell.cfg.Automation, func(message string) { shell.logf("%s", message) })
+	} else {
+		shell.automation = automation.New(shell.cfg.Automation, func(message string) { shell.logf("%s", message) })
+	}
 	if controller == nil {
 		shell.systemRecovery = newSystemRecoveryCoordinator(
 			defaultSystemRecoveryDelay,
@@ -485,6 +508,16 @@ func (s *Shell) Close() {
 		return
 	}
 	s.quitting.Store(true)
+	for _, widget := range s.controllerWidgets {
+		widget.Close()
+	}
+	s.controllerWidgets = nil
+	// Widget HWNDs borrow the root's immutable product icon.
+	if s.controllerOwner != nil {
+		s.appIcon = nil
+	}
+	s.closeControllerInline()
+	s.disposeControllerChartRasters()
 	for _, font := range s.controllerIconFonts {
 		font.Dispose()
 	}
@@ -540,6 +573,9 @@ func (s *Shell) ApplyConfig(cfg config.Config) {
 	if s == nil || s.mw == nil || s.quitting.Load() || s.closed.Load() {
 		return
 	}
+	if s.controller != nil {
+		cfg = controllerViewConfig(s.Config(), cfg)
+	}
 	cfg, _ = s.prepareConfig(cfg)
 	s.cfgMu.Lock()
 	if s.quitting.Load() || s.closed.Load() {
@@ -574,6 +610,7 @@ func (s *Shell) ApplyConfig(cfg config.Config) {
 			return
 		}
 		s.applyConfigUI(cfg, true)
+		s.syncControllerWidgetAppearance()
 	})
 }
 
@@ -617,6 +654,10 @@ func (s *Shell) Quit() {
 	if s == nil || s.mw == nil {
 		return
 	}
+	if s.controllerOwner != nil {
+		s.Hide()
+		return
+	}
 	if !s.quitting.CompareAndSwap(false, true) {
 		return
 	}
@@ -631,6 +672,14 @@ func (s *Shell) ShowNotification(title, message string, audible bool) error {
 		if err := s.QueueAudio(string(sfx.CueMessage), 1); err != nil {
 			s.logf("queue notification sound: %v", err)
 		}
+	}
+	if s.controller != nil {
+		if !cfg.Notifications.Enabled || s.controller.Notify == nil {
+			return nil
+		}
+		ctx, cancel := context.WithTimeout(s.ctx, 8*time.Second)
+		defer cancel()
+		return s.controller.Notify(ctx, title, message, cfg.Notifications.Delivery)
 	}
 	if !cfg.Notifications.Enabled || s.notifier == nil {
 		return nil
@@ -745,11 +794,9 @@ func (s *Shell) createWindow() error {
 				return 0, true
 			case win.WM_CAPTURECHANGED:
 				s.deferPointerCaptureCancellation()
+				token := s.controllerGesture.token
 				s.mw.Synchronize(func() {
-					if s.controllerGesture.key != "" {
-						s.controllerGesture = controllerChannelGesture{}
-						s.surface.Invalidate()
-					}
+					s.cancelControllerGestureToken(token)
 				})
 			case win.WM_CANCELMODE:
 				s.cancelButtonActivation()
@@ -779,6 +826,12 @@ func (s *Shell) createWindow() error {
 	if s.controller != nil {
 		minimum.Width = 560
 		minimum.Height = 550
+		if s.cfg.UI.ViewMode == config.ViewCompact {
+			minimum = walk.Size{Width: 340, Height: 330}
+		}
+		if s.controllerWidgetID != "" {
+			minimum = s.controllerWidgetMinimum()
+		}
 	}
 	if err := mw.SetMinMaxSizePixels(minimum, maximum); err != nil {
 		return err
@@ -927,7 +980,7 @@ func (s *Shell) restoreCaptionIcon(redrawFrame bool) {
 	}
 	// Preserve the current live taskbar icon while restoring both product-icon
 	// sizes through Walk. This also restores Walk's retained FormBase.icon, so
-	// a future WM_DPICHANGED cannot replace the caption with a lamp-state icon.
+	// a future WM_DPICHANGED cannot replace the caption with a device-state icon.
 	stateBigIcon := queryTaskbarIcon(win.SendMessage, s.mw.Handle())
 	if err := s.mw.SetIcon(s.appIcon); err != nil {
 		s.logf("restore product window icon: %v", err)
@@ -961,16 +1014,26 @@ func (s *Shell) loadArtwork() error {
 	if err := s.mw.SetIcon(s.appIcon); err != nil {
 		return err
 	}
+	if s.controller != nil {
+		s.controllerTrayIcons = make(map[string]walk.Image, 4)
+		for _, state := range []string{"connected", "reconnecting", "paused", "offline"} {
+			icon, err := walk.NewIconFromResource("TRAY_" + strings.ToUpper(state))
+			if err != nil {
+				return fmt.Errorf("load controller %s tray icon: %w", state, err)
+			}
+			s.controllerTrayIcons[state] = icon
+		}
+	}
 
 	iconTargets := []struct {
 		path   string
 		target *walk.Image
 	}{
-		{"icons/lamp-on.ico", &s.onIcon},
-		{"icons/lamp-off.ico", &s.offIcon},
-		{"icons/lamp-unknown.ico", &s.unknownIcon},
-		{"icons/lamp-connecting.ico", &s.connectingIcon},
-		{"icons/lamp-error.ico", &s.errorIcon},
+		{"icons/device-on.ico", &s.onIcon},
+		{"icons/device-off.ico", &s.offIcon},
+		{"icons/device-unknown.ico", &s.unknownIcon},
+		{"icons/device-connecting.ico", &s.connectingIcon},
+		{"icons/device-error.ico", &s.errorIcon},
 		{"icons/menu-settings.ico", &s.settingsIcon},
 		{"icons/menu-diagnostics.ico", &s.diagnosticsIcon},
 	}
@@ -1006,11 +1069,11 @@ func (s *Shell) loadArtwork() error {
 		s.currentAnimationFrame = -1
 		return nil
 	}
-	if s.lampOnSVG, err = assets.Files.ReadFile("lamp-on.svg"); err != nil {
-		return fmt.Errorf("read embedded lamp-on.svg: %w", err)
+	if s.deviceOnSVG, err = assets.Files.ReadFile("device-on.svg"); err != nil {
+		return fmt.Errorf("read embedded device-on.svg: %w", err)
 	}
-	if s.lampOffSVG, err = assets.Files.ReadFile("lamp-off.svg"); err != nil {
-		return fmt.Errorf("read embedded lamp-off.svg: %w", err)
+	if s.deviceOffSVG, err = assets.Files.ReadFile("device-off.svg"); err != nil {
+		return fmt.Errorf("read embedded device-off.svg: %w", err)
 	}
 
 	s.currentAnimationFrame = -1
@@ -1022,10 +1085,10 @@ func (s *Shell) loadArtwork() error {
 	return nil
 }
 
-func decodeEmbeddedLampAnimation() (*animation.Animation, error) {
-	apngFile, err := assets.Files.Open("lamp-transition.apng")
+func decodeEmbeddedDeviceAnimation() (*animation.Animation, error) {
+	apngFile, err := assets.Files.Open("device-transition.apng")
 	if err != nil {
-		return nil, fmt.Errorf("read lamp transition APNG: %w", err)
+		return nil, fmt.Errorf("read device transition APNG: %w", err)
 	}
 	defer apngFile.Close()
 	decoded, err := animation.DecodeReader(apngFile)
@@ -1035,7 +1098,7 @@ func decodeEmbeddedLampAnimation() (*animation.Animation, error) {
 	return decoded, nil
 }
 
-var loadLampAnimation = decodeEmbeddedLampAnimation
+var loadDeviceAnimation = decodeEmbeddedDeviceAnimation
 
 func (s *Shell) ensureAnimationFrameSources() error {
 	if s == nil {
@@ -1045,7 +1108,7 @@ func (s *Shell) ensureAnimationFrameSources() error {
 		return nil
 	}
 	cancelIdleMemoryRelease()
-	decoded, err := loadLampAnimation()
+	decoded, err := loadDeviceAnimation()
 	if err != nil {
 		return err
 	}
@@ -1080,17 +1143,17 @@ func (s *Shell) setAnimationResourceEnabled(enabled bool) error {
 
 func (s *Shell) ensureVectorArtwork(size int) error {
 	if size < 1 {
-		return errors.New("ui: invalid vector lamp size")
+		return errors.New("ui: invalid vector device size")
 	}
-	if s.vectorLampSize == size && s.vectorOnBitmap != nil && s.vectorOffBitmap != nil {
+	if s.vectorDeviceSize == size && s.vectorOnBitmap != nil && s.vectorOffBitmap != nil {
 		return nil
 	}
 
-	onImage, err := vector.RenderSVG(s.lampOnSVG, size, size)
+	onImage, err := vector.RenderSVG(s.deviceOnSVG, size, size)
 	if err != nil {
 		return fmt.Errorf("render on-state SVG: %w", err)
 	}
-	offImage, err := vector.RenderSVG(s.lampOffSVG, size, size)
+	offImage, err := vector.RenderSVG(s.deviceOffSVG, size, size)
 	if err != nil {
 		return fmt.Errorf("render off-state SVG: %w", err)
 	}
@@ -1111,7 +1174,7 @@ func (s *Shell) ensureVectorArtwork(size int) error {
 	}
 	s.vectorOnBitmap = onBitmap
 	s.vectorOffBitmap = offBitmap
-	s.vectorLampSize = size
+	s.vectorDeviceSize = size
 	return nil
 }
 
@@ -1121,7 +1184,14 @@ func (s *Shell) createTray() error {
 		return fmt.Errorf("create notification-area icon: %w", err)
 	}
 	s.tray = tray
-	if err := tray.SetIcon(s.connectingIcon); err != nil {
+	initialIcon := s.connectingIcon
+	if s.controller != nil {
+		initialIcon = s.controllerTrayIcons["offline"]
+		if initialIcon == nil {
+			initialIcon = s.appIcon
+		}
+	}
+	if err := tray.SetIcon(initialIcon); err != nil {
 		return err
 	}
 	initialTooltip := fmt.Sprintf(
@@ -1130,16 +1200,19 @@ func (s *Shell) createTray() error {
 		s.tr(i18n.MsgConnectionReconnecting),
 		s.tr(i18n.MsgTrayLeftClickHint),
 	)
+	if s.controller != nil {
+		initialTooltip = s.controller.Title + " — Offline"
+	}
 	if err := tray.SetToolTip(initialTooltip); err != nil {
 		return err
 	}
 	tray.MouseDown().Attach(func(_, _ int, button walk.MouseButton) {
-		if button == walk.LeftButton {
-			s.invoke("lamp.toggle", nil)
+		if trayToggleOnPress(s.controller != nil, button) {
+			s.invoke("device.toggle", nil)
 		}
 	})
 	tray.MouseUp().Attach(func(x, y int, button walk.MouseButton) {
-		if button == walk.RightButton {
+		if trayMenuOnRelease(s.controller != nil, button) {
 			s.showAppMenuAt(int32(x), int32(y))
 		}
 	})
@@ -1178,9 +1251,9 @@ func (s *Shell) createNotifications() error {
 		func(action string) {
 			switch strings.ToLower(strings.TrimSpace(action)) {
 			case "on":
-				s.invoke("lamp.on", nil)
+				s.invoke("device.on", nil)
 			case "off":
-				s.invoke("lamp.off", nil)
+				s.invoke("device.off", nil)
 			default:
 				s.Show()
 			}
@@ -1274,9 +1347,9 @@ func (s *Shell) applyEvent(event model.Event) {
 			}
 			if cfg.Notifications.Enabled && cfg.Notifications.StateChanges {
 				go func() {
-					message := s.tr(i18n.MsgNotificationLampTurnedOff)
+					message := s.tr(i18n.MsgNotificationDeviceTurnedOff)
 					if event.Snapshot.State == model.StateOn {
-						message = s.tr(i18n.MsgNotificationLampTurnedOn)
+						message = s.tr(i18n.MsgNotificationDeviceTurnedOn)
 					}
 					_ = s.ShowNotification(
 						s.tr(i18n.MsgAppName),
@@ -1311,7 +1384,7 @@ func (s *Shell) applyEvent(event model.Event) {
 	}
 }
 
-func (s *Shell) updateAnimation(previous, next model.LampState, initial bool) {
+func (s *Shell) updateAnimation(previous, next model.OutputState, initial bool) {
 	activeAnimation := s.animation
 	frameCount := activeAnimation.FrameCount()
 	if next == model.StateUnknown || frameCount == 0 {
@@ -1322,7 +1395,7 @@ func (s *Shell) updateAnimation(previous, next model.LampState, initial bool) {
 		return
 	}
 	// Connection-health, pending-command, HTTP, and WebSocket echo snapshots
-	// can repeat the same lamp state. They must not cancel a real transition
+	// can repeat the same device state. They must not cancel a real transition
 	// that is already playing toward that state.
 	if previous == next {
 		return
@@ -1427,7 +1500,7 @@ func (s *Shell) applyConfigUI(cfg config.Config, reportErrors bool) {
 	s.dark = appearance.Dark
 	s.highContrast = appearance.HighContrast
 	if err := s.setAnimationResourceEnabled(cfg.UI.Animations); err != nil {
-		s.logf("load lamp transition animation: %v", err)
+		s.logf("load device transition animation: %v", err)
 		if reportErrors {
 			s.showError(s.tr(i18n.MsgErrorUpdateSettings), err)
 		}
@@ -1543,6 +1616,12 @@ func (s *Shell) applyViewMode(ui config.UIConfig) error {
 	if s.controller != nil {
 		minimum.Width = 560
 		minimum.Height = 550
+		if ui.ViewMode == config.ViewCompact {
+			minimum = walk.Size{Width: 340, Height: 330}
+		}
+		if s.controllerWidgetID != "" {
+			minimum = s.controllerWidgetMinimum()
+		}
 	}
 	current := s.mw.BoundsPixels()
 	next := liveViewBounds(current, ui)
@@ -1573,9 +1652,9 @@ func liveViewBounds(current walk.Rectangle, ui config.UIConfig) walk.Rectangle {
 }
 
 func (s *Shell) registerHotkeys(cfg config.HotkeysConfig) error {
-	if s.controller != nil {
+	if s.controllerOwner != nil {
 		return nil
-	} // Host owns global hotkey registration.
+	}
 	var failures []error
 	for _, item := range []struct {
 		id    int32
@@ -1766,6 +1845,13 @@ func (s *Shell) windowMessage(hwnd, message, wParam, lParam uintptr) (uintptr, b
 	}
 	switch uint32(message) {
 	case win.WM_COMMAND:
+		if s.controller != nil {
+			if action, ok := controllerTaskbarAction(wParam); ok {
+				s.activateControllerAction(action)
+				return 0, true
+			}
+			return 0, false
+		}
 		if method, ok := taskbarCommandMethod(wParam); ok {
 			s.invoke(method, nil)
 			return 0, true
@@ -1881,13 +1967,27 @@ func (s *Shell) windowMessage(hwnd, message, wParam, lParam uintptr) (uintptr, b
 			// an action while the user is learning that same chord.
 			return 0, true
 		}
+		if s.controller != nil {
+			switch int32(wParam) {
+			case hotkeyToggle:
+				s.activateControllerAction(actionCompact)
+			case hotkeyOn:
+				s.activateControllerAction(actionChannels)
+				s.Show()
+			case hotkeyOff:
+				s.activateControllerAction(actionConsole)
+			case hotkeyShow:
+				s.Show()
+			}
+			return 0, true
+		}
 		switch int32(wParam) {
 		case hotkeyToggle:
-			s.invoke("lamp.toggle", nil)
+			s.invoke("device.toggle", nil)
 		case hotkeyOn:
-			s.invoke("lamp.on", nil)
+			s.invoke("device.on", nil)
 		case hotkeyOff:
-			s.invoke("lamp.off", nil)
+			s.invoke("device.off", nil)
 		case hotkeyShow:
 			s.Show()
 		}
@@ -1995,6 +2095,7 @@ func (s *Shell) windowMessage(hwnd, message, wParam, lParam uintptr) (uintptr, b
 			dpi,
 			cfg.UI.MagneticSnapDistance,
 			controlDown,
+			s.controllerSnapNeighbours()...,
 		)
 		if handled {
 			uiCopyMemory.Call(
@@ -2048,6 +2149,8 @@ func (s *Shell) windowMessage(hwnd, message, wParam, lParam uintptr) (uintptr, b
 	case winfx.WMSystemNetworkChange:
 		if s.systemRecovery != nil {
 			s.systemRecovery.NetworkChanged()
+		} else if s.controller != nil && s.controllerOwner == nil {
+			s.handleSystemAutomation(automation.SystemEventNetworkChange)
 		}
 		return 0, true
 	case wmPowerBroadcast:
@@ -2082,7 +2185,11 @@ func (s *Shell) handleSystemAutomation(event automation.SystemEvent) {
 	if s == nil || s.automation == nil || s.core == nil {
 		return
 	}
-	s.automation.HandleSystemEvent(event, s.core.Snapshot())
+	if s.controller != nil {
+		s.automation.HandleSystemEvent(event, controllerAutomationSnapshot(s.controllerState))
+	} else {
+		s.automation.HandleSystemEvent(event, s.core.Snapshot())
+	}
 }
 
 func shellAppearanceMessage(message uint32) bool {
@@ -2476,8 +2583,8 @@ func (s *Shell) onMouseDown(x, y int, button walk.MouseButton) {
 		return
 	}
 	switch action {
-	case actionLamp:
-		s.dragLampOrToggle()
+	case actionDevice:
+		s.dragDeviceOrToggle()
 	default:
 		if err := winfx.BeginWindowDrag(s.HWND()); err != nil {
 			s.logf("begin borderless drag: %v", err)
@@ -2561,28 +2668,44 @@ func (s *Shell) cancelButtonActivation() {
 	s.cancelKeyboardActivation()
 }
 
-func (s *Shell) dragLampOrToggle() {
+func (s *Shell) dragDeviceOrToggle() {
 	if s == nil || s.mw == nil {
 		return
 	}
 	before := s.mw.BoundsPixels()
 	if err := winfx.BeginWindowDrag(s.HWND()); err != nil {
-		s.logf("begin lamp drag: %v", err)
+		s.logf("begin device drag: %v", err)
 		return
 	}
 	after := s.mw.BoundsPixels()
 	if absInt32(int32(after.X-before.X)) <= 2 &&
 		absInt32(int32(after.Y-before.Y)) <= 2 {
-		s.invoke("lamp.toggle", nil)
+		s.invoke("device.toggle", nil)
 	}
 }
 
 func (s *Shell) onKeyDown(key walk.Key) {
 	if key == walk.KeyEscape {
+		if s.controllerInline != nil {
+			if !s.controllerBusy {
+				s.closeControllerInline()
+			}
+			return
+		}
+		if s.controllerGesture.key != "" {
+			s.cancelPointerActivation()
+			if s.surface != nil {
+				s.surface.Invalidate()
+			}
+			return
+		}
 		s.cancelButtonActivation()
 		if s.Config().UI.CloseToTray {
 			s.Hide()
 		}
+		return
+	}
+	if s.controllerInline != nil {
 		return
 	}
 	action := keyboardActivationAction(key)
@@ -2624,11 +2747,11 @@ func (s *Shell) activateSurfaceAction(action actionID) {
 	}
 	switch action {
 	case actionToggle:
-		s.invoke("lamp.toggle", nil)
+		s.invoke("device.toggle", nil)
 	case actionOn:
-		s.invoke("lamp.on", nil)
+		s.invoke("device.on", nil)
 	case actionOff:
-		s.invoke("lamp.off", nil)
+		s.invoke("device.off", nil)
 	case actionSettings:
 		s.OpenSettings()
 	case actionDiagnostics:
@@ -2783,7 +2906,7 @@ func (s *Shell) ResolveAudio(cue string) (sfx.Asset, error) {
 	return s.audio.Resolve(sfx.Cue(cue))
 }
 
-// ImportAudio validates and stores one custom WAV in the shared asset store.
+// ImportAudio validates and stores one custom sound in the shared asset store.
 func (s *Shell) ImportAudio(name string, wave []byte) (sfx.ImportedAsset, error) {
 	if s == nil || s.audio == nil {
 		return sfx.ImportedAsset{}, errors.New("shared sound effects are unavailable")
@@ -2935,6 +3058,12 @@ func (s *Shell) dispose() {
 		s.vectorOffBitmap.Dispose()
 		s.vectorOffBitmap = nil
 	}
+	for _, icon := range s.controllerTrayIcons {
+		if icon != nil {
+			icon.Dispose()
+		}
+	}
+	s.controllerTrayIcons = nil
 	for _, icon := range []walk.Image{
 		s.appIcon, s.onIcon, s.offIcon, s.unknownIcon, s.connectingIcon, s.errorIcon,
 		s.settingsIcon, s.diagnosticsIcon,

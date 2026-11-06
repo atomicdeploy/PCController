@@ -13,8 +13,8 @@ fail() {
 
 colored="$(
     env -u NO_COLOR -u CLICOLOR -u FORCE_COLOR \
-        -u RAYANLAMP_FORCE_COLOR -u NO_EMOJI \
-        CLICOLOR_FORCE=1 RAYANLAMP_EMOJI=1 TERM=xterm-256color \
+        -u PCCONTROLLER_DESKTOP_FORCE_COLOR -u NO_EMOJI \
+        CLICOLOR_FORCE=1 PCCONTROLLER_DESKTOP_EMOJI=1 TERM=xterm-256color \
         bash -c 'source "$1"; rl_success "release ready"' bash "$terminal_script"
 )"
 expected_prefix=$'\033[1;32m\u2705 OK\033[0m: '
@@ -24,8 +24,8 @@ expected_prefix=$'\033[1;32m\u2705 OK\033[0m: '
     fail "forced output contains an unexpected number of escape characters"
 
 plain="$(
-    env -u CLICOLOR -u FORCE_COLOR -u RAYANLAMP_FORCE_COLOR -u NO_EMOJI \
-        NO_COLOR=1 CLICOLOR_FORCE=1 RAYANLAMP_EMOJI=1 TERM=xterm-256color \
+    env -u CLICOLOR -u FORCE_COLOR -u PCCONTROLLER_DESKTOP_FORCE_COLOR -u NO_EMOJI \
+        NO_COLOR=1 CLICOLOR_FORCE=1 PCCONTROLLER_DESKTOP_EMOJI=1 TERM=xterm-256color \
         bash -c 'source "$1"; rl_success "release ready"' bash "$terminal_script"
 )"
 [[ "$plain" != *"$escape"* ]] ||
@@ -35,7 +35,7 @@ plain="$(
 
 ascii="$(
     env -u CLICOLOR -u CLICOLOR_FORCE -u FORCE_COLOR \
-        -u RAYANLAMP_FORCE_COLOR -u RAYANLAMP_EMOJI \
+        -u PCCONTROLLER_DESKTOP_FORCE_COLOR -u PCCONTROLLER_DESKTOP_EMOJI \
         NO_COLOR=1 NO_EMOJI=1 \
         bash -c 'source "$1"; rl_warn "sample"' bash "$terminal_script" 2>&1
 )"
@@ -44,7 +44,7 @@ ascii="$(
 
 redirected="$(
     env -u NO_COLOR -u CLICOLOR -u CLICOLOR_FORCE -u FORCE_COLOR \
-        -u RAYANLAMP_FORCE_COLOR -u NO_EMOJI -u RAYANLAMP_EMOJI \
+        -u PCCONTROLLER_DESKTOP_FORCE_COLOR -u NO_EMOJI -u PCCONTROLLER_DESKTOP_EMOJI \
         TERM=xterm-256color LANG=C.UTF-8 \
         bash -c 'source "$1"; rl_info "sample"' bash "$terminal_script"
 )"
@@ -52,8 +52,8 @@ redirected="$(
     fail "redirected output must use the plain ASCII fallback by default"
 
 disabled_color="$(
-    env -u NO_COLOR -u CLICOLOR -u RAYANLAMP_FORCE_COLOR -u NO_EMOJI \
-        FORCE_COLOR=0 CLICOLOR_FORCE=1 RAYANLAMP_EMOJI=0 TERM=xterm-256color \
+    env -u NO_COLOR -u CLICOLOR -u PCCONTROLLER_DESKTOP_FORCE_COLOR -u NO_EMOJI \
+        FORCE_COLOR=0 CLICOLOR_FORCE=1 PCCONTROLLER_DESKTOP_EMOJI=0 TERM=xterm-256color \
         bash -c 'source "$1"; rl_success "sample"' bash "$terminal_script"
 )"
 [[ "$disabled_color" == "OK: sample" ]] ||

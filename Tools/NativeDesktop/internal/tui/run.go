@@ -8,7 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/colorprofile"
-	"rayanlamp.local/app/internal/terminal"
+	"pccontroller.local/desktop/internal/terminal"
 )
 
 // Run starts the interactive Bubble Tea program. The caller retains ownership
@@ -25,10 +25,10 @@ func Run(
 		!terminal.IsTerminal(os.Stdout) {
 		return fmt.Errorf(
 			"TUI requires an interactive terminal on stdin and stdout; " +
-				"use `RayanLamp cli` for redirected or scripted output",
+				"use `PCControllerDesktop cli` for redirected or scripted output",
 		)
 	}
-	// Keep Run safe for embedders that do not use cmd/RayanLamp's launcher.
+	// Keep Run safe for embedders that do not use cmd/PCControllerDesktop's launcher.
 	// Redirected streams are ignored by the platform implementation.
 	_, _ = terminal.EnableVT100(os.Stdout, os.Stderr)
 	runContext, cancel := context.WithCancel(ctx)

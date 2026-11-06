@@ -5,7 +5,7 @@ import (
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/lipgloss/v2"
-	"rayanlamp.local/app/internal/design"
+	"pccontroller.local/desktop/internal/design"
 )
 
 type palette struct {

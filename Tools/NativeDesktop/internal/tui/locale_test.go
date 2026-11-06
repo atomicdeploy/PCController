@@ -6,8 +6,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/i18n"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/i18n"
 )
 
 func TestPersianLocaleRendersRTLWithoutRewritingTechnicalValues(t *testing.T) {
@@ -20,7 +20,7 @@ func TestPersianLocaleRendersRTLWithoutRewritingTechnicalValues(t *testing.T) {
 		t.Fatalf("locale = %q, rtl = %v", model.localizer.Locale(), model.rtl())
 	}
 	rendered := ansi.Strip(model.View().Content)
-	for _, expected := range []string{"چراغ", "وضعیت و کنترل"} {
+	for _, expected := range []string{"دستگاه", "وضعیت و کنترل"} {
 		if !strings.Contains(rendered, expected) {
 			t.Fatalf("Persian dashboard omitted %q:\n%s", expected, rendered)
 		}

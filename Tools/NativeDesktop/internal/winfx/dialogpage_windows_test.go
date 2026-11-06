@@ -9,7 +9,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"rayanlamp.local/app/internal/design"
+	"pccontroller.local/desktop/internal/design"
 )
 
 func TestDialogPagePrintFlagsMatchWin32AndDoNotSkipHiddenPages(t *testing.T) {

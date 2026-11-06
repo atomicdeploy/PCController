@@ -1,6 +1,6 @@
 package traymenu
 
-import "rayanlamp.local/app/internal/design"
+import "pccontroller.local/desktop/internal/design"
 
 type rgb struct {
 	r byte

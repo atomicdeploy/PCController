@@ -11,7 +11,7 @@ func TestValidateOptions(t *testing.T) {
 
 	valid := Options{
 		Items: []Item{
-			{ID: "toggle", Label: "Toggle lamp", Shortcut: "Ctrl+Alt+L", Checked: true},
+			{ID: "toggle", Label: "Toggle device", Shortcut: "Ctrl+Alt+L", Checked: true},
 			{Separator: true},
 			{ID: "quit", Label: "Quit", Disabled: true},
 		},

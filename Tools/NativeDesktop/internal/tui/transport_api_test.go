@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/model"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/model"
 )
 
 const transportTestToken = "tui-local-api-test-token-that-must-stay-secret"
@@ -32,7 +32,7 @@ func TestAPITransportCommandAndConfigCapabilities(t *testing.T) {
 		observed []observedRequest
 		cfg      = config.Default()
 	)
-	cfg.Lamp.BaseURL = "http://example.local"
+	cfg.Device.BaseURL = "http://example.local"
 	server := httptest.NewServer(http.HandlerFunc(func(
 		w http.ResponseWriter,
 		r *http.Request,
@@ -138,10 +138,10 @@ func TestAPITransportCommandAndConfigCapabilities(t *testing.T) {
 		},
 		{
 			"notify",
-			map[string]string{"title": "Lamp", "message": "Ready"},
+			map[string]string{"title": "Device", "message": "Ready"},
 			http.MethodPost,
 			"/notifications",
-			`{"message":"Ready","title":"Lamp"}`,
+			`{"message":"Ready","title":"Device"}`,
 		},
 		{"audio.play", nil, http.MethodPost, "/audio/play", ""},
 		{
@@ -189,8 +189,8 @@ func TestAPITransportCommandAndConfigCapabilities(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.Lamp.BaseURL != cfg.Lamp.BaseURL {
-		t.Errorf("GetConfig base URL = %q", loaded.Lamp.BaseURL)
+	if loaded.Device.BaseURL != cfg.Device.BaseURL {
+		t.Errorf("GetConfig base URL = %q", loaded.Device.BaseURL)
 	}
 	updated, err := transport.PatchConfig(
 		context.Background(),
@@ -351,7 +351,7 @@ func TestValidateLoopbackAPIURLRejectsUnsafeAddresses(t *testing.T) {
 		},
 		{
 			name:    "local network hostname",
-			input:   "http://rayanlamp.local:47891",
+			input:   "http://pccontroller-desktop.local:47891",
 			wantErr: "must use localhost or a loopback IP address",
 		},
 		{
@@ -470,18 +470,18 @@ func TestAPITransportStatusAndActionRoutes(t *testing.T) {
 					"state": "on",
 					"http_reachable": true,
 					"websocket_online": true,
-					"device_url": "http://rayanlamp.local"
+					"device_url": "http://pccontroller-desktop.local"
 				}
 			}`)
 		case request.Method == http.MethodPost &&
-			request.URL.Path == "/lamp/refresh":
+			request.URL.Path == "/device/refresh":
 			_, _ = io.WriteString(writer, `{
 				"ok": true,
 				"result": {
 					"state": "on",
 					"http_reachable": true,
 					"websocket_online": true,
-					"device_url": "http://rayanlamp.local"
+					"device_url": "http://pccontroller-desktop.local"
 				}
 			}`)
 		case request.Method == http.MethodPost:
@@ -512,10 +512,10 @@ func TestAPITransportStatusAndActionRoutes(t *testing.T) {
 		action   Action
 		wantPath string
 	}{
-		{action: ActionToggle, wantPath: "/lamp/toggle"},
-		{action: ActionOn, wantPath: "/lamp/on"},
-		{action: ActionOff, wantPath: "/lamp/off"},
-		{action: ActionRefresh, wantPath: "/lamp/refresh"},
+		{action: ActionToggle, wantPath: "/device/toggle"},
+		{action: ActionOn, wantPath: "/device/on"},
+		{action: ActionOff, wantPath: "/device/off"},
+		{action: ActionRefresh, wantPath: "/device/refresh"},
 		{action: ActionReconnect, wantPath: "/reconnect"},
 	}
 	for _, test := range tests {
@@ -707,8 +707,8 @@ func TestAPITransportResponseErrorsAndTokenRedaction(t *testing.T) {
 		{
 			name:    "coded HTTP error",
 			status:  http.StatusServiceUnavailable,
-			body:    `{"ok":false,"error":{"code":"offline","message":"lamp unavailable"}}`,
-			wantErr: "offline: lamp unavailable",
+			body:    `{"ok":false,"error":{"code":"offline","message":"device unavailable"}}`,
+			wantErr: "offline: device unavailable",
 		},
 		{
 			name:    "coded logical error",
@@ -911,7 +911,7 @@ func assertTransportTestSnapshot(t *testing.T, snapshot model.Snapshot) {
 	if !snapshot.WebSocketOnline {
 		t.Error("WebSocket state was not decoded")
 	}
-	if snapshot.DeviceURL != "http://rayanlamp.local" {
+	if snapshot.DeviceURL != "http://pccontroller-desktop.local" {
 		t.Errorf("device URL = %q", snapshot.DeviceURL)
 	}
 }

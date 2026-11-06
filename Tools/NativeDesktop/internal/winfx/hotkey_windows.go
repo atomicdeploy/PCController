@@ -20,7 +20,7 @@ var (
 )
 
 // RegisterHotKey registers a parsed chord against hwnd. It always requests
-// MOD_NOREPEAT so holding the chord cannot flood lamp commands.
+// MOD_NOREPEAT so holding the chord cannot flood device commands.
 func RegisterHotKey(hwnd uintptr, id int32, hotkey Hotkey) error {
 	if id < 0 || id > maxApplicationHotkeyID {
 		return fmt.Errorf("winfx: hotkey id %d is outside application range 0..%d", id, maxApplicationHotkeyID)

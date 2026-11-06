@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"rayanlamp.local/app/internal/animation"
+	"pccontroller.local/desktop/internal/animation"
 )
 
 func TestAnimationCacheEvictsSourcesAndRedecodesAfterResize(t *testing.T) {
@@ -31,13 +31,13 @@ func TestAnimationCacheEvictsSourcesAndRedecodesAfterResize(t *testing.T) {
 		t.Fatalf("frame count after source eviction = %d, want 3", got)
 	}
 
-	originalLoader := loadLampAnimation
+	originalLoader := loadDeviceAnimation
 	loadCount := 0
-	loadLampAnimation = func() (*animation.Animation, error) {
+	loadDeviceAnimation = func() (*animation.Animation, error) {
 		loadCount++
 		return testUIAnimation(3), nil
 	}
-	defer func() { loadLampAnimation = originalLoader }()
+	defer func() { loadDeviceAnimation = originalLoader }()
 
 	if _, err := shell.animationBitmap(0, 3); err != nil {
 		t.Fatalf("rebuild resized animation cache: %v", err)
@@ -102,13 +102,13 @@ func TestSelectAnimationCacheSizeInitializesHiddenPaintAndInvalidatesResize(
 }
 
 func TestDisabledAnimationResourceIsLazyAndReversible(t *testing.T) {
-	originalLoader := loadLampAnimation
+	originalLoader := loadDeviceAnimation
 	loadCount := 0
-	loadLampAnimation = func() (*animation.Animation, error) {
+	loadDeviceAnimation = func() (*animation.Animation, error) {
 		loadCount++
 		return testUIAnimation(2), nil
 	}
-	defer func() { loadLampAnimation = originalLoader }()
+	defer func() { loadDeviceAnimation = originalLoader }()
 
 	shell := new(Shell)
 	if err := shell.setAnimationResourceEnabled(false); err != nil {

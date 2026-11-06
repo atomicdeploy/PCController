@@ -6,12 +6,12 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"rayanlamp.local/app/internal/model"
+	"pccontroller.local/desktop/internal/model"
 )
 
 func TestActivityUsesBrowserConsoleVocabularyAndLevels(t *testing.T) {
 	setColorCapableTestTerminal(t)
-	t.Setenv("RAYANLAMP_EMOJI", "always")
+	t.Setenv("PCCONTROLLER_DESKTOP_EMOJI", "always")
 	tuiModel, _ := newTestModel(t)
 
 	tuiModel.acceptEvent(model.Event{
@@ -38,7 +38,7 @@ func TestActivityUsesBrowserConsoleVocabularyAndLevels(t *testing.T) {
 	}{
 		{activityAppStart, activityLevelInfo},
 		{activityTransportReady, activityLevelSuccess},
-		{activityLampState, activityLevelSuccess},
+		{activityOutputState, activityLevelSuccess},
 		{activityMessageReceived, activityLevelInfo},
 		{activityAudioCue, activityLevelInfo},
 		{activityDeviceEvent, activityLevelDebug},
@@ -74,7 +74,7 @@ func TestActivityUsesBrowserConsoleVocabularyAndLevels(t *testing.T) {
 		"💡",
 		"📡",
 		"app.start",
-		"lamp.state",
+		"device.state",
 		"websocket.disconnected",
 	} {
 		if !strings.Contains(rendered, token) {
@@ -85,7 +85,7 @@ func TestActivityUsesBrowserConsoleVocabularyAndLevels(t *testing.T) {
 
 func TestActivitySeverityColorsMatchThemeAndRemainNoColorAccessible(t *testing.T) {
 	setColorCapableTestTerminal(t)
-	t.Setenv("RAYANLAMP_EMOJI", "always")
+	t.Setenv("PCCONTROLLER_DESKTOP_EMOJI", "always")
 	tuiModel, _ := newTestModel(t)
 	checks := []struct {
 		level activityLevel
@@ -129,13 +129,13 @@ func TestActivitySeverityColorsMatchThemeAndRemainNoColorAccessible(t *testing.T
 }
 
 func TestActivityUsesASCIISymbolsWhenEmojiAreDisabled(t *testing.T) {
-	t.Setenv("RAYANLAMP_EMOJI", "never")
+	t.Setenv("PCCONTROLLER_DESKTOP_EMOJI", "never")
 	t.Setenv("NO_EMOJI", "1")
 
 	for event, want := range map[activityEvent]string{
 		activityAppStart:           "[START]",
 		activityTransportError:     "[WARN]",
-		activityLampState:          "[LAMP]",
+		activityOutputState:        "[DEVICE]",
 		activityWebSocketConnected: "[WS]",
 		activityMessageReceived:    "[MSG]",
 		activityAudioCue:           "[AUDIO]",

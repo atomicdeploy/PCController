@@ -128,6 +128,7 @@ func (s *Shell) releaseHiddenRenderResources() {
 	if s == nil {
 		return
 	}
+	s.disposeControllerChartRasters()
 	// Keep the resolved backend policy/capability, but release its swap chain,
 	// D3D device, DirectComposition tree, and CPU recovery surfaces while no
 	// main-window pixels can be seen. The next visible paint recreates them

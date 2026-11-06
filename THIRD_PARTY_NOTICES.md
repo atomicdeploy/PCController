@@ -22,6 +22,11 @@ See the [source-preservation and runtime coverage audit](docs/NATIVE-DONOR-COVER
 for the imported revision and the distinction between retained source and
 integrated runtime features.
 
+Custom sound import additionally compiles the pure-Go MP3 and FLAC
+decoders listed in the native [dependency notices](Tools/NativeDesktop/docs/attribution.md#go-dependencies).
+Their unmodified license texts are retained under `Tools/NativeDesktop/vendor`
+and included by the host package's Go-module notice collection.
+
 ### Adafruit NeoPixel AVR timing loop
 
 `Project/AddressableLeds.cpp` contains an adapted 20-cycle AVR WS281x sender

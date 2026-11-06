@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-const audioFilenameHeader = "X-RayanLamp-Filename"
+const audioFilenameHeader = "X-PCControllerDesktop-Filename"
 
 // AudioAsset is one resolved PCM-WAV cue. Data must remain immutable for the
 // duration of the callback; the API does not retain it after the response.
@@ -35,7 +35,7 @@ type ImportedAudio struct {
 // AudioAssetFunc resolves a semantic cue such as on, off, message, or error.
 type AudioAssetFunc func(cue string) (AudioAsset, error)
 
-// AudioImportFunc validates and stores one custom WAV.
+// AudioImportFunc decodes supported audio and stores a canonical PCM WAV.
 type AudioImportFunc func(name string, data []byte) (ImportedAudio, error)
 
 func (a *api) uiAudioAsset(w http.ResponseWriter, r *http.Request) {
@@ -107,8 +107,8 @@ func (a *api) uiAudioImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	if err != nil || (mediaType != "audio/wav" && mediaType != "audio/x-wav") {
-		writeError(w, http.StatusUnsupportedMediaType, "invalid_content_type", "custom audio must be a PCM WAV file")
+	if err != nil || !supportedAudioMediaType(mediaType) {
+		writeError(w, http.StatusUnsupportedMediaType, "invalid_content_type", "choose WAV, MP3 or FLAC audio")
 		return
 	}
 	if r.ContentLength > maxAudioBytes {
@@ -172,6 +172,15 @@ func (a *api) uiAudioImport(w http.ResponseWriter, r *http.Request) {
 	a.writeBrowserConfigPatch(w, r, patch)
 }
 
+func supportedAudioMediaType(value string) bool {
+	switch value {
+	case "audio/wav", "audio/x-wav", "audio/wave", "audio/vnd.wave",
+		"audio/mpeg", "audio/mp3", "audio/flac", "audio/x-flac":
+		return true
+	}
+	return false
+}
+
 func validAudioCue(value string) bool {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "on", "off", "message", "error":
@@ -193,7 +202,7 @@ func validAudioAssetID(value string) bool {
 func safeAudioDownloadName(value string) string {
 	value = safeAudioDisplayName(value)
 	if value == "" {
-		return "rayanlamp-sfx.wav"
+		return "pccontroller-desktop-sfx.wav"
 	}
 	if !strings.EqualFold(filepath.Ext(value), ".wav") {
 		value += ".wav"

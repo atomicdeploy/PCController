@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"rayanlamp.local/app/internal/terminal"
+	"pccontroller.local/desktop/internal/terminal"
 )
 
 func TestMachineForArchitecture(t *testing.T) {
@@ -58,7 +58,7 @@ func TestVerifyEditionRequiresMatchingNativeAndWebDebugPayload(t *testing.T) {
 		fileData: []byte(
 			`prefix{"edition":"develop","developer_tools":true}suffix`,
 		),
-		buildTags:     "rayanlamp_develop",
+		buildTags:     "pccontroller_desktop_develop",
 		debugSections: true,
 		symbolCount:   12,
 	}
@@ -70,7 +70,7 @@ func TestVerifyEditionRequiresMatchingNativeAndWebDebugPayload(t *testing.T) {
 		fileData: []byte(
 			`prefix{"edition":"production","developer_tools":false}suffix`,
 		),
-		buildTags:   "rayanlamp_production",
+		buildTags:   "pccontroller_desktop_production",
 		symbolCount: 0,
 	}
 	if err := verifyEdition(production, "production"); err != nil {
@@ -101,7 +101,7 @@ func TestVerifyEditionRequiresMatchingNativeAndWebDebugPayload(t *testing.T) {
 		"wrong native tag": {
 			image: executable{
 				fileData:      develop.fileData,
-				buildTags:     "rayanlamp_production",
+				buildTags:     "pccontroller_desktop_production",
 				debugSections: true,
 				symbolCount:   1,
 			},
@@ -118,8 +118,8 @@ func TestVerifyEditionRequiresMatchingNativeAndWebDebugPayload(t *testing.T) {
 		"both build tags": {
 			image: executable{
 				fileData: production.fileData,
-				buildTags: "rayanlamp_develop," +
-					"rayanlamp_production",
+				buildTags: "pccontroller_desktop_develop," +
+					"pccontroller_desktop_production",
 				symbolCount: 0,
 			},
 			edition: "production",
@@ -142,7 +142,7 @@ func TestVerifyEditionRequiresMatchingNativeAndWebDebugPayload(t *testing.T) {
 
 func TestSourceManifestDetachedConsolePolicyPlacement(t *testing.T) {
 	t.Parallel()
-	manifestPath := filepath.Join("..", "..", "resources", "RayanLamp.exe.manifest")
+	manifestPath := filepath.Join("..", "..", "resources", "PCControllerDesktop.exe.manifest")
 	manifest, err := os.ReadFile(manifestPath)
 	if err != nil {
 		t.Fatal(err)
@@ -339,7 +339,7 @@ func TestPrintStatusUsesPlainASCIIFallbackWhenRedirected(t *testing.T) {
 func TestPrintStatusUsesCompleteResetWhenForced(t *testing.T) {
 	clearTerminalEnvironment(t)
 	t.Setenv("FORCE_COLOR", "1")
-	t.Setenv("RAYANLAMP_EMOJI", "always")
+	t.Setenv("PCCONTROLLER_DESKTOP_EMOJI", "always")
 	var output bytes.Buffer
 
 	printStatus(&output, terminal.BoldGreen, "✅", "[OK]", "release ready")
@@ -362,7 +362,7 @@ func clearTerminalEnvironment(t *testing.T) {
 		"CLICOLOR",
 		"CLICOLOR_FORCE",
 		"FORCE_COLOR",
-		"RAYANLAMP_EMOJI",
+		"PCCONTROLLER_DESKTOP_EMOJI",
 	} {
 		value, present := os.LookupEnv(name)
 		if err := os.Unsetenv(name); err != nil {

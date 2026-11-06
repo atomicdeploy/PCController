@@ -32,7 +32,7 @@ const (
 	ScreenTerminal    InitialScreen = "terminal"
 )
 
-// LaunchOptions is the complete terminal-mode surface of RayanLamp.exe.
+// LaunchOptions is the complete terminal-mode surface of PCControllerDesktop.exe.
 type LaunchOptions struct {
 	Transport     TransportOptions
 	Poll          time.Duration
@@ -63,7 +63,7 @@ func DefaultLaunchOptions() LaunchOptions {
 
 func ParseLaunchOptions(args []string) (LaunchOptions, error) {
 	options := DefaultLaunchOptions()
-	set := flag.NewFlagSet("RayanLamp.exe tui", flag.ContinueOnError)
+	set := flag.NewFlagSet("PCControllerDesktop.exe tui", flag.ContinueOnError)
 	set.SetOutput(io.Discard)
 
 	var mode, theme, screen string
@@ -217,15 +217,15 @@ func ParseThemeMode(value string) (ThemeMode, error) {
 }
 
 func Usage() string {
-	return `RayanLamp terminal UI
+	return `PCControllerDesktop terminal UI
 
 Usage:
-  RayanLamp.exe tui [screen] [options]
+  PCControllerDesktop.exe tui [screen] [options]
 
 Screens:
-  dashboard              Lamp status and controls (default)
+  dashboard              Device status and controls (default)
   commands               Searchable application command workspace
-  settings | configure   Complete RayanLamp configuration
+  settings | configure   Complete PCControllerDesktop configuration
   device                 Device information and parameters
   serving | serve        Web dashboard and local API controls
   diagnostics            Parsed and raw diagnostic tools
@@ -234,7 +234,7 @@ Screens:
 Connection:
   --mode auto|ipc|api|standalone
                          Auto attaches to the GUI, then becomes headless primary
-  --config PATH          Alternate RayanLamp configuration
+  --config PATH          Alternate PCControllerDesktop configuration
   --api-url URL          Explicit loopback API base URL
   --api-token TOKEN      Explicit local API bearer token
   --poll 1s              Remote status refresh interval
@@ -248,7 +248,7 @@ Appearance:
 Other:
   --screen NAME          Open a named screen
   --commands             Open the command workspace
-  --settings             Open RayanLamp configuration
+  --settings             Open PCControllerDesktop configuration
   --configure            Alias for --settings
   --device-settings      Open device information and parameters
   --serving              Open Web dashboard and local API controls

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"rayanlamp.local/app/internal/sfxgen"
+	"pccontroller.local/desktop/internal/sfxgen"
 )
 
 func TestValidateWaveAcceptsBundledPCM(t *testing.T) {

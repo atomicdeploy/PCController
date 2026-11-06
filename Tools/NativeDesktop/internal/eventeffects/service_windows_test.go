@@ -9,22 +9,22 @@ import (
 	"testing"
 	"time"
 
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/model"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/model"
 )
 
 func TestNewWindowsRunsConfiguredAutomationWithoutGUI(t *testing.T) {
 	temp := t.TempDir()
 	outputPath := filepath.Join(temp, "automation-result.txt")
-	t.Setenv("RAYANLAMP_TEST_OUTPUT", outputPath)
+	t.Setenv("PCCONTROLLER_DESKTOP_TEST_OUTPUT", outputPath)
 
 	scriptPath := filepath.Join(temp, "state.cmd")
 	script := "@echo off\r\n" +
-		"> \"%RAYANLAMP_TEST_OUTPUT%\" (\r\n" +
-		"  echo event=%RAYANLAMP_EVENT%\r\n" +
-		"  echo state=%RAYANLAMP_STATE%\r\n" +
-		"  echo previous=%RAYANLAMP_PREVIOUS_STATE%\r\n" +
-		"  echo source=%RAYANLAMP_SOURCE%\r\n" +
+		"> \"%PCCONTROLLER_DESKTOP_TEST_OUTPUT%\" (\r\n" +
+		"  echo event=%PCCONTROLLER_DESKTOP_EVENT%\r\n" +
+		"  echo state=%PCCONTROLLER_DESKTOP_STATE%\r\n" +
+		"  echo previous=%PCCONTROLLER_DESKTOP_PREVIOUS_STATE%\r\n" +
+		"  echo source=%PCCONTROLLER_DESKTOP_SOURCE%\r\n" +
 		")\r\n"
 	if err := os.WriteFile(scriptPath, []byte(script), 0o600); err != nil {
 		t.Fatal(err)
@@ -52,7 +52,7 @@ func TestNewWindowsRunsConfiguredAutomationWithoutGUI(t *testing.T) {
 		Snapshot: model.Snapshot{
 			State:      model.StateOn,
 			LastSource: "websocket",
-			DeviceURL:  "http://rayanlamp.local",
+			DeviceURL:  "http://pccontroller-desktop.local",
 		},
 	}
 

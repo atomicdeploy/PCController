@@ -1,4 +1,4 @@
-//go:build !rayanlamp_production
+//go:build !pccontroller_desktop_production
 
 package buildinfo
 

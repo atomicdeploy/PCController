@@ -2,7 +2,7 @@ package tui
 
 import (
 	tea "charm.land/bubbletea/v2"
-	"rayanlamp.local/app/internal/terminal"
+	"pccontroller.local/desktop/internal/terminal"
 )
 
 func initialThemeIsDark(mode ThemeMode) bool {

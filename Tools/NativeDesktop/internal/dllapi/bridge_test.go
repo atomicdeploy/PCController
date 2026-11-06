@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"rayanlamp.local/app/sdk"
+	"pccontroller.local/desktop/sdk"
 )
 
 type fakeCaller struct {
@@ -37,7 +37,7 @@ func TestExecuteWithPreservesRawParamsAndVersionlessEnvelope(t *testing.T) {
 			method string,
 			params any,
 		) (sdk.Response, error) {
-			if method != "lamp.future" {
+			if method != "device.future" {
 				t.Fatalf("method = %q", method)
 			}
 			raw, ok := params.(json.RawMessage)
@@ -52,7 +52,7 @@ func TestExecuteWithPreservesRawParamsAndVersionlessEnvelope(t *testing.T) {
 	}
 	status, data := executeWith(
 		factory,
-		[]byte(" lamp.future "),
+		[]byte(" device.future "),
 		[]byte(`{"level":7}`),
 		1250,
 	)
@@ -90,7 +90,7 @@ func TestExecuteWithKeepsDispatcherFailureAtSuccessfulABIStatus(t *testing.T) {
 				}, nil
 			}}, nil
 		},
-		[]byte("lamp.on"),
+		[]byte("device.on"),
 		nil,
 		0,
 	)
@@ -121,10 +121,10 @@ func TestExecuteWithValidationDoesNotCreateClient(t *testing.T) {
 	}{
 		{nil, nil, 0},
 		{[]byte{0xff}, nil, 0},
-		{[]byte("lamp.on\x00"), nil, 0},
-		{[]byte("lamp.on"), []byte(`{"broken"`), 0},
-		{[]byte("lamp.on"), nil, 99},
-		{[]byte("lamp.on"), nil, 600_001},
+		{[]byte("device.on\x00"), nil, 0},
+		{[]byte("device.on"), []byte(`{"broken"`), 0},
+		{[]byte("device.on"), nil, 99},
+		{[]byte("device.on"), nil, 600_001},
 	}
 	for _, testCase := range cases {
 		status, data := executeWith(

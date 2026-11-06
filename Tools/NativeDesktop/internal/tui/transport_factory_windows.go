@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 
-	"rayanlamp.local/app/internal/config"
+	"pccontroller.local/desktop/internal/config"
 )
 
 // OpenTransport selects and opens one transport. Auto mode attaches to a
@@ -99,13 +99,13 @@ func OpenTransport(
 	case ModeIPC:
 		transport, openErr := openIPC()
 		if openErr != nil {
-			return nil, fmt.Errorf("IPC mode requires a running RayanLamp primary: %w", openErr)
+			return nil, fmt.Errorf("IPC mode requires a running PCControllerDesktop primary: %w", openErr)
 		}
 		return transport, nil
 	case ModeAPI:
 		transport, openErr := openAPI()
 		if openErr != nil {
-			return nil, fmt.Errorf("API mode could not attach to the local RayanLamp API: %w", openErr)
+			return nil, fmt.Errorf("API mode could not attach to the local PCControllerDesktop API: %w", openErr)
 		}
 		return transport, nil
 	case ModeStandalone:
@@ -151,7 +151,7 @@ func OpenTransport(
 
 	// The GUI can win the primary-instance race between our first IPC probe
 	// and ListenPipe. Retry only the side-effect-free attachment probes. Never
-	// retry a lamp command across transports.
+	// retry a device command across transports.
 	if transport, openErr := openIPC(); openErr == nil {
 		return transport, nil
 	} else {

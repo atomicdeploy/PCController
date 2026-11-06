@@ -15,11 +15,11 @@ import (
 	"strings"
 	"time"
 
-	"rayanlamp.local/app/internal/commands"
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/deviceterminal"
-	"rayanlamp.local/app/internal/ipc"
-	"rayanlamp.local/app/internal/model"
+	"pccontroller.local/desktop/internal/commands"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/deviceterminal"
+	"pccontroller.local/desktop/internal/ipc"
+	"pccontroller.local/desktop/internal/model"
 )
 
 const maxAPIResponseBytes = int64(ipc.MaxMessageBytes)
@@ -124,30 +124,30 @@ func (transport *apiTransport) ExecuteCommand(
 		if err == nil {
 			envelope, err = transport.request(ctx, http.MethodGet, "/ping")
 		}
-	case "status", "state", "lamp.get", "get":
+	case "status", "state", "device.get", "get":
 		err = requireAPICommandNoParams(method, params)
 		if err == nil {
 			envelope, err = transport.request(ctx, http.MethodGet, "/status")
 		}
-	case "lamp.on", "on":
+	case "device.on", "on":
 		err = requireAPICommandNoParams(method, params)
 		if err == nil {
-			envelope, err = transport.request(ctx, http.MethodPost, "/lamp/on")
+			envelope, err = transport.request(ctx, http.MethodPost, "/device/on")
 		}
-	case "lamp.off", "off":
+	case "device.off", "off":
 		err = requireAPICommandNoParams(method, params)
 		if err == nil {
-			envelope, err = transport.request(ctx, http.MethodPost, "/lamp/off")
+			envelope, err = transport.request(ctx, http.MethodPost, "/device/off")
 		}
-	case "lamp.toggle", "toggle":
+	case "device.toggle", "toggle":
 		err = requireAPICommandNoParams(method, params)
 		if err == nil {
-			envelope, err = transport.request(ctx, http.MethodPost, "/lamp/toggle")
+			envelope, err = transport.request(ctx, http.MethodPost, "/device/toggle")
 		}
-	case "lamp.refresh", "refresh":
+	case "device.refresh", "refresh":
 		err = requireAPICommandNoParams(method, params)
 		if err == nil {
-			envelope, err = transport.request(ctx, http.MethodPost, "/lamp/refresh")
+			envelope, err = transport.request(ctx, http.MethodPost, "/device/refresh")
 		}
 	case "reconnect":
 		err = requireAPICommandNoParams(method, params)
@@ -409,10 +409,10 @@ func (transport *apiTransport) Execute(
 		return model.Snapshot{}, err
 	}
 	path := map[Action]string{
-		ActionToggle:    "/lamp/toggle",
-		ActionOn:        "/lamp/on",
-		ActionOff:       "/lamp/off",
-		ActionRefresh:   "/lamp/refresh",
+		ActionToggle:    "/device/toggle",
+		ActionOn:        "/device/on",
+		ActionOff:       "/device/off",
+		ActionRefresh:   "/device/refresh",
 		ActionReconnect: "/reconnect",
 	}[action]
 	envelope, err := transport.request(ctx, http.MethodPost, path)

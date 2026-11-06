@@ -38,8 +38,8 @@ describe("Web UI internationalization", () => {
     expect(document.documentElement.lang).toBe("fa-IR");
     expect(document.documentElement.dir).toBe("rtl");
     expect(document.documentElement.dataset.resolvedLocale).toBe("fa");
-    expect(document.title).toBe("چراغ رایان");
-    expect(localStorage.getItem("rayanlamp.web.locale")).toBe("fa");
+    expect(document.title).toBe("PCController");
+    expect(localStorage.getItem("pccontroller-desktop.web.locale")).toBe("fa");
     expect(t("Settings")).toBe("تنظیمات");
     expect(t("Updated {date}", { date: "امروز" })).toBe("به‌روزرسانی امروز");
     expect(formatNumber(123456)).toMatch(/[۱۲۳۴۵۶]/);
@@ -48,9 +48,9 @@ describe("Web UI internationalization", () => {
 
   it("keeps protocol values in an explicit LTR isolation boundary", () => {
     applyWebLocale("fa");
-    render(<BidiLtr>http://rayanlamp.local:47831</BidiLtr>);
+    render(<BidiLtr>http://pccontroller-desktop.local:47831</BidiLtr>);
 
-    const value = screen.getByText("http://rayanlamp.local:47831");
+    const value = screen.getByText("http://pccontroller-desktop.local:47831");
     expect(value.tagName).toBe("BDI");
     expect(value.getAttribute("dir")).toBe("ltr");
   });

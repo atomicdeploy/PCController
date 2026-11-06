@@ -23,7 +23,7 @@ func TestManagerDetectsReadOnlyBannerAcrossReads(t *testing.T) {
 
 	if _, err := manager.Connect(
 		context.Background(),
-		"rayanlamp.local",
+		"pccontroller-desktop.local",
 		23,
 		func(context.Context) (net.Conn, error) { return client, nil },
 	); err != nil {
@@ -68,7 +68,7 @@ func TestManagerBoundedScrollbackResetsStaleCursor(t *testing.T) {
 	defer manager.Close()
 	snapshot, err := manager.Connect(
 		context.Background(),
-		"rayanlamp.local",
+		"pccontroller-desktop.local",
 		23,
 		func(context.Context) (net.Conn, error) { return client, nil },
 	)
@@ -114,7 +114,7 @@ func TestManagerLongPollWakesOnStateOnlyDisconnect(t *testing.T) {
 	defer manager.Close()
 	snapshot, err := manager.Connect(
 		context.Background(),
-		"rayanlamp.local",
+		"pccontroller-desktop.local",
 		23,
 		func(context.Context) (net.Conn, error) { return client, nil },
 	)
@@ -169,7 +169,7 @@ func TestManagerNewReaderLongPollWaitsPastResetMarker(t *testing.T) {
 	defer manager.Close()
 	if _, err := manager.Connect(
 		context.Background(),
-		"rayanlamp.local",
+		"pccontroller-desktop.local",
 		23,
 		func(context.Context) (net.Conn, error) { return client, nil },
 	); err != nil {
@@ -229,7 +229,7 @@ func TestManagerConcurrentConnectWriteAndDisconnectWithNetPipe(t *testing.T) {
 		}()
 		return client, nil
 	}
-	if _, err := manager.Connect(context.Background(), "rayanlamp.local", 23, dial); err != nil {
+	if _, err := manager.Connect(context.Background(), "pccontroller-desktop.local", 23, dial); err != nil {
 		t.Fatal(err)
 	}
 
@@ -247,7 +247,7 @@ func TestManagerConcurrentConnectWriteAndDisconnectWithNetPipe(t *testing.T) {
 			case 0:
 				_, err := manager.Connect(
 					context.Background(),
-					"rayanlamp.local",
+					"pccontroller-desktop.local",
 					23,
 					dial,
 				)
@@ -337,7 +337,7 @@ func TestManagerDisconnectAndCloseCancelInFlightDial(t *testing.T) {
 			go func() {
 				_, err := manager.Connect(
 					context.Background(),
-					"rayanlamp.local",
+					"pccontroller-desktop.local",
 					23,
 					func(ctx context.Context) (net.Conn, error) {
 						close(started)
@@ -355,7 +355,7 @@ func TestManagerDisconnectAndCloseCancelInFlightDial(t *testing.T) {
 			}
 			if _, err := manager.Connect(
 				context.Background(),
-				"second-rayanlamp.local",
+				"second-pccontroller-desktop.local",
 				23,
 				func(context.Context) (net.Conn, error) {
 					t.Fatal("busy Connect invoked its dialer")
@@ -405,7 +405,7 @@ func TestManagerStaleDialCannotReplaceNewConnection(t *testing.T) {
 	go func() {
 		_, err := manager.Connect(
 			context.Background(),
-			"old-rayanlamp.local",
+			"old-pccontroller-desktop.local",
 			23,
 			func(context.Context) (net.Conn, error) {
 				close(staleStarted)
@@ -436,14 +436,14 @@ func TestManagerStaleDialCannotReplaceNewConnection(t *testing.T) {
 	defer currentServer.Close()
 	connected, err := manager.Connect(
 		context.Background(),
-		"new-rayanlamp.local",
+		"new-pccontroller-desktop.local",
 		2323,
 		func(context.Context) (net.Conn, error) { return currentClient, nil },
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if connected.Host != "new-rayanlamp.local" || connected.Port != 2323 {
+	if connected.Host != "new-pccontroller-desktop.local" || connected.Port != 2323 {
 		t.Fatalf("new connection snapshot = %+v", connected)
 	}
 
@@ -502,7 +502,7 @@ func TestManagerSessionResetAdvancesCursorAndDisconnectPurgesTranscript(t *testi
 	defer firstServer.Close()
 	first, err := manager.Connect(
 		context.Background(),
-		"rayanlamp.local",
+		"pccontroller-desktop.local",
 		23,
 		func(context.Context) (net.Conn, error) { return firstClient, nil },
 	)
@@ -531,7 +531,7 @@ func TestManagerSessionResetAdvancesCursorAndDisconnectPurgesTranscript(t *testi
 	defer secondServer.Close()
 	second, err := manager.Connect(
 		context.Background(),
-		"rayanlamp.local",
+		"pccontroller-desktop.local",
 		2323,
 		func(context.Context) (net.Conn, error) { return secondClient, nil },
 	)
@@ -627,7 +627,7 @@ func TestManagerFutureCursorReturnsResetAndCurrentTranscript(t *testing.T) {
 	defer server.Close()
 	connected, err := manager.Connect(
 		context.Background(),
-		"rayanlamp.local",
+		"pccontroller-desktop.local",
 		23,
 		func(context.Context) (net.Conn, error) { return client, nil },
 	)
@@ -659,7 +659,7 @@ func TestManagerConcurrentCloseCallersWaitForReaderShutdown(t *testing.T) {
 	connection := newControlledTerminalConn()
 	if _, err := manager.Connect(
 		context.Background(),
-		"rayanlamp.local",
+		"pccontroller-desktop.local",
 		23,
 		func(context.Context) (net.Conn, error) { return connection, nil },
 	); err != nil {

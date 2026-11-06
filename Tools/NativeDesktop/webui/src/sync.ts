@@ -1,4 +1,4 @@
-import type { RayanLampClient } from "./api";
+import type { PCControllerDesktopClient } from "./api";
 import type {
   AppConfig,
   AudioCue,
@@ -59,7 +59,7 @@ const fallbackLeaseDuration = 12_000;
 const fallbackLeaseHeartbeat = 3_000;
 
 export class RealtimeSync {
-  private readonly api: RayanLampClient;
+  private readonly api: PCControllerDesktopClient;
   private readonly connectEvents: boolean;
   private readonly tabID = crypto.randomUUID();
   private readonly channel: BroadcastChannel | null;
@@ -84,7 +84,7 @@ export class RealtimeSync {
   private directKnownStateSeen = false;
 
   constructor(
-    api: RayanLampClient,
+    api: PCControllerDesktopClient,
     options: RealtimeSyncOptions = {}
   ) {
     this.api = api;
@@ -610,8 +610,8 @@ export class RealtimeSync {
           "info",
           "audio.cue",
           cueCount === 1
-            ? "Lamp requested an audible cue"
-            : `Lamp requested ${cueCount} audible cues`,
+            ? "Device requested an audible cue"
+            : `Device requested ${cueCount} audible cues`,
           {
             source: this.api.kind,
             action: "beep",
@@ -629,15 +629,15 @@ export class RealtimeSync {
         browserConsole.event(
           "info",
           "message.received",
-          "Lamp message received",
+          "Device message received",
           {
             source: this.api.kind,
-            action: event.title || "Rayan Lamp",
+            action: event.title || "PCController",
             count: event.message.length
           }
         );
       }
-      showToast("info", event.title || "Rayan Lamp", event.message);
+      showToast("info", event.title || "PCController", event.message);
       this.broadcast({
         kind: "message",
         title: event.title,
@@ -746,8 +746,8 @@ export class RealtimeSync {
           "info",
           "audio.cue",
           cueCount === 1
-            ? "Lamp requested an audible cue"
-            : `Lamp requested ${cueCount} audible cues`,
+            ? "Device requested an audible cue"
+            : `Device requested ${cueCount} audible cues`,
           {
             source: this.api.kind,
             action: "beep",
@@ -759,15 +759,15 @@ export class RealtimeSync {
         browserConsole.event(
           "info",
           "message.received",
-          "Lamp message synchronized from another tab",
+          "Device message synchronized from another tab",
           {
             source: this.api.kind,
-            action: value.title || "Rayan Lamp",
+            action: value.title || "PCController",
             count: value.message.length
           }
         );
       }
-      showToast("info", value.title || "Rayan Lamp", value.message);
+      showToast("info", value.title || "PCController", value.message);
     }
   };
 
@@ -827,7 +827,7 @@ export class RealtimeSync {
       if (this.socket?.readyState !== WebSocket.OPEN) {
         this.setConnectionState(
           false,
-          "The RayanLamp controller heartbeat stopped.",
+          "The PCControllerDesktop controller heartbeat stopped.",
           {
             action: "follower",
             error_code: "heartbeat_timeout"
@@ -859,12 +859,12 @@ export function relayDisconnectReason(
     event?.code === 1001 &&
     event.reason.trim().toLowerCase() === "server shutting down"
   ) {
-    return "The RayanLamp controller shut down.";
+    return "The PCControllerDesktop controller shut down.";
   }
   if (event?.wasClean) {
-    return "The RayanLamp controller closed its live connection.";
+    return "The PCControllerDesktop controller closed its live connection.";
   }
-  return "The RayanLamp controller connection was lost.";
+  return "The PCControllerDesktop controller connection was lost.";
 }
 
 export function connectionSyncNames(key: string): {
@@ -881,8 +881,8 @@ export function connectionSyncNames(key: string): {
   }
   const suffix = (hash >>> 0).toString(16).padStart(8, "0");
   return {
-    channel: `rayanlamp-web-v1-${suffix}`,
-    lock: `rayanlamp-web-event-leader-v1-${suffix}`
+    channel: `pccontroller-desktop-web-v1-${suffix}`,
+    lock: `pccontroller-desktop-web-event-leader-v1-${suffix}`
   };
 }
 

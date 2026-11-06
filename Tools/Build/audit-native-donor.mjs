@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Read-only source-preservation audit. This does NOT certify runtime parity.
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadProjectEnv } from './env.mjs';
@@ -10,6 +10,7 @@ loadProjectEnv();
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const prefix = 'Tools/NativeDesktop/';
+const migratedPaths = JSON.parse(readFileSync(path.join(root, 'Tools/Audit/native-desktop-path-migration.json'), 'utf8')).files;
 const baseline = {
   donorCommit: 'b5847a0c86f9931a86048d418ff8ff5045f52b0a',
   importCommit: '08ef6eb74ad38ba86a9a356d5d5ed3f8fda95c8a',
@@ -23,9 +24,9 @@ const exclusions = new Map([
 // licensed font adaptation and scheduler origin guard. Keep exact old/new pairs: missing source or an
 // unrelated deleted asset must still fail this audit.
 const regeneratedAssets = new Map([
-  ['internal/webui/dist/assets/index-BJJi2oIR.css', 'internal/webui/dist/assets/index-BI9zYtDG.css'],
-  ['internal/webui/dist/assets/index-P8wU9w4v.js', 'internal/webui/dist/assets/index-SrMXIX_H.js'],
-  ['internal/webui/dist/assets/index-P8wU9w4v.js.map', 'internal/webui/dist/assets/index-SrMXIX_H.js.map'],
+  ['internal/webui/dist/assets/index-BJJi2oIR.css', 'internal/webui/dist/assets/index-1vVQeuVg.css'],
+  ['internal/webui/dist/assets/index-P8wU9w4v.js', 'internal/webui/dist/assets/index-BuoRu0iz.js'],
+  ['internal/webui/dist/assets/index-P8wU9w4v.js.map', 'internal/webui/dist/assets/index-BuoRu0iz.js.map'],
   ['internal/webui/dist/assets/addon-webgl-qNQI_Zx4.js', 'internal/webui/dist/assets/addon-webgl-DTes4Zuf.js'],
   ['internal/webui/dist/assets/addon-webgl-qNQI_Zx4.js.map', 'internal/webui/dist/assets/addon-webgl-DTes4Zuf.js.map'],
   ['internal/webui/dist/assets/xterm-B6pQ9H5k.js', 'internal/webui/dist/assets/xterm-BbplF7Um.js'],
@@ -69,7 +70,9 @@ function audit() {
 
   const present = [];
   for (const entry of entries) {
-    const target = path.join(root, prefix, entry.path);
+    entry.currentPath = migratedPaths[entry.path] ?? entry.path;
+    if (entry.currentPath.split('/').includes('..') || path.isAbsolute(entry.currentPath)) throw new Error('Unsafe migrated donor path');
+    const target = path.join(root, prefix, entry.currentPath);
     if (!existsSync(target)) {
       const replacement = regeneratedAssets.get(entry.path);
       if (replacement && existsSync(path.join(root, prefix, replacement))) {
@@ -93,7 +96,7 @@ function audit() {
   // for Git's --stdin-paths format, including whitespace/backslash escaping.
   if (present.length) {
     const hashes = git(root, ['hash-object', '--stdin-paths'], present
-      .map(entry => JSON.stringify(prefix + entry.path)).join('\n') + '\n')
+      .map(entry => JSON.stringify(prefix + entry.currentPath)).join('\n') + '\n')
       .trim().split(/\r?\n/);
     if (hashes.length !== present.length) throw new Error('Incomplete Git blob hash response.');
     present.forEach((entry, i) => {

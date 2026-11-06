@@ -11,9 +11,9 @@ import (
 	"github.com/lxn/walk"
 	"github.com/lxn/win"
 
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/model"
-	"rayanlamp.local/app/internal/winfx"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/model"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
 func TestHighContrastPaletteUsesWindowsSystemColors(t *testing.T) {
@@ -61,7 +61,7 @@ func TestDashboardGeometryFitsResizableBounds(t *testing.T) {
 			for name, rectangle := range map[string]walk.Rectangle{
 				"title": layout.title, "settings": layout.settings,
 				"diagnostics": layout.diagnostics, "card": layout.card,
-				"lamp": layout.lamp, "lamp hit": layout.lampHit,
+				"device": layout.device, "device hit": layout.deviceHit,
 				"state": layout.state, "toggle": layout.toggle,
 				"on": layout.on, "off": layout.off, "hint": layout.hint,
 			} {
@@ -95,8 +95,8 @@ func TestDashboardGeometryMirrorsExactlyForRTL(t *testing.T) {
 		"settings":    {ltr.settings, rtl.settings},
 		"diagnostics": {ltr.diagnostics, rtl.diagnostics},
 		"card":        {ltr.card, rtl.card},
-		"lamp":        {ltr.lamp, rtl.lamp},
-		"lamp hit":    {ltr.lampHit, rtl.lampHit},
+		"device":      {ltr.device, rtl.device},
+		"device hit":  {ltr.deviceHit, rtl.deviceHit},
 		"state":       {ltr.state, rtl.state},
 		"toggle":      {ltr.toggle, rtl.toggle},
 		"on":          {ltr.on, rtl.on},

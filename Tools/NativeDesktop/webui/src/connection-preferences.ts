@@ -1,24 +1,24 @@
-import { normalizeLampBaseURL } from "./direct-protocol";
+import { normalizeDeviceBaseURL } from "./direct-protocol";
 
 export type ConnectionMode = "auto" | "relay" | "direct";
 
 export interface ConnectionPreferences {
   mode: ConnectionMode;
-  lampURL: string;
+  deviceURL: string;
 }
 
-const storageKey = "rayanlamp.web.connection.v1";
-const channelName = "rayanlamp-web-connection-v1";
-const localEventName = "rayanlamp:connection-preferences";
+const storageKey = "pccontroller-desktop.web.connection.v1";
+const channelName = "pccontroller-desktop-web-connection-v1";
+const localEventName = "pccontroller-desktop:connection-preferences";
 
 export function isStaticExport(): boolean {
-  return import.meta.env.VITE_RAYANLAMP_STATIC_EXPORT === "true";
+  return import.meta.env.VITE_PCCONTROLLER_DESKTOP_STATIC_EXPORT === "true";
 }
 
 export function defaultConnectionPreferences(): ConnectionPreferences {
   return {
     mode: isStaticExport() ? "direct" : "auto",
-    lampURL: "http://rayanlamp.local"
+    deviceURL: "http://pccontroller-desktop.local"
   };
 }
 
@@ -30,10 +30,10 @@ export function readConnectionPreferences(): ConnectionPreferences {
     const value = JSON.parse(raw) as Partial<ConnectionPreferences>;
     return {
       mode: isConnectionMode(value.mode) ? value.mode : fallback.mode,
-      lampURL:
-        typeof value.lampURL === "string" && value.lampURL.trim()
-          ? normalizeLampBaseURL(value.lampURL)
-          : fallback.lampURL
+      deviceURL:
+        typeof value.deviceURL === "string" && value.deviceURL.trim()
+          ? normalizeDeviceBaseURL(value.deviceURL)
+          : fallback.deviceURL
     };
   } catch {
     return fallback;
@@ -45,7 +45,7 @@ export function saveConnectionPreferences(
 ): void {
   const normalized = {
     mode: value.mode,
-    lampURL: normalizeLampBaseURL(value.lampURL)
+    deviceURL: normalizeDeviceBaseURL(value.deviceURL)
   } satisfies ConnectionPreferences;
   try {
     localStorage.setItem(storageKey, JSON.stringify(normalized));
@@ -83,7 +83,7 @@ export function subscribeConnectionPreferences(
     try {
       value = {
         mode: event.data.mode,
-        lampURL: normalizeLampBaseURL(event.data.lampURL)
+        deviceURL: normalizeDeviceBaseURL(event.data.deviceURL)
       };
     } catch {
       return;
@@ -113,7 +113,7 @@ function validPreferences(value: unknown): value is ConnectionPreferences {
   const candidate = value as Partial<ConnectionPreferences>;
   return (
     isConnectionMode(candidate.mode) &&
-    typeof candidate.lampURL === "string" &&
-    candidate.lampURL.trim().length > 0
+    typeof candidate.deviceURL === "string" &&
+    candidate.deviceURL.trim().length > 0
   );
 }

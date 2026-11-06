@@ -18,7 +18,7 @@ import (
 	"github.com/lxn/win"
 	"golang.org/x/sys/windows"
 
-	"rayanlamp.local/app/internal/graphics"
+	"pccontroller.local/desktop/internal/graphics"
 )
 
 const (
@@ -57,6 +57,7 @@ var preparedIconCache = struct {
 
 type menuFont struct {
 	handle win.HFONT
+	bold   win.HFONT
 }
 
 // foregroundBuffer owns the popup's per-session GDI surfaces. The old paint
@@ -111,17 +112,32 @@ func newMenuFontForFamily(dpi int32, family string) (menuFont, error) {
 	if handle == 0 {
 		return menuFont{}, errors.New("traymenu: CreateFontIndirect failed")
 	}
-	return menuFont{handle: handle}, nil
+	spec.LfWeight = win.FW_BOLD
+	bold := win.CreateFontIndirect(&spec)
+	if bold == 0 {
+		win.DeleteObject(win.HGDIOBJ(handle))
+		return menuFont{}, errors.New("traymenu: create default-item font")
+	}
+	return menuFont{handle: handle, bold: bold}, nil
 }
 
 func (f menuFont) close() {
+	if f.bold != 0 {
+		win.DeleteObject(win.HGDIOBJ(f.bold))
+	}
 	if f.handle != 0 {
 		win.DeleteObject(win.HGDIOBJ(f.handle))
 	}
 }
 
 func (f menuFont) measure(value string) int32 {
-	if value == "" || f.handle == 0 {
+	return measureMenuText(f.handle, value)
+}
+
+func (f menuFont) measureBold(value string) int32 { return measureMenuText(f.bold, value) }
+
+func measureMenuText(font win.HFONT, value string) int32 {
+	if value == "" || font == 0 {
 		return 0
 	}
 	text, err := windows.UTF16FromString(value)
@@ -133,7 +149,7 @@ func (f menuFont) measure(value string) int32 {
 		return int32(len([]rune(value))) * 8
 	}
 	defer win.ReleaseDC(0, dc)
-	old := win.SelectObject(dc, win.HGDIOBJ(f.handle))
+	old := win.SelectObject(dc, win.HGDIOBJ(font))
 	defer win.SelectObject(dc, old)
 	var size win.SIZE
 	if !win.GetTextExtentPoint32(dc, &text[0], int32(len(text)-1), &size) {
@@ -828,7 +844,13 @@ func (s *popupSession) drawAlphaContent(
 		if d.rightToLeft {
 			labelAlignment = win.DT_RIGHT | win.DT_RTLREADING
 		}
+		labelFont := s.font.handle
+		if item.Default {
+			labelFont = s.font.bold
+		}
+		previousFont := win.SelectObject(dc, win.HGDIOBJ(labelFont))
 		drawText(dc, item.Label, &labelRect, labelAlignment)
+		win.SelectObject(dc, previousFont)
 		compositeTextMask(
 			destination,
 			mask,

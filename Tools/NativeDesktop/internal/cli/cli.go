@@ -1,7 +1,7 @@
 //go:build windows
 
 // Package cli implements the GUI-handoff and controller modes exposed by the
-// unified RayanLamp.exe.
+// unified PCControllerDesktop.exe.
 package cli
 
 import (
@@ -15,10 +15,10 @@ import (
 	"strings"
 	"time"
 
-	"rayanlamp.local/app/internal/buildinfo"
-	"rayanlamp.local/app/internal/ipc"
-	"rayanlamp.local/app/internal/shellintegration"
-	"rayanlamp.local/app/internal/terminal"
+	"pccontroller.local/desktop/internal/buildinfo"
+	"pccontroller.local/desktop/internal/ipc"
+	"pccontroller.local/desktop/internal/shellintegration"
+	"pccontroller.local/desktop/internal/terminal"
 )
 
 type SpecialMode uint8
@@ -287,9 +287,9 @@ func Parse(args []string) (Options, error) {
 		params any
 	}
 	commands := []selectedCommand{
-		{on, "lamp.on", nil},
-		{off, "lamp.off", nil},
-		{toggle, "lamp.toggle", nil},
+		{on, "device.on", nil},
+		{off, "device.off", nil},
+		{toggle, "device.toggle", nil},
 		{getState, "status", nil},
 		{show, "window.show", nil},
 		{hide, "window.hide", nil},
@@ -424,18 +424,18 @@ func boolCount(values ...bool) int {
 }
 
 func Usage() string {
-	return `RayanLamp command line
+	return `PCControllerDesktop command line
 
 Usage:
-  RayanLamp.exe                         Open or hand over to the primary app
-  RayanLamp.exe /on | /off | /toggle   Control through the running instance
-  RayanLamp.exe cli --status [--json] Query the primary instance
+  PCControllerDesktop.exe                         Open or hand over to the primary app
+  PCControllerDesktop.exe /on | /off | /toggle   Control through the running instance
+  PCControllerDesktop.exe cli --status [--json] Query the primary instance
 
 Commands:
-  --on, --off, --toggle, --get          Lamp control and state
+  --on, --off, --toggle, --get          Device control and state
   --show, --hide, --settings            Window control
   --web                                  Open the embedded web dashboard
-  --reconnect                           Reconnect to the lamp
+  --reconnect                           Reconnect to the device
   --endpoint /info                      Fetch an allow-listed diagnostic
   --notify "message" [--title "title"] Show a local notification
   --audio [--cue CUE] [--count N]      Play on/off/message/error SFX
@@ -458,7 +458,7 @@ Options:
   --uninstall         Remove the per-user installation and owned integrations
     --remove-user-data  Also remove configuration and logs
   --install-status    Report portable/installed status (supports --json)
-  --uri URI           Handle a validated rayan-lamp:// activation
+  --uri URI           Handle a validated pccontroller-desktop:// activation
   --help, --version   Help or version information
 
 Windows-style /on, /off, /toggle, /get, /show and /? aliases are supported.`

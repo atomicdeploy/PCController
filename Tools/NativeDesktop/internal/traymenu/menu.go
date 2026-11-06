@@ -36,7 +36,7 @@ var (
 type ActionID string
 
 // Item describes one command or separator. IconPNG accepts ordinary PNG bytes
-// such as assets.Files.ReadFile("icons/lamp-on.png"). IconHandle accepts a
+// such as assets.Files.ReadFile("icons/device-on.png"). IconHandle accepts a
 // caller-owned HICON and is never destroyed by this package. If both are set,
 // IconPNG is preferred by the custom renderer.
 type Item struct {
@@ -46,6 +46,7 @@ type Item struct {
 	IconPNG    []byte
 	IconHandle uintptr
 	Checked    bool
+	Default    bool
 	Disabled   bool
 	Separator  bool
 }
@@ -185,6 +186,10 @@ func ShowAtCursor(options Options) (Result, error) {
 	return showAtCursor(cloneOptions(options))
 }
 
+// Validate checks a shared menu model without creating windows or invoking an
+// action. Embedders can preflight both presentation paths with the same rules.
+func Validate(options Options) error { return validateOptions(options) }
+
 // ShowAtAnchor displays the menu adjacent to a screen-coordinate anchor. The
 // same owner-thread requirement as ShowAtCursor applies.
 func ShowAtAnchor(options Options, anchor Rect) (Result, error) {
@@ -239,17 +244,24 @@ func validateOptions(options Options) error {
 	}
 
 	seen := make(map[ActionID]struct{}, len(options.Items))
+	defaultSeen := false
 	for index, item := range options.Items {
 		if item.Separator {
 			if item.ID != "" || item.Label != "" || item.Shortcut != "" ||
 				len(item.IconPNG) != 0 || item.IconHandle != 0 ||
-				item.Checked || item.Disabled {
+				item.Checked || item.Default || item.Disabled {
 				return fmt.Errorf("%w at index %d: separator has command fields", ErrInvalidItem, index)
 			}
 			continue
 		}
 		if item.ID == "" {
 			return fmt.Errorf("%w at index %d: action ID is empty", ErrInvalidItem, index)
+		}
+		if item.Default {
+			if defaultSeen {
+				return fmt.Errorf("%w: multiple default actions", ErrInvalidItem)
+			}
+			defaultSeen = true
 		}
 		if err := validateText(string(item.ID), false); err != nil {
 			return fmt.Errorf("%w at index %d: action ID: %v", ErrInvalidItem, index, err)

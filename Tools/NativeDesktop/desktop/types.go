@@ -1,8 +1,8 @@
 // Package desktop exposes the imported Windows presentation stack without
-// exporting its donor lamp protocol or creating another hardware owner.
+// exporting its donor device protocol or creating another hardware owner.
 package desktop
 
-import "rayanlamp.local/app/presentation"
+import "pccontroller.local/desktop/presentation"
 
 type Snapshot = presentation.Snapshot
 type Options = presentation.Options
@@ -11,3 +11,5 @@ type Action = presentation.Action
 type Page = presentation.Page
 type Field = presentation.Field
 type PageAction = presentation.PageAction
+type MenuItem = presentation.MenuItem
+type Message = presentation.Message

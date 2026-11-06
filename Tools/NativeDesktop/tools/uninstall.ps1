@@ -14,8 +14,8 @@ if ([string]::IsNullOrWhiteSpace($localAppData)) {
     throw 'The current user LocalAppData directory is unavailable.'
 }
 
-$installPath = [IO.Path]::GetFullPath((Join-Path $localAppData 'Programs\RayanLamp'))
-$installedExecutable = Join-Path $installPath 'RayanLamp.exe'
+$installPath = [IO.Path]::GetFullPath((Join-Path $localAppData 'Programs\PCControllerDesktop'))
+$installedExecutable = Join-Path $installPath 'PCControllerDesktop.exe'
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 
 function Assert-ExactPath {
@@ -59,7 +59,7 @@ function Test-ActivationCommandOwnedBy {
 function Remove-OwnedShellRegistrationWithoutExecutable {
     param([Parameter(Mandatory = $true)][string]$Executable)
 
-    $protocolRoot = 'Registry::HKEY_CURRENT_USER\Software\Classes\rayan-lamp'
+    $protocolRoot = 'Registry::HKEY_CURRENT_USER\Software\Classes\pccontroller-desktop'
     $commandKey = Join-Path $protocolRoot 'shell\open\command'
     $expectedCommand = '"{0}" /uri "%1"' -f $Executable
     if (Test-Path -LiteralPath $commandKey) {
@@ -76,7 +76,7 @@ function Remove-OwnedShellRegistrationWithoutExecutable {
     $legacyActivator = '{66F0C709-6E91-45BE-9013-5A96219E6D3D}'
     $activatorRoot = "Registry::HKEY_CURRENT_USER\Software\Classes\CLSID\$legacyActivator"
     $activatorServer = Join-Path $activatorRoot 'LocalServer32'
-    $appIDRoot = 'Registry::HKEY_CURRENT_USER\Software\Classes\AppUserModelId\YektaYar.RayanLamp'
+    $appIDRoot = 'Registry::HKEY_CURRENT_USER\Software\Classes\AppUserModelId\DRSDavidSoft.PCController'
     $activationCommand = $null
     if (Test-Path -LiteralPath $activatorServer) {
         $activationCommand = (Get-Item -LiteralPath $activatorServer -ErrorAction Stop).GetValue('')
@@ -106,7 +106,7 @@ function Remove-OwnedShellRegistrationWithoutExecutable {
     }
 
     Write-Warning (
-        'RayanLamp.exe was missing, so its owned registry entries were removed ' +
+        'PCControllerDesktop.exe was missing, so its owned registry entries were removed ' +
         'directly. Windows may retain its Jump List until the shell refreshes it.'
     )
 }
@@ -126,7 +126,7 @@ function Wait-ControllerShutdown {
         }
         Start-Sleep -Milliseconds 100
     } while ([DateTime]::UtcNow -lt $deadline)
-    throw 'The running RayanLamp primary did not release IPC before the uninstall timeout.'
+    throw 'The running PCControllerDesktop primary did not release IPC before the uninstall timeout.'
 }
 
 function Remove-DirectoryWithRetry {
@@ -151,12 +151,12 @@ function Remove-DirectoryWithRetry {
 }
 
 Assert-ExactPath -Actual $installPath `
-    -Expected (Join-Path $localAppData 'Programs\RayanLamp') `
+    -Expected (Join-Path $localAppData 'Programs\PCControllerDesktop') `
     -Purpose 'installation'
 
 $controller = $installedExecutable
 $controllerPrefix = @('cli')
-$legacyController = Join-Path $installPath 'rayanlampctl.exe'
+$legacyController = Join-Path $installPath 'desktopctl.exe'
 if (Test-Path -LiteralPath $legacyController -PathType Leaf) {
     $controller = $legacyController
     $controllerPrefix = @()
@@ -168,7 +168,7 @@ if (Test-Path -LiteralPath $controller -PathType Leaf) {
         -PrefixArguments $controllerPrefix
 }
 
-$shellCommandKey = 'Registry::HKEY_CURRENT_USER\Software\Classes\rayan-lamp\shell\open\command'
+$shellCommandKey = 'Registry::HKEY_CURRENT_USER\Software\Classes\pccontroller-desktop\shell\open\command'
 $shellCommandExists = Test-Path -LiteralPath $shellCommandKey
 $registeredShellCommand = $null
 if ($shellCommandExists) {
@@ -206,7 +206,7 @@ if ($shellCommandExists -and
 }
 elseif ($shellCommandExists) {
     Write-Warning (
-        'The rayan-lamp URI protocol points elsewhere or has no owner command ' +
+        'The pccontroller-desktop URI protocol points elsewhere or has no owner command ' +
         'and was preserved.'
     )
 }
@@ -214,7 +214,7 @@ elseif ($shellCommandExists) {
 if (Test-Path -LiteralPath $runKey) {
     $runValue = $null
     try {
-        $runValue = (Get-ItemProperty -LiteralPath $runKey -Name 'RayanLamp' -ErrorAction Stop).RayanLamp
+        $runValue = (Get-ItemProperty -LiteralPath $runKey -Name 'PCControllerDesktop' -ErrorAction Stop).PCControllerDesktop
     }
     catch [System.Management.Automation.ItemNotFoundException] {
         $runValue = $null
@@ -229,10 +229,10 @@ if (Test-Path -LiteralPath $runKey) {
             $expectedRunValue,
             [StringComparison]::OrdinalIgnoreCase
         )) {
-            Remove-ItemProperty -LiteralPath $runKey -Name 'RayanLamp'
+            Remove-ItemProperty -LiteralPath $runKey -Name 'PCControllerDesktop'
         }
         else {
-            Write-Warning 'The RayanLamp startup value points elsewhere and was preserved.'
+            Write-Warning 'The PCControllerDesktop startup value points elsewhere and was preserved.'
         }
     }
 }
@@ -243,13 +243,13 @@ if (Test-Path -LiteralPath $installedExecutable -PathType Leaf) {
         Write-Warning (
             'COM Automation registration was not removed. A 32-bit or 64-bit ' +
             'registry view may be owned by another executable and was preserved; ' +
-            "RayanLamp exited with code $LASTEXITCODE."
+            "PCControllerDesktop exited with code $LASTEXITCODE."
         )
     }
 }
 elseif (Test-Path -LiteralPath $installPath) {
     Write-Warning (
-        'RayanLamp.exe is missing, so ownership-safe 32-bit and 64-bit COM ' +
+        'PCControllerDesktop.exe is missing, so ownership-safe 32-bit and 64-bit COM ' +
         'registration cleanup could not run.'
     )
 }
@@ -268,20 +268,20 @@ if ($RemoveUserData) {
     if ([string]::IsNullOrWhiteSpace($appData)) {
         throw 'The current user AppData directory is unavailable.'
     }
-    $dataPath = [IO.Path]::GetFullPath((Join-Path $appData 'RayanLamp'))
+    $dataPath = [IO.Path]::GetFullPath((Join-Path $appData 'PCControllerDesktop'))
     Assert-ExactPath -Actual $dataPath `
-        -Expected (Join-Path $appData 'RayanLamp') `
+        -Expected (Join-Path $appData 'PCControllerDesktop') `
         -Purpose 'user-data'
     if (Test-Path -LiteralPath $dataPath) {
         Remove-Item -LiteralPath $dataPath -Recurse -Force
     }
 }
 
-Write-RayanLampStatus -Level Success `
-    -Icon (Get-RayanLampEmojiGlyph -Name Cleanup) -Label 'REMOVED' `
-    -Message 'RayanLamp was uninstalled for the current user.'
+Write-PCControllerDesktopStatus -Level Success `
+    -Icon (Get-PCControllerDesktopEmojiGlyph -Name Cleanup) -Label 'REMOVED' `
+    -Message 'PCControllerDesktop was uninstalled for the current user.'
 if (-not $RemoveUserData) {
-    Write-RayanLampStatus -Level Info `
-        -Icon (Get-RayanLampEmojiGlyph -Name Preserve) -Label 'PRESERVED' `
-        -Message "Configuration and logs remain under $appData\RayanLamp."
+    Write-PCControllerDesktopStatus -Level Info `
+        -Icon (Get-PCControllerDesktopEmojiGlyph -Name Preserve) -Label 'PRESERVED' `
+        -Message "Configuration and logs remain under $appData\PCControllerDesktop."
 }

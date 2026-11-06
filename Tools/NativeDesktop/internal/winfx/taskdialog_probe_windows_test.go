@@ -18,7 +18,7 @@ func TestTaskDialogRuntimeFallbackProbe(t *testing.T) {
 	go func() {
 		for range 50 {
 			for _, title := range []string{
-				"RayanLamp TaskDialog probe",
+				"PCControllerDesktop TaskDialog probe",
 				"CALLBACK-PROBE",
 			} {
 				value, _ := windows.UTF16PtrFromString(title)
@@ -36,7 +36,7 @@ func TestTaskDialogRuntimeFallbackProbe(t *testing.T) {
 		}
 	}()
 	options := TaskDialogOptions{
-		Title:           "RayanLamp TaskDialog probe",
+		Title:           "PCControllerDesktop TaskDialog probe",
 		MainInstruction: "Probe",
 		Content:         "Probe",
 		Icon:            DialogIconInformation,

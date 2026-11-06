@@ -8,18 +8,18 @@ import (
 )
 
 func TestQuoteRunCommand(t *testing.T) {
-	got, err := quoteRunCommand(`C:\Program Files\Rayan Lamp\RayanLamp.exe`)
+	got, err := quoteRunCommand(`C:\Program Files\PCController\PCControllerDesktop.exe`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `"C:\Program Files\Rayan Lamp\RayanLamp.exe"`
+	want := `"C:\Program Files\PCController\PCControllerDesktop.exe"`
 	if got != want {
 		t.Fatalf("quoteRunCommand = %q, want %q", got, want)
 	}
 }
 
 func TestQuoteRunCommandRejectsUnsafePaths(t *testing.T) {
-	for _, path := range []string{"", `relative\RayanLamp.exe`, "C:\\bad\"name.exe", "C:\\bad\nname.exe"} {
+	for _, path := range []string{"", `relative\PCControllerDesktop.exe`, "C:\\bad\"name.exe", "C:\\bad\nname.exe"} {
 		t.Run(path, func(t *testing.T) {
 			_, err := quoteRunCommand(path)
 			if !errors.Is(err, ErrInvalidExecutablePath) {
@@ -32,8 +32,8 @@ func TestQuoteRunCommandRejectsUnsafePaths(t *testing.T) {
 func TestDecideStartWithWindowsActionPreservesForeignValues(t *testing.T) {
 	t.Parallel()
 
-	expected := `"C:\Apps\RayanLamp\RayanLamp.exe"`
-	foreign := `"D:\Portable\RayanLamp.exe"`
+	expected := `"C:\Apps\PCControllerDesktop\PCControllerDesktop.exe"`
+	foreign := `"D:\Portable\PCControllerDesktop.exe"`
 	tests := []struct {
 		name    string
 		enabled bool
@@ -48,7 +48,7 @@ func TestDecideStartWithWindowsActionPreservesForeignValues(t *testing.T) {
 		{
 			"enable owned different casing",
 			true,
-			`"c:\apps\rayanlamp\rayanlamp.exe"`,
+			`"c:\apps\pccontrollerdesktop\pccontrollerdesktop.exe"`,
 			true,
 			startWithWindowsNoop,
 		},
@@ -77,7 +77,7 @@ func TestStartWithWindowsPersistenceDoesNotMutateOnStartup(t *testing.T) {
 
 	var calls []bool
 	persistence, err := newStartWithWindowsPersistence(
-		`C:\Apps\RayanLamp\RayanLamp.exe`,
+		`C:\Apps\PCControllerDesktop\PCControllerDesktop.exe`,
 		false,
 		func(enabled bool, _ string) error {
 			calls = append(calls, enabled)
@@ -109,7 +109,7 @@ func TestReconcileStartWithWindowsSettingIsReadOnlyAndFailSafe(t *testing.T) {
 
 	var calls int
 	got, err := reconcileStartWithWindowsSetting(
-		`C:\Apps\RayanLamp\RayanLamp.exe`,
+		`C:\Apps\PCControllerDesktop\PCControllerDesktop.exe`,
 		false,
 		func(string) (bool, error) {
 			calls++
@@ -125,7 +125,7 @@ func TestReconcileStartWithWindowsSettingIsReadOnlyAndFailSafe(t *testing.T) {
 
 	injected := errors.New("injected read failure")
 	got, err = reconcileStartWithWindowsSetting(
-		`C:\Apps\RayanLamp\RayanLamp.exe`,
+		`C:\Apps\PCControllerDesktop\PCControllerDesktop.exe`,
 		true,
 		func(string) (bool, error) {
 			return false, injected
@@ -142,7 +142,7 @@ func TestStartWithWindowsPersistenceDoesNotRetryOnUnrelatedSave(t *testing.T) {
 	injected := errors.New("injected registry failure")
 	var calls int
 	persistence, err := newStartWithWindowsPersistence(
-		`C:\Apps\RayanLamp\RayanLamp.exe`,
+		`C:\Apps\PCControllerDesktop\PCControllerDesktop.exe`,
 		false,
 		func(bool, string) error {
 			calls++
@@ -167,7 +167,7 @@ func TestStartWithWindowsOwnershipErrorUnwraps(t *testing.T) {
 	t.Parallel()
 
 	err := &StartWithWindowsOwnershipError{
-		Command: `"D:\Portable\RayanLamp.exe"`,
+		Command: `"D:\Portable\PCControllerDesktop.exe"`,
 	}
 	if !errors.Is(err, ErrStartWithWindowsOwnedByAnotherCommand) {
 		t.Fatalf("ownership error does not unwrap: %v", err)

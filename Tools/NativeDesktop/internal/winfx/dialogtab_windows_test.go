@@ -112,7 +112,7 @@ func TestDialogTabRGBUsesCOLORREFOrder(t *testing.T) {
 
 func TestDialogTabGlyphsCoverEverySettingsPage(t *testing.T) {
 	want := map[string]uint16{
-		"Lamp":          0xEA80,
+		"Device":        0xEA80,
 		"Appearance":    0xE790,
 		"Notifications": 0xEA8F,
 		"Hotkeys":       0xE765,

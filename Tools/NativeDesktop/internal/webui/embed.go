@@ -1,4 +1,4 @@
-// Package webui serves the compiled, bundled Rayan Lamp SPA/PWA.
+// Package webui serves the compiled, bundled PCController SPA/PWA.
 package webui
 
 import (
@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"io/fs"
 
-	"rayanlamp.local/app/internal/buildinfo"
+	"pccontroller.local/desktop/internal/buildinfo"
 )
 
 // distribution contains only generated browser artifacts. Frontend source and
-// node_modules are never linked into RayanLamp.exe.
+// node_modules are never linked into PCControllerDesktop.exe.
 //
 //go:embed all:dist
 var distribution embed.FS

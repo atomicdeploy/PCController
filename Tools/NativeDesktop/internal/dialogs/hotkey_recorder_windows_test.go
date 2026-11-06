@@ -8,12 +8,12 @@ import (
 	"strings"
 	"testing"
 
-	"rayanlamp.local/app/internal/winfx"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
 func TestHotkeyRecorderBindingSetChordCanonicalizes(t *testing.T) {
 	group := newHotkeyRecorderGroup()
-	binding := group.Add("Toggle lamp", "Toggle the current state", "")
+	binding := group.Add("Toggle device", "Toggle the current state", "")
 
 	binding.SetChord(" control + windows + pgdn ")
 
@@ -23,7 +23,7 @@ func TestHotkeyRecorderBindingSetChordCanonicalizes(t *testing.T) {
 }
 
 func TestHotkeyRecorderButtonsUseUniquePageAccelerators(t *testing.T) {
-	actions := []string{"Toggle lamp", "Turn on", "Turn off", "Show window"}
+	actions := []string{"Toggle device", "Turn on", "Turn off", "Show window"}
 	seen := make(map[byte]string)
 	captions := []string{
 		settingsSaveCaption,
@@ -58,7 +58,7 @@ func TestHotkeyRecorderButtonsUseUniquePageAccelerators(t *testing.T) {
 func TestHotkeyRecorderGroupDetectsSemanticDuplicate(t *testing.T) {
 	group := newHotkeyRecorderGroup()
 	toggle := group.Add(
-		"Toggle lamp",
+		"Toggle device",
 		"Toggle the current state",
 		"Ctrl+Alt+L",
 	)
@@ -79,7 +79,7 @@ func TestHotkeyRecorderGroupDetectsSemanticDuplicate(t *testing.T) {
 		)
 	}
 	if !strings.Contains(toggle.message, "Show window") ||
-		!strings.Contains(show.message, "Toggle lamp") {
+		!strings.Contains(show.message, "Toggle device") {
 		t.Fatalf(
 			"duplicate messages = toggle %q, show %q",
 			toggle.message,
@@ -95,7 +95,7 @@ func TestHotkeyRecorderGroupDetectsSemanticDuplicate(t *testing.T) {
 func TestHotkeyRecorderGroupRejectsReservedF12(t *testing.T) {
 	group := newHotkeyRecorderGroup()
 	binding := group.Add(
-		"Toggle lamp",
+		"Toggle device",
 		"Toggle the current state",
 		"Ctrl+F12",
 	)
@@ -120,7 +120,7 @@ func TestHotkeyRecorderGroupRejectsReservedF12(t *testing.T) {
 func TestHotkeyRecorderGroupAcceptsSingleKeyWithWarning(t *testing.T) {
 	group := newHotkeyRecorderGroup()
 	binding := group.Add(
-		"Toggle lamp",
+		"Toggle device",
 		"Toggle the current state",
 		"L",
 	)
@@ -144,7 +144,7 @@ func TestHotkeyRecorderGroupAcceptsSingleKeyWithWarning(t *testing.T) {
 func TestHotkeyRecorderGroupRejectsValidationWhileActive(t *testing.T) {
 	group := newHotkeyRecorderGroup()
 	binding := group.Add(
-		"Toggle lamp",
+		"Toggle device",
 		"Toggle the current state",
 		"Ctrl+Alt+L",
 	)
@@ -164,7 +164,7 @@ func TestHotkeyRecorderGroupRejectsValidationWhileActive(t *testing.T) {
 func TestHotkeyRecorderGroupCancelRestoresOriginalChord(t *testing.T) {
 	group := newHotkeyRecorderGroup()
 	binding := group.Add(
-		"Toggle lamp",
+		"Toggle device",
 		"Toggle the current state",
 		" control + alt + l ",
 	)
@@ -199,7 +199,7 @@ func TestHotkeyRecorderGroupCancelRestoresOriginalChord(t *testing.T) {
 func TestHotkeyRecorderGroupClearDisablesBinding(t *testing.T) {
 	group := newHotkeyRecorderGroup()
 	binding := group.Add(
-		"Toggle lamp",
+		"Toggle device",
 		"Toggle the current state",
 		"Ctrl+Alt+L",
 	)
@@ -240,7 +240,7 @@ func TestHotkeyRecorderGroupClearDisablesBinding(t *testing.T) {
 func TestHotkeyRecorderGroupCompletesRecordedChord(t *testing.T) {
 	group := newHotkeyRecorderGroup()
 	binding := group.Add(
-		"Toggle lamp",
+		"Toggle device",
 		"Toggle the current state",
 		"",
 	)
@@ -268,7 +268,7 @@ func TestHotkeyRecorderGroupCompletesRecordedChord(t *testing.T) {
 func TestHotkeyRecorderAvailabilityFailurePersistsAndCanBeRetried(t *testing.T) {
 	group := newHotkeyRecorderGroup()
 	binding := group.Add(
-		"Toggle lamp",
+		"Toggle device",
 		"Toggle the current state",
 		"Ctrl+Alt+L",
 	)

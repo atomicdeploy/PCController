@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/diagnostics"
-	"rayanlamp.local/app/internal/model"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/diagnostics"
+	"pccontroller.local/desktop/internal/model"
 )
 
 const (
@@ -43,7 +43,7 @@ type StreamEnvelope struct {
 	Type          string                `json:"type"`
 	SentAt        time.Time             `json:"sent_at"`
 	Snapshot      *model.Snapshot       `json:"snapshot,omitempty"`
-	PreviousState model.LampState       `json:"previous_state,omitempty"`
+	PreviousState model.OutputState     `json:"previous_state,omitempty"`
 	InitialSync   bool                  `json:"initial_sync,omitempty"`
 	Title         string                `json:"title,omitempty"`
 	Message       string                `json:"message,omitempty"`
@@ -245,7 +245,7 @@ func (h *eventHub) broadcast(envelope StreamEnvelope, update func()) {
 		select {
 		case client.send <- envelope:
 		default:
-			// A stalled browser must not delay the lamp/network event loop.
+			// A stalled browser must not delay the device/network event loop.
 			// Disconnect it; a reconnect receives an authoritative hello.
 			delete(h.clients, client)
 			retireStreamClient(client)

@@ -1,4 +1,4 @@
-// Package comserver implements RayanLamp's opt-in, out-of-process COM
+// Package comserver implements PCControllerDesktop's opt-in, out-of-process COM
 // Automation server. Its type-info-free IDispatch surface provides On, Off,
 // Toggle, Show, Hide, Reconnect, Notify, GetState, and the read-only State
 // property.
@@ -16,21 +16,21 @@ import (
 	"sync/atomic"
 	"unicode/utf8"
 
-	"rayanlamp.local/app/internal/ipc"
+	"pccontroller.local/desktop/internal/ipc"
 )
 
 const (
 	// ProgID is the stable, version-independent COM programmatic identifier.
-	ProgID = "YektaYar.RayanLamp"
+	ProgID = "DRSDavidSoft.PCController"
 
 	// VersionedProgID is the current version-specific alias used by CurVer.
-	VersionedProgID = "YektaYar.RayanLamp.1"
+	VersionedProgID = "DRSDavidSoft.PCController.1"
 
-	// CLSID is UUIDv5(URL, "https://yektayar.ir/rayanlamp/com-automation").
-	// It is deterministic and must remain stable for compatibility.
+	// Preserve the imported automation class's immutable identity; changing
+	// branding and ProgIDs must not silently assign this class a different GUID.
 	CLSID = "{D9603C3B-7D90-53B2-AC01-7656B027603F}"
 
-	displayName = "RayanLamp Automation"
+	displayName = "PCControllerDesktop Automation"
 
 	dispatchMethod      = 0x1
 	dispatchPropertyGet = 0x2
@@ -142,7 +142,7 @@ func invocation(dispID int32, flags uint16, args []any) (method string, params a
 		if len(args) != 0 {
 			return "", nil, false, errBadParameterCount
 		}
-		return "lamp.on", nil, false, nil
+		return "device.on", nil, false, nil
 	case dispIDOff:
 		if flags&dispatchMethod == 0 {
 			return "", nil, false, errMemberAccess
@@ -150,7 +150,7 @@ func invocation(dispID int32, flags uint16, args []any) (method string, params a
 		if len(args) != 0 {
 			return "", nil, false, errBadParameterCount
 		}
-		return "lamp.off", nil, false, nil
+		return "device.off", nil, false, nil
 	case dispIDToggle:
 		if flags&dispatchMethod == 0 {
 			return "", nil, false, errMemberAccess
@@ -158,7 +158,7 @@ func invocation(dispID int32, flags uint16, args []any) (method string, params a
 		if len(args) != 0 {
 			return "", nil, false, errBadParameterCount
 		}
-		return "lamp.toggle", nil, false, nil
+		return "device.toggle", nil, false, nil
 	case dispIDShow:
 		if flags&dispatchMethod == 0 {
 			return "", nil, false, errMemberAccess

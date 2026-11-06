@@ -1,6 +1,6 @@
-# Shared terminal presentation for RayanLamp's PowerShell tooling.
+# Shared terminal presentation for PCControllerDesktop's PowerShell tooling.
 #
-# RayanLamp-authored human status is written to the information stream so the
+# PCControllerDesktop-authored human status is written to the information stream so the
 # script's final success-stream object remains a machine-readable artifact
 # path. (Native child tools can still forward their own ordinary stdout.)
 # ANSI SGR is emitted only for an attached VT-capable terminal. NO_COLOR and
@@ -8,7 +8,7 @@
 
 Set-StrictMode -Version Latest
 
-function Get-RayanLampEnvironmentValue {
+function Get-PCControllerDesktopEnvironmentValue {
     param([Parameter(Mandatory = $true)][string]$Name)
 
     $item = Get-Item -LiteralPath "Env:$Name" -ErrorAction SilentlyContinue
@@ -18,48 +18,48 @@ function Get-RayanLampEnvironmentValue {
     return [string]$item.Value
 }
 
-function Test-RayanLampEnvironmentEnabled {
+function Test-PCControllerDesktopEnvironmentEnabled {
     param([Parameter(Mandatory = $true)][string]$Name)
 
-    $value = Get-RayanLampEnvironmentValue -Name $Name
+    $value = Get-PCControllerDesktopEnvironmentValue -Name $Name
     if ([string]::IsNullOrWhiteSpace($value)) {
         return $false
     }
     return $value -notmatch '^(?:0|false|no|off)$'
 }
 
-function Test-RayanLampVT100 {
+function Test-PCControllerDesktopVT100 {
     param(
         [ValidateSet('Output', 'Error')]
         [string]$Stream = 'Output'
     )
 
-    $noColor = Get-RayanLampEnvironmentValue -Name 'NO_COLOR'
+    $noColor = Get-PCControllerDesktopEnvironmentValue -Name 'NO_COLOR'
     if (-not [string]::IsNullOrEmpty($noColor)) {
         return $false
     }
     if ([string]::Equals(
-        (Get-RayanLampEnvironmentValue -Name 'TERM'),
+        (Get-PCControllerDesktopEnvironmentValue -Name 'TERM'),
         'dumb',
         [StringComparison]::OrdinalIgnoreCase
     )) {
         return $false
     }
     if ([string]::Equals(
-        (Get-RayanLampEnvironmentValue -Name 'CLICOLOR'),
+        (Get-PCControllerDesktopEnvironmentValue -Name 'CLICOLOR'),
         '0',
         [StringComparison]::Ordinal
     ) -or [string]::Equals(
-        (Get-RayanLampEnvironmentValue -Name 'FORCE_COLOR'),
+        (Get-PCControllerDesktopEnvironmentValue -Name 'FORCE_COLOR'),
         '0',
         [StringComparison]::Ordinal
     )) {
         return $false
     }
 
-    if ((Test-RayanLampEnvironmentEnabled -Name 'FORCE_COLOR') -or
-        (Test-RayanLampEnvironmentEnabled -Name 'CLICOLOR_FORCE') -or
-        (Test-RayanLampEnvironmentEnabled -Name 'RAYANLAMP_FORCE_COLOR')) {
+    if ((Test-PCControllerDesktopEnvironmentEnabled -Name 'FORCE_COLOR') -or
+        (Test-PCControllerDesktopEnvironmentEnabled -Name 'CLICOLOR_FORCE') -or
+        (Test-PCControllerDesktopEnvironmentEnabled -Name 'PCCONTROLLER_DESKTOP_FORCE_COLOR')) {
         return $true
     }
 
@@ -82,16 +82,16 @@ function Test-RayanLampVT100 {
     return $null -ne $property -and [bool]$Host.UI.SupportsVirtualTerminal
 }
 
-function Test-RayanLampEmoji {
+function Test-PCControllerDesktopEmoji {
     param(
         [ValidateSet('Output', 'Error')]
         [string]$Stream = 'Output'
     )
 
-    if (Test-RayanLampEnvironmentEnabled -Name 'NO_EMOJI') {
+    if (Test-PCControllerDesktopEnvironmentEnabled -Name 'NO_EMOJI') {
         return $false
     }
-    $preference = Get-RayanLampEnvironmentValue -Name 'RAYANLAMP_EMOJI'
+    $preference = Get-PCControllerDesktopEnvironmentValue -Name 'PCCONTROLLER_DESKTOP_EMOJI'
     if (-not [string]::IsNullOrWhiteSpace($preference)) {
         switch ($preference.Trim().ToLowerInvariant()) {
             { $_ -in @('1', 'always', 'force', 'on', 'true', 'yes') } {
@@ -103,7 +103,7 @@ function Test-RayanLampEmoji {
         }
     }
     if ([string]::Equals(
-        (Get-RayanLampEnvironmentValue -Name 'TERM'),
+        (Get-PCControllerDesktopEnvironmentValue -Name 'TERM'),
         'dumb',
         [StringComparison]::OrdinalIgnoreCase
     )) {
@@ -120,11 +120,11 @@ function Test-RayanLampEmoji {
             return $false
         }
         if (-not [string]::IsNullOrWhiteSpace(
-            (Get-RayanLampEnvironmentValue -Name 'WT_SESSION')
+            (Get-PCControllerDesktopEnvironmentValue -Name 'WT_SESSION')
         ) -or -not [string]::IsNullOrWhiteSpace(
-            (Get-RayanLampEnvironmentValue -Name 'ConEmuANSI')
+            (Get-PCControllerDesktopEnvironmentValue -Name 'ConEmuANSI')
         ) -or -not [string]::IsNullOrWhiteSpace(
-            (Get-RayanLampEnvironmentValue -Name 'ANSICON')
+            (Get-PCControllerDesktopEnvironmentValue -Name 'ANSICON')
         )) {
             return $true
         }
@@ -135,13 +135,13 @@ function Test-RayanLampEmoji {
     }
 }
 
-function Get-RayanLampEmojiGlyph {
+function Get-PCControllerDesktopEmojiGlyph {
     param(
         [Parameter(Mandatory = $true)]
         [ValidateSet(
             'Start', 'Step', 'Success', 'Info', 'Artifact', 'Warning',
             'Dependencies', 'Typecheck', 'Test', 'Web', 'Resource', 'Compile',
-            'Compress', 'Hash', 'Size', 'Assets', 'Lamp', 'Cleanup', 'Preserve'
+            'Compress', 'Hash', 'Size', 'Assets', 'Device', 'Cleanup', 'Preserve'
         )]
         [string]$Name
     )
@@ -163,7 +163,7 @@ function Get-RayanLampEmojiGlyph {
         Hash = @(0x1F510)
         Size = @(0x1F4CF)
         Assets = @(0x1F3A8)
-        Lamp = @(0x1F4A1)
+        Device = @(0x1F4A1)
         Cleanup = @(0x1F9F9)
         Preserve = @(0x1F6E1, 0xFE0F)
     }[$Name]
@@ -175,7 +175,7 @@ function Get-RayanLampEmojiGlyph {
     return $builder.ToString()
 }
 
-function Format-RayanLampTerminalMessage {
+function Format-PCControllerDesktopTerminalMessage {
     param(
         [Parameter(Mandatory = $true)]
         [ValidateSet('Start', 'Step', 'Success', 'Info', 'Artifact', 'Warning')]
@@ -189,32 +189,32 @@ function Format-RayanLampTerminalMessage {
 
     $presentation = @{
         Start = @{
-            Icon = Get-RayanLampEmojiGlyph -Name Start
+            Icon = Get-PCControllerDesktopEmojiGlyph -Name Start
             Label = 'START'
             Sgr = '1;36'
         }
         Step = @{
-            Icon = Get-RayanLampEmojiGlyph -Name Step
+            Icon = Get-PCControllerDesktopEmojiGlyph -Name Step
             Label = 'STEP'
             Sgr = '1;36'
         }
         Success = @{
-            Icon = Get-RayanLampEmojiGlyph -Name Success
+            Icon = Get-PCControllerDesktopEmojiGlyph -Name Success
             Label = 'OK'
             Sgr = '1;32'
         }
         Info = @{
-            Icon = Get-RayanLampEmojiGlyph -Name Info
+            Icon = Get-PCControllerDesktopEmojiGlyph -Name Info
             Label = 'INFO'
             Sgr = '1;34'
         }
         Artifact = @{
-            Icon = Get-RayanLampEmojiGlyph -Name Artifact
+            Icon = Get-PCControllerDesktopEmojiGlyph -Name Artifact
             Label = 'ARTIFACT'
             Sgr = '1;35'
         }
         Warning = @{
-            Icon = Get-RayanLampEmojiGlyph -Name Warning
+            Icon = Get-PCControllerDesktopEmojiGlyph -Name Warning
             Label = 'WARNING'
             Sgr = '1;33'
         }
@@ -247,7 +247,7 @@ function Format-RayanLampTerminalMessage {
     return "$escape[$($presentation.Sgr)m$prefix$escape[0m $Message"
 }
 
-function Write-RayanLampStatus {
+function Write-PCControllerDesktopStatus {
     param(
         [Parameter(Mandatory = $true)]
         [ValidateSet('Start', 'Step', 'Success', 'Info', 'Artifact', 'Warning')]
@@ -257,11 +257,11 @@ function Write-RayanLampStatus {
         [string]$Label
     )
 
-    $formatted = Format-RayanLampTerminalMessage `
+    $formatted = Format-PCControllerDesktopTerminalMessage `
         -Level $Level `
         -Message $Message `
-        -Ansi:(Test-RayanLampVT100) `
-        -Emoji:(Test-RayanLampEmoji) `
+        -Ansi:(Test-PCControllerDesktopVT100) `
+        -Emoji:(Test-PCControllerDesktopEmoji) `
         -Icon $Icon `
         -Label $Label
     Write-Information $formatted -InformationAction Continue

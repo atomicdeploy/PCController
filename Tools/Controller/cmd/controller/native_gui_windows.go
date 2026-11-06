@@ -19,8 +19,9 @@ import (
 	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/native"
+	"pccontroller.local/controller/internal/nativeshell"
 	"pccontroller.local/controller/internal/productidentity"
-	"rayanlamp.local/app/desktop"
+	"pccontroller.local/desktop/desktop"
 )
 
 func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Store) error {
@@ -125,6 +126,7 @@ func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Stor
 	pageChanges := make(chan struct{}, 1)
 	defer func() { cancel(); client.Close() }()
 	updates := make(chan desktop.Snapshot, 128)
+	messages := make(chan desktop.Message, 32)
 	readbacks := make(chan control.Snapshot, 1)
 	type channelCatalog struct {
 		Controls     []appconfig.ControlDescriptor `json:"controls"`
@@ -167,13 +169,13 @@ func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Stor
 	if err != nil {
 		return fmt.Errorf("connect native desktop to controller: %w", err)
 	}
-	updates <- desktopSnapshot(initial, *address)
+	updates <- desktopSnapshot(initial, *address, productidentity.Title(store.Current().UI.AppTitle))
 	client.StartLive()
 	go func() {
 		state := initial
 		var catalog channelCatalog
 		publish := func() {
-			snapshot := desktopSnapshot(state, *address)
+			snapshot := desktopSnapshot(state, *address, productidentity.Title(store.Current().UI.AppTitle))
 			snapshot.Channels = desktopChannels(state, catalog.Controls)
 			snapshot.CatalogRevision = catalog.BoardProfile.Revision
 			select {
@@ -190,6 +192,13 @@ func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Stor
 					return
 				}
 				eventHistory.append(event)
+				if nativeDesktopReceivesMessage(event) {
+					select {
+					case messages <- desktop.Message{Text: event.Text, Source: event.Source}:
+					case <-ctx.Done():
+						return
+					}
+				}
 				select {
 				case pageChanges <- struct{}{}:
 				default:
@@ -265,9 +274,24 @@ func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Stor
 	}()
 	console := newNativeConsole(store.Path(), *address, auth)
 	pages := nativePages{client: client, events: eventHistory}
+	notifiers := map[string]hostui.Notifier{}
+	for _, delivery := range []string{"auto", "toast", "balloon"} {
+		notifiers[delivery] = hostui.NewNotifier(hostui.NotifierOptions{Delivery: delivery})
+	}
 	return desktop.Run(ctx, desktop.Options{
+		Notify: func(ctx context.Context, title, message, delivery string) error {
+			if delivery == "off" {
+				return nil
+			}
+			notifier := notifiers[delivery]
+			if notifier == nil {
+				return errors.New("unknown desktop notification delivery")
+			}
+			// The desktop owns custom WAV cues. Do not also play an OS sound.
+			return notifier.Notify(ctx, hostui.Notification{Title: title, Body: message, Silent: true})
+		},
 		Title:      productidentity.Title(store.Current().UI.AppTitle),
-		ConfigPath: filepath.Join(filepath.Dir(store.Path()), "native-desktop.json"), Updates: updates,
+		ConfigPath: filepath.Join(filepath.Dir(store.Path()), "native-desktop.json"), Updates: updates, Messages: messages,
 		Log:     func(format string, args ...any) { fmt.Fprintf(stderr, format+"\n", args...) },
 		Execute: func(ctx context.Context, command string) error { _, err := client.Execute(ctx, command); return err },
 		SetPWM: func(actionCtx context.Context, key string, percent float64) error {
@@ -348,11 +372,49 @@ func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Stor
 				return err
 			}
 			if page != "" {
-				page = map[string]string{"control": "controls", "rf": "device", "programs": "workbench", "firmware": "updates", "events": "events", "settings": "settings"}[page]
+				if alias, ok := map[string]string{"control": "controls", "rf": "device", "programs": "workbench", "firmware": "updates"}[page]; ok {
+					page = alias
+				}
 				target, err = webURLForAppAction(target, hostui.AppAction{Kind: "app.page", Value: page})
 				if err != nil {
 					return err
 				}
+			}
+			if *address == configured.Listen {
+				return openAuthenticatedBrowser(target, store)
+			}
+			return openBrowser(target)
+		},
+		InvokeHostMenu: func(actionCtx context.Context, id string) error {
+			if id == "exit" {
+				var reply any
+				return client.call(actionCtx, "controller.quit", nil, &reply)
+			}
+			if id == "reconnect" {
+				_, err := client.Execute(actionCtx, "reconnect")
+				return err
+			}
+			current, err := client.Snapshot(actionCtx)
+			if err != nil {
+				return err
+			}
+			if !current.Connected {
+				return errors.New("controller disconnected before the page could open")
+			}
+			known := false
+			for _, item := range desktopHostMenu(current) {
+				known = known || (item.ID == id && id != "" && !item.Disabled && !item.Separator)
+			}
+			if !known {
+				return fmt.Errorf("unknown host tray action %q", id)
+			}
+			target, err := browserURL(*address)
+			if err != nil {
+				return err
+			}
+			target, err = nativeWebPageURL(target, id)
+			if err != nil {
+				return err
 			}
 			if *address == configured.Listen {
 				return openAuthenticatedBrowser(target, store)
@@ -366,8 +428,12 @@ func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Stor
 	})
 }
 
-func desktopSnapshot(state control.Snapshot, address string) desktop.Snapshot {
+func desktopSnapshot(state control.Snapshot, address, title string) desktop.Snapshot {
+	trayState := desktopTrayState(state, title)
 	return desktop.Snapshot{
+		ObservedAt: state.StatusUpdated, Generation: state.ConnectionGeneration,
+		HostMenu: desktopHostMenu(state),
+		TrayIcon: string(nativeshell.StateIcon(trayState)), TrayTooltip: nativeshell.Tooltip(trayState),
 		Busy:      state.EmergencyStop.Active || state.Programming.Active || state.Programming.RestorationPending,
 		Connected: state.Connected, HavePanel: state.HaveFrontPanel || state.HaveFrontPanelSegments,
 		HaveStatus: state.HaveStatus, CanNavigate: state.Connected && state.Hello.Capabilities&native.CapabilityMenuRemote != 0,
@@ -377,6 +443,25 @@ func desktopSnapshot(state control.Snapshot, address string) desktop.Snapshot {
 		LCDLine1: state.FrontPanel.LCDLine1, LCDLine2: state.FrontPanel.LCDLine2, Mode: strconv.Itoa(int(state.FrontPanel.ProgramMode)), Endpoint: address,
 		SupplyMV: state.Status.SupplyMV, CurrentMA: state.Status.CurrentMA, TemperatureC: float64(state.Status.TLEDCenti) / 100,
 	}
+}
+
+func desktopTrayState(state control.Snapshot, title string) nativeshell.State {
+	return nativeshell.State{Title: title, Connected: state.Connected, Paused: state.Paused, Port: state.Port.Name, ConnectionState: state.ConnectionState}
+}
+
+func desktopHostMenu(state control.Snapshot) []desktop.MenuItem {
+	var items []desktop.MenuItem
+	for _, item := range nativeshell.BuildMenu(desktopTrayState(state, "")) {
+		id, _ := nativeshell.PageForCommand(item.Command)
+		if item.Command == nativeshell.CommandReconnect {
+			id = "reconnect"
+		}
+		if item.Command == nativeshell.CommandExit {
+			id = "exit"
+		}
+		items = append(items, desktop.MenuItem{ID: id, Label: item.Label, Disabled: !item.Enabled, Separator: item.Kind == nativeshell.ItemSeparator, Default: item.Default})
+	}
+	return items
 }
 
 func mergeDesktopSnapshot(previous, next control.Snapshot) control.Snapshot {

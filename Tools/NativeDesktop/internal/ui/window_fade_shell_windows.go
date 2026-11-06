@@ -7,7 +7,7 @@ import (
 
 	"github.com/lxn/win"
 
-	"rayanlamp.local/app/internal/winfx"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
 func (s *Shell) beginEntranceFade() bool {

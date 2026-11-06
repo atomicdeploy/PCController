@@ -1,4 +1,4 @@
-// Package webexport creates the reproducible, frontend-only RayanLamp archive.
+// Package webexport creates the reproducible, frontend-only PCControllerDesktop archive.
 package webexport
 
 import (
@@ -20,7 +20,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"rayanlamp.local/app/assets"
+	"pccontroller.local/desktop/assets"
 )
 
 const readmeArchiveName = "README.txt"

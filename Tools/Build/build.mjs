@@ -1658,6 +1658,10 @@ export function collectWebNotices(destination, webRoot = WEB_ROOT) {
 	return packages
 }
 
+export function isModuleNotice(name) {
+	return /^(LICEN[CS]E|UNLICENSE|COPYING|NOTICE)/i.test(name)
+}
+
 function collectModuleNotices(go, stage, env, options) {
 	const root = join(stage, 'licenses')
 	removeGeneratedTree(root)
@@ -1672,7 +1676,7 @@ function collectModuleNotices(go, stage, env, options) {
 		const [modulePath, version, directory] = line.split('|')
 		if (!modulePath || !directory || !existsSync(directory)) continue
 		const notices = readdirSync(directory, { withFileTypes: true }).filter(entry =>
-			entry.isFile() && /^(LICEN[CS]E|COPYING|NOTICE)/i.test(entry.name)
+			entry.isFile() && isModuleNotice(entry.name)
 		)
 		if (notices.length === 0) continue
 		const safe = `${modulePath}@${version || 'local'}`.replace(/[\\/:*?"<>|]/g, '_')

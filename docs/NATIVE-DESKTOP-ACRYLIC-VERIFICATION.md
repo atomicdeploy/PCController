@@ -29,7 +29,7 @@ live foreground changes, resizing, pointer/press state, masked adjacent shadows,
 clipped controls and hidden-resource release. A reference comparison retains the
 original layered material with only bounded 8-bit alpha rounding differences.
 
-For an interactive desktop, set `RAYANLAMP_WINDOW_TESTS=1` and run
+For an interactive desktop, set `PCCONTROLLER_DESKTOP_WINDOW_TESTS=1` and run
 `TestControllerGlassHoverPresentation` through the same stable runner. It owns
 an offline native window, loads the product's Common Controls manifest, and
 measures full paint plus presentation submission in both DirectX and compatibility

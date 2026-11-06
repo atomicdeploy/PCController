@@ -4,11 +4,11 @@ import (
 	"image"
 	"testing"
 
-	"rayanlamp.local/app/assets"
+	"pccontroller.local/desktop/assets"
 )
 
-func TestRenderEmbeddedLampSVGAtDeviceSize(t *testing.T) {
-	for _, name := range []string{"lamp-off.svg", "lamp-on.svg"} {
+func TestRenderEmbeddedDeviceSVGAtDeviceSize(t *testing.T) {
+	for _, name := range []string{"device-off.svg", "device-on.svg"} {
 		t.Run(name, func(t *testing.T) {
 			data, err := assets.Files.ReadFile(name)
 			if err != nil {
@@ -35,7 +35,7 @@ func TestRenderEmbeddedLampSVGAtDeviceSize(t *testing.T) {
 }
 
 func TestRenderOnStateKeepsEveryVectorRay(t *testing.T) {
-	data, err := assets.Files.ReadFile("lamp-on.svg")
+	data, err := assets.Files.ReadFile("device-on.svg")
 	if err != nil {
 		t.Fatal(err)
 	}

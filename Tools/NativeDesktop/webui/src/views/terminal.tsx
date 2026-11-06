@@ -1,7 +1,7 @@
 import type { ITheme, Terminal as XTermTerminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { RayanLampClient } from "../api";
+import type { PCControllerDesktopClient } from "../api";
 import type {
   DeviceTerminalStatus,
   DeviceTerminalState
@@ -31,7 +31,7 @@ const disconnectedStatus: DeviceTerminalStatus = {
   sequence: 0
 };
 
-export function DeviceTerminal({ api }: { api: RayanLampClient }) {
+export function DeviceTerminal({ api }: { api: PCControllerDesktopClient }) {
   const direct =
     activeClientKind.value === "direct" ||
     capabilities.value.transport_direct === true ||
@@ -48,7 +48,7 @@ export function DeviceTerminal({ api }: { api: RayanLampClient }) {
   );
 }
 
-function CoordinatorTerminal({ api }: { api: RayanLampClient }) {
+function CoordinatorTerminal({ api }: { api: PCControllerDesktopClient }) {
   const host = useRef<HTMLDivElement>(null);
   const terminal = useRef<XTermTerminal | null>(null);
   const bridge = useRef<TerminalBridge | null>(null);
@@ -126,7 +126,7 @@ function CoordinatorTerminal({ api }: { api: RayanLampClient }) {
           });
         xterm.textarea?.setAttribute(
           "aria-label",
-          t("Rayan Lamp device terminal input")
+          t("PCController device terminal input")
         );
         terminal.current = xterm;
         fit = () => {
@@ -261,7 +261,7 @@ function CoordinatorTerminal({ api }: { api: RayanLampClient }) {
     current.focus();
   };
   const shownPort =
-    status.port || config.value?.lamp.telnet_port || disconnectedStatus.port;
+    status.port || config.value?.device.telnet_port || disconnectedStatus.port;
 
   return (
     <div class="view terminal-view">
@@ -270,7 +270,7 @@ function CoordinatorTerminal({ api }: { api: RayanLampClient }) {
           <span class="eyebrow">{t("Coordinator-secured TCP bridge")}</span>
           <h1>{t("Device terminal")}</h1>
           <p>
-            {t("An ANSI terminal connected to the lamp through the local Go coordinator. Output exists only in this page’s memory.")}
+            {t("An ANSI terminal connected to the device through the local Go coordinator. Output exists only in this page’s memory.")}
           </p>
         </div>
         <TerminalPhase status={status.state} transport={transport} />
@@ -305,7 +305,7 @@ function CoordinatorTerminal({ api }: { api: RayanLampClient }) {
               <Icon name="terminal" />
             </span>
             <span>
-              <small>{status.host ? <BidiLtr>{status.host}</BidiLtr> : t("Configured lamp")}</small>
+              <small>{status.host ? <BidiLtr>{status.host}</BidiLtr> : t("Configured device")}</small>
               <strong><BidiLtr>TCP {shownPort}</BidiLtr></strong>
             </span>
           </div>
@@ -352,7 +352,7 @@ function CoordinatorTerminal({ api }: { api: RayanLampClient }) {
         <div
           class={`terminal-frame${canType ? " accepts-input" : ""}`}
           role="region"
-          aria-label={t("Rayan Lamp terminal output")}
+          aria-label={t("PCController terminal output")}
           onClick={() => terminal.current?.focus()}
         >
           <div ref={host} class="terminal-host" />
@@ -387,7 +387,7 @@ function CoordinatorTerminal({ api }: { api: RayanLampClient }) {
       <div class="security-note terminal-security-note">
         <Icon name="warning" />
         <span>
-          {t("Device-shell commands can change firmware settings or restart the lamp. The coordinator fixes the destination to the configured lamp and terminal port; this browser never opens raw TCP itself.")}
+          {t("Device-shell commands can change firmware settings or restart the device. The coordinator fixes the destination to the configured device and terminal port; this browser never opens raw TCP itself.")}
         </span>
       </div>
     </div>
@@ -413,13 +413,13 @@ export function TerminalUnavailable({ direct }: { direct: boolean }) {
         <span class="eyebrow">{t("Coordinator required")}</span>
         <h2>{t("Raw TCP is not available in direct browser mode")}</h2>
         <p>
-          {t("Browsers cannot connect directly to the lamp’s Telnet port. Choose Automatic or Go coordinator to use the authenticated same-origin terminal bridge.")}
+          {t("Browsers cannot connect directly to the device’s Telnet port. Choose Automatic or Go coordinator to use the authenticated same-origin terminal bridge.")}
         </p>
         {direct && (
           <p class="terminal-static-note">
             {t("For the frontend-only ZIP, serve it behind the same origin that forwards")}{" "}
             <code dir="ltr">/app/session</code>{" "}
-            {t("and the versionless API paths to a running RayanLamp coordinator.")}
+            {t("and the versionless API paths to a running PCControllerDesktop coordinator.")}
           </p>
         )}
       </Card>

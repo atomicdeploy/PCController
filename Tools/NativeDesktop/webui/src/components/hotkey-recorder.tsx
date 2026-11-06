@@ -345,7 +345,7 @@ export function HotkeyRecorder({
       setSessionError(
         recorderErrorMessage(
           error,
-          "Rayan Lamp could not prepare shortcut recording."
+          "PCController could not prepare shortcut recording."
         )
       );
       return;
@@ -359,7 +359,7 @@ export function HotkeyRecorder({
           setSessionError(
             recorderErrorMessage(
               error,
-              "Rayan Lamp could not prepare shortcut recording."
+              "PCController could not prepare shortcut recording."
             )
           );
         }
@@ -404,7 +404,7 @@ export function HotkeyRecorder({
         setSessionError(
           recorderErrorMessage(
             error,
-            "Rayan Lamp could not verify that shortcut. Try again."
+            "PCController could not verify that shortcut. Try again."
           )
         );
         return;

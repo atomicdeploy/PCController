@@ -13,9 +13,9 @@ import (
 	decl "github.com/lxn/walk/declarative"
 	"github.com/lxn/win"
 
-	"rayanlamp.local/app/internal/design"
-	"rayanlamp.local/app/internal/i18n"
-	"rayanlamp.local/app/internal/winfx"
+	"pccontroller.local/desktop/internal/design"
+	"pccontroller.local/desktop/internal/i18n"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
 const (
@@ -933,7 +933,7 @@ func (binding *hotkeyRecorderBinding) updateControls() {
 // enumerate first.
 func hotkeyRecorderButtonCaptions(action string) (record, clear string) {
 	switch strings.ToLower(strings.TrimSpace(action)) {
-	case "toggle lamp":
+	case "toggle device":
 		return "Record &toggle", "Clear to&ggle"
 	case "turn on":
 		return "Record o&n", "Clea&r on"
@@ -1098,24 +1098,28 @@ func (binding *hotkeyRecorderBinding) paint(
 	}
 	shadowBounds := outer
 	shadowBounds.Y += 2
-	_ = canvas.FillRoundedRectanglePixels(
-		shadow,
-		shadowBounds,
-		walk.Size{Width: radius * 2, Height: radius * 2},
-	)
-	if err := canvas.FillRoundedRectanglePixels(
-		body,
-		outer,
-		walk.Size{Width: radius * 2, Height: radius * 2},
-	); err != nil {
-		return err
+	if !paintRecorderRounded(canvas, shadowBounds, palette.shadow, palette.shadow, radius, 0) {
+		_ = canvas.FillRoundedRectanglePixels(
+			shadow,
+			shadowBounds,
+			walk.Size{Width: radius * 2, Height: radius * 2},
+		)
 	}
-	if err := canvas.DrawRoundedRectanglePixels(
-		border,
-		outer,
-		walk.Size{Width: radius * 2, Height: radius * 2},
-	); err != nil {
-		return err
+	if !paintRecorderRounded(canvas, outer, fillColor, borderColor, radius, 1) {
+		if err := canvas.FillRoundedRectanglePixels(
+			body,
+			outer,
+			walk.Size{Width: radius * 2, Height: radius * 2},
+		); err != nil {
+			return err
+		}
+		if err := canvas.DrawRoundedRectanglePixels(
+			border,
+			outer,
+			walk.Size{Width: radius * 2, Height: radius * 2},
+		); err != nil {
+			return err
+		}
 	}
 
 	display := binding.chord
@@ -1243,24 +1247,28 @@ func (binding *hotkeyRecorderBinding) paint(
 		}
 		keyShadow := keyBounds
 		keyShadow.Y++
-		_ = canvas.FillRoundedRectanglePixels(
-			shadow,
-			keyShadow,
-			walk.Size{Width: keyRadius * 2, Height: keyRadius * 2},
-		)
-		if err := canvas.FillRoundedRectanglePixels(
-			keyBrush,
-			keyBounds,
-			walk.Size{Width: keyRadius * 2, Height: keyRadius * 2},
-		); err != nil {
-			return err
+		if !paintRecorderRounded(canvas, keyShadow, palette.shadow, palette.shadow, keyRadius, 0) {
+			_ = canvas.FillRoundedRectanglePixels(
+				shadow,
+				keyShadow,
+				walk.Size{Width: keyRadius * 2, Height: keyRadius * 2},
+			)
 		}
-		if err := canvas.DrawRoundedRectanglePixels(
-			keyBorder,
-			keyBounds,
-			walk.Size{Width: keyRadius * 2, Height: keyRadius * 2},
-		); err != nil {
-			return err
+		if !paintRecorderRounded(canvas, keyBounds, palette.key, palette.highlight, keyRadius, 1) {
+			if err := canvas.FillRoundedRectanglePixels(
+				keyBrush,
+				keyBounds,
+				walk.Size{Width: keyRadius * 2, Height: keyRadius * 2},
+			); err != nil {
+				return err
+			}
+			if err := canvas.DrawRoundedRectanglePixels(
+				keyBorder,
+				keyBounds,
+				walk.Size{Width: keyRadius * 2, Height: keyRadius * 2},
+			); err != nil {
+				return err
+			}
 		}
 		if err := canvas.DrawTextPixels(
 			part.text,
@@ -1302,24 +1310,28 @@ func (binding *hotkeyRecorderBinding) paintSingleChordPill(
 	radius := maxInt(5, binding.surface.IntFrom96DPI(5))
 	shadowBounds := bounds
 	shadowBounds.Y++
-	_ = canvas.FillRoundedRectanglePixels(
-		shadow,
-		shadowBounds,
-		walk.Size{Width: radius * 2, Height: radius * 2},
-	)
-	if err := canvas.FillRoundedRectanglePixels(
-		keyBrush,
-		bounds,
-		walk.Size{Width: radius * 2, Height: radius * 2},
-	); err != nil {
-		return err
+	if !paintRecorderRounded(canvas, shadowBounds, palette.shadow, palette.shadow, radius, 0) {
+		_ = canvas.FillRoundedRectanglePixels(
+			shadow,
+			shadowBounds,
+			walk.Size{Width: radius * 2, Height: radius * 2},
+		)
 	}
-	if err := canvas.DrawRoundedRectanglePixels(
-		keyBorder,
-		bounds,
-		walk.Size{Width: radius * 2, Height: radius * 2},
-	); err != nil {
-		return err
+	if !paintRecorderRounded(canvas, bounds, palette.key, palette.highlight, radius, 1) {
+		if err := canvas.FillRoundedRectanglePixels(
+			keyBrush,
+			bounds,
+			walk.Size{Width: radius * 2, Height: radius * 2},
+		); err != nil {
+			return err
+		}
+		if err := canvas.DrawRoundedRectanglePixels(
+			keyBorder,
+			bounds,
+			walk.Size{Width: radius * 2, Height: radius * 2},
+		); err != nil {
+			return err
+		}
 	}
 	padding := binding.surface.IntFrom96DPI(8)
 	bounds.X += padding
@@ -1332,6 +1344,10 @@ func (binding *hotkeyRecorderBinding) paintSingleChordPill(
 		walk.TextCenter|walk.TextVCenter|walk.TextSingleLine|
 			walk.TextEndEllipsis|walk.TextNoPrefix,
 	)
+}
+
+func paintRecorderRounded(canvas *walk.Canvas, bounds walk.Rectangle, fill, border walk.Color, radius, stroke int) bool {
+	return winfx.PaintRoundedControl(uintptr(canvas.HDC()), winfx.Rect{Left: int32(bounds.X), Top: int32(bounds.Y), Right: int32(bounds.X + bounds.Width), Bottom: int32(bounds.Y + bounds.Height)}, uint32(fill), uint32(border), int32(radius), int32(stroke))
 }
 
 func (binding *hotkeyRecorderBinding) invalidate() {

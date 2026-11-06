@@ -1,15 +1,15 @@
 # Configuration reference
 
-RayanLamp loads strict JSON from:
+PCControllerDesktop loads strict JSON from:
 
 ```text
-%APPDATA%\RayanLamp\config.json
+%APPDATA%\PCControllerDesktop\config.json
 ```
 
 Path precedence is:
 
 1. `--config PATH`;
-2. `RAYANLAMP_CONFIG`;
+2. `PCCONTROLLER_DESKTOP_CONFIG`;
 3. the default path above.
 
 Environment variables in an explicit path are expanded, and relative explicit
@@ -17,7 +17,7 @@ paths become absolute. A missing file loads defaults. Existing files are
 limited to 1 MiB, reject unknown fields and trailing JSON, and are overlaid on
 defaults so omitted members retain their default values.
 
-The modeless settings window is the recommended editor: the lamp window stays
+The modeless settings window is the recommended editor: the device window stays
 interactive, appearance choices preview immediately, Cancel restores the
 previous runtime presentation, and Save completes asynchronously. Saves
 normalize the complete configuration, write a same-directory temporary file,
@@ -31,8 +31,8 @@ a fresh, cryptographically random 256-bit URL-safe token.
 
 ```json
 {
-  "lamp": {
-    "base_url": "http://rayanlamp.local",
+  "device": {
+    "base_url": "http://pccontroller-desktop.local",
     "request_timeout": "5s",
     "websocket": true,
     "reconnect_min": "1s",
@@ -124,7 +124,7 @@ a fresh, cryptographically random 256-bit URL-safe token.
 
 Durations use Go duration strings such as `"750ms"`, `"5s"`, or `"1m30s"`.
 
-## Lamp
+## Device
 
 | Key | Meaning and validation |
 | --- | --- |
@@ -136,7 +136,7 @@ Durations use Go duration strings such as `"750ms"`, `"5s"`, or `"1m30s"`.
 | `http_poll` | `"0s"` disables polling; otherwise 1 second through 24 hours. |
 | `telnet_port` | TCP port used only when the TUI or Web UI manually opens the device terminal; 1 through 65535, default 23. |
 
-Changing lamp networking settings creates a new client generation, cancels the
+Changing device networking settings creates a new client generation, cancels the
 old listener/poller, disconnects an open device terminal, and reconnects with
 the new values. The terminal never auto-connects at process startup.
 
@@ -144,14 +144,14 @@ the new values. The terminal never auto-connects at process startup.
 
 | Key | Values |
 | --- | --- |
-| `view_mode` | `compact` for the lamp-only surface or `dashboard` for the larger control view. |
+| `view_mode` | `compact` for the device-only surface or `dashboard` for the larger control view. |
 | `theme` | `system` follows the live Windows app theme; `light` and `dark` are explicit app-wide overrides. |
 | `locale` | `auto` follows the Windows language; `en` selects English; `fa` selects Persian with RTL layout and Persian presentation digits. |
 | `backdrop` | `auto`, `solid`, `transparent`, `mica`, `tabbed`, `acrylic`, `blur`. Legacy `none`, `off`, and `disabled` values normalize to `solid`. |
 | `render_backend` | `auto` prefers the hardware DirectX path and falls back safely; `directx` explicitly requests it; `legacy` keeps the same UI features on the lower-private-memory GDI/`UpdateLayeredWindow` compatibility path. See the [measured memory profile](MEMORY.md). |
 | `rounded_corners` | Uses native DWM corners, with a rounded-region fallback on older Windows. |
 | `layered_foreground` | Enables the alpha-composited Fluent renderer, sharp SVG/APNG foreground, and glass controls. Disabling it selects compatible flat controls. |
-| `title_bar_mode` | `none`, `custom`, or `native`. Custom uses RayanLamp's composited controls; native restores the Windows caption. |
+| `title_bar_mode` | `none`, `custom`, or `native`. Custom uses PCControllerDesktop's composited controls; native restores the Windows caption. |
 | `border_mode` | `auto` keeps the native resize frame; `none` removes the outer frame and edge-resize affordance. A native title bar requires `auto`. |
 | `settings_tab` | Zero-based last selected settings page, restored on the next open. Out-of-range values reset to zero. |
 | `settings_bounds` | Settings position in virtual-screen pixels and size in 96-DPI logical units. Default 780×640; minimum 520×340; maximum 4096×4096, further constrained to the current monitor work area. Both X/Y = -1 centers the first open; closing remembers resized bounds, even on Cancel. |
@@ -184,7 +184,7 @@ that mode automatically uses the per-pixel legacy presenter because a
 DirectComposition visual's alpha is not an HWND hit-test mask. Other requested
 backdrops are best effort; capability, High Contrast, and the Windows
 transparency setting can select a safer fallback. Neither renderer snapshots
-nor reads back the desktop: DWM supplies live backdrop material and RayanLamp
+nor reads back the desktop: DWM supplies live backdrop material and PCControllerDesktop
 presents only its own pixels.
 
 The default `system` theme is live: the main window, native caption, shared
@@ -246,7 +246,7 @@ uses a native notification-area balloon if toast setup or delivery fails.
 
 Native Settings and coordinator-backed Web Settings validate and import a
 custom WAV into `sfx\<sha256>.wav` beside the active configuration
-(`%APPDATA%\RayanLamp\sfx\…` by default), then atomically select its ID.
+(`%APPDATA%\PCControllerDesktop\sfx\…` by default), then atomically select its ID.
 Re-importing identical bytes reuses the existing file. The import accepts
 uncompressed integer PCM in RIFF/WAVE, mono or stereo, 8–96 kHz,
 8/16/24/32-bit, no more than 4 MiB or 10 seconds. A standalone/direct Web UI
@@ -286,8 +286,8 @@ normalized to `Ctrl`, `Alt`, `Shift`, and `Win`.
 Duplicate bindings are rejected with inline conflict feedback. Unsupported keys
 also leave the recorder active so another chord can be tried. `F12` is reported
 inline as unavailable because Windows reserves it for the debugger. While a
-recorder is listening, RayanLamp temporarily unregisters its current global
-shortcuts so the chord being learned cannot toggle the lamp. Native recording
+recorder is listening, PCControllerDesktop temporarily unregisters its current global
+shortcuts so the chord being learned cannot toggle the device. Native recording
 also suppresses ordinary shell accelerators such as `Win+E` and `Alt+Tab`;
 Windows' secure `Ctrl+Alt+Delete` sequence cannot be intercepted by an
 application. The configured shortcuts are restored when recording completes
@@ -332,8 +332,8 @@ near-duplicate events within 750 ms are suppressed.
 `lock_script`, `unlock_script`, `suspend_script`, `resume_script`, and
 `network_change_script` react to the corresponding Windows session, power, and
 network-interface events. Resume and network recovery is coalesced before the
-lamp reconnects, while every configured lifecycle script receives the original
-event name through `RAYANLAMP_EVENT`.
+device reconnects, while every configured lifecycle script receives the original
+event name through `PCCONTROLLER_DESKTOP_EVENT`.
 
 PowerShell scripts run with:
 
@@ -352,7 +352,7 @@ See [Automation security and environment](integration.md#automation).
 ## Integration
 
 `start_with_windows` controls the current user's
-`HKCU\Software\Microsoft\Windows\CurrentVersion\Run\RayanLamp` value. Loading
+`HKCU\Software\Microsoft\Windows\CurrentVersion\Run\PCControllerDesktop` value. Loading
 the GUI, standalone TUI, or GUI-free `serve` host only reads that value; it
 never creates, rewrites, or deletes it. The primary reconciles the
 displayed/configured checkbox with exact current-executable ownership after it
@@ -373,11 +373,11 @@ The local API listen address must include a numeric port from 1 through 65535
 and an explicit loopback host: `127.0.0.1`, `[::1]`, another loopback IP, or
 `localhost`. Wildcard and LAN addresses are rejected.
 
-`RayanLamp.exe serve` is an explicit request to make this API and `/app/`
+`PCControllerDesktop.exe serve` is an explicit request to make this API and `/app/`
 dashboard the primary presentation surface. It enables `local_api_enabled` in
 the selected configuration. `serve --listen HOST:PORT` validates and persists
 the same `local_api_listen` field; it is not an unreported transient override.
-Later disabling the API stops only the headless HTTP listener—the lamp
+Later disabling the API stops only the headless HTTP listener—the device
 coordinator and named-pipe IPC remain alive until Ctrl+C or `quit`.
 
 The token must contain 32 through 256 non-whitespace, non-control characters.
@@ -388,7 +388,7 @@ files or send named-pipe commands, but other accounts should not receive it.
 ## Diagnostics
 
 `safe_endpoints` must be omitted/empty or exactly match the compiled canonical
-lamp/ESP set. It is not user-extensible. The legacy `expert_enabled` and
+device/ESP set. It is not user-extensible. The legacy `expert_enabled` and
 `expert_endpoints` fields remain only so exact older configurations can migrate:
 normalization always writes `false` and an empty array. The unrelated
 `/datetime/get`, `/pu`, `/is_exec`, `/page_id`, `/eProcessState`, and

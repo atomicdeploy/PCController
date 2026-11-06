@@ -78,7 +78,7 @@ func (d *telnetDecoder) Feed(input []byte) []byte {
 
 // terminalFilter drops OSC/DCS/SOS/PM/APC strings. Those sequences can carry
 // clipboard data, hyperlinks, or window-title requests and are unnecessary
-// for the lamp's ANSI shell. Ordinary CSI cursor/color/erase sequences, BEL,
+// for the device's ANSI shell. Ordinary CSI cursor/color/erase sequences, BEL,
 // CR/LF, and printable bytes are preserved for a real terminal emulator.
 type terminalFilter struct {
 	state terminalFilterState

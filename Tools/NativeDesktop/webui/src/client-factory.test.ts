@@ -1,39 +1,39 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  AutoRayanLampClient,
-  createRayanLampClient
+  AutoPCControllerDesktopClient,
+  createPCControllerDesktopClient
 } from "./client-factory";
-import { DirectLampAPI } from "./direct-api";
-import { RayanLampAPI, type RayanLampClient } from "./api";
+import { DirectDeviceAPI } from "./direct-api";
+import { PCControllerDesktopAPI, type PCControllerDesktopClient } from "./api";
 import { testBootstrap } from "./test/fixtures";
 
 describe("client factory", () => {
   it("honors explicit modes without wrapping them in fallback", () => {
     expect(
-      createRayanLampClient({
+      createPCControllerDesktopClient({
         mode: "relay",
-        lampURL: "http://rayanlamp.local"
+        deviceURL: "http://pccontroller-desktop.local"
       })
-    ).toBeInstanceOf(RayanLampAPI);
+    ).toBeInstanceOf(PCControllerDesktopAPI);
     expect(
-      createRayanLampClient({
+      createPCControllerDesktopClient({
         mode: "direct",
-        lampURL: "http://rayanlamp.local"
+        deviceURL: "http://pccontroller-desktop.local"
       })
-    ).toBeInstanceOf(DirectLampAPI);
+    ).toBeInstanceOf(DirectDeviceAPI);
     expect(
-      createRayanLampClient({
+      createPCControllerDesktopClient({
         mode: "auto",
-        lampURL: "http://rayanlamp.local"
+        deviceURL: "http://pccontroller-desktop.local"
       })
-    ).toBeInstanceOf(AutoRayanLampClient);
+    ).toBeInstanceOf(AutoPCControllerDesktopClient);
   });
 
   it("keeps the relay when same-origin bootstrap succeeds", async () => {
     const relay = fakeClient("relay", vi.fn(async () => testBootstrap));
     const directBootstrap = vi.fn(async () => testBootstrap);
     const direct = fakeClient("direct", directBootstrap);
-    const api = new AutoRayanLampClient(relay, direct);
+    const api = new AutoPCControllerDesktopClient(relay, direct);
 
     await expect(api.bootstrap()).resolves.toBe(testBootstrap);
 
@@ -50,7 +50,7 @@ describe("client factory", () => {
       })
     );
     const direct = fakeClient("direct", vi.fn(async () => testBootstrap));
-    const api = new AutoRayanLampClient(relay, direct);
+    const api = new AutoPCControllerDesktopClient(relay, direct);
 
     await expect(api.bootstrap()).resolves.toBe(testBootstrap);
 
@@ -63,8 +63,8 @@ describe("client factory", () => {
 
 function fakeClient(
   kind: "relay" | "direct",
-  bootstrap: RayanLampClient["bootstrap"]
-): RayanLampClient {
+  bootstrap: PCControllerDesktopClient["bootstrap"]
+): PCControllerDesktopClient {
   return {
     kind,
     displayName: `${kind} client`,

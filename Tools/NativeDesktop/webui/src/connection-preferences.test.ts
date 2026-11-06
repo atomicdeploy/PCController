@@ -10,12 +10,12 @@ describe("connection preferences", () => {
   it("defaults the embedded build to automatic relay-first selection", () => {
     expect(defaultConnectionPreferences()).toEqual({
       mode: "auto",
-      lampURL: "http://rayanlamp.local"
+      deviceURL: "http://pccontroller-desktop.local"
     });
   });
 
-  it("defaults a static export to direct lamp control", () => {
-    vi.stubEnv("VITE_RAYANLAMP_STATIC_EXPORT", "true");
+  it("defaults a static export to direct device control", () => {
+    vi.stubEnv("VITE_PCCONTROLLER_DESKTOP_STATIC_EXPORT", "true");
     expect(defaultConnectionPreferences().mode).toBe("direct");
     vi.unstubAllEnvs();
   });
@@ -27,32 +27,32 @@ describe("connection preferences", () => {
     });
     saveConnectionPreferences({
       mode: "direct",
-      lampURL: "http://lamp.example"
+      deviceURL: "http://device.example"
     });
     stop();
 
     expect(readConnectionPreferences()).toEqual({
       mode: "direct",
-      lampURL: "http://lamp.example"
+      deviceURL: "http://device.example"
     });
     expect(received).toEqual([
-      { mode: "direct", lampURL: "http://lamp.example" }
+      { mode: "direct", deviceURL: "http://device.example" }
     ]);
   });
 
   it("fails closed to defaults for malformed storage", () => {
-    localStorage.setItem("rayanlamp.web.connection.v1", "{broken");
+    localStorage.setItem("pccontroller-desktop.web.connection.v1", "{broken");
     expect(readConnectionPreferences()).toEqual(
       defaultConnectionPreferences()
     );
   });
 
-  it("fails closed to defaults for an unsafe stored lamp target", () => {
+  it("fails closed to defaults for an unsafe stored device target", () => {
     localStorage.setItem(
-      "rayanlamp.web.connection.v1",
+      "pccontroller-desktop.web.connection.v1",
       JSON.stringify({
         mode: "direct",
-        lampURL: "https://user:secret@lamp.example/path"
+        deviceURL: "https://user:secret@device.example/path"
       })
     );
     expect(readConnectionPreferences()).toEqual(

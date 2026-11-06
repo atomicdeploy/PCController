@@ -19,16 +19,16 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"rayanlamp.local/app/internal/i18n"
-	"rayanlamp.local/app/internal/winfx"
+	"pccontroller.local/desktop/internal/i18n"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
 const (
 	// EnvConfigPath overrides the default configuration path when no CLI path
 	// was supplied.
-	EnvConfigPath = "RAYANLAMP_CONFIG"
+	EnvConfigPath = "PCCONTROLLER_DESKTOP_CONFIG"
 
-	DefaultBaseURL        = "http://rayanlamp.local"
+	DefaultBaseURL        = "http://pccontroller-desktop.local"
 	DefaultLocalAPIListen = "127.0.0.1:47831"
 
 	LocaleAuto    = string(i18n.Auto)
@@ -140,7 +140,7 @@ func (d *Duration) UnmarshalJSON(data []byte) error {
 }
 
 type Config struct {
-	Lamp          LampConfig          `json:"lamp"`
+	Device        DeviceConfig        `json:"device"`
 	UI            UIConfig            `json:"ui"`
 	Notifications NotificationsConfig `json:"notifications"`
 	Hotkeys       HotkeysConfig       `json:"hotkeys"`
@@ -149,7 +149,7 @@ type Config struct {
 	Diagnostics   DiagnosticsConfig   `json:"diagnostics"`
 }
 
-type LampConfig struct {
+type DeviceConfig struct {
 	BaseURL        string   `json:"base_url"`
 	RequestTimeout Duration `json:"request_timeout"`
 	WebSocket      bool     `json:"websocket"`
@@ -160,18 +160,21 @@ type LampConfig struct {
 }
 
 type UIConfig struct {
-	ViewMode          string       `json:"view_mode"`
-	Theme             string       `json:"theme"`
-	Locale            string       `json:"locale"`
-	Backdrop          string       `json:"backdrop"`
-	RenderBackend     string       `json:"render_backend"`
-	RoundedCorners    bool         `json:"rounded_corners"`
-	LayeredForeground bool         `json:"layered_foreground"`
-	TitleBarMode      string       `json:"title_bar_mode"`
-	ControllerChrome  string       `json:"controller_chrome,omitempty"`
-	BorderMode        string       `json:"border_mode"`
-	SettingsTab       int          `json:"settings_tab"`
-	SettingsBounds    WindowBounds `json:"settings_bounds"`
+	ControllerExpandedBounds WindowBounds                `json:"controller_expanded_bounds,omitempty"`
+	ControllerWidgets        map[string]ControllerWidget `json:"controller_widgets,omitempty"`
+	ViewMode                 string                      `json:"view_mode"`
+	Theme                    string                      `json:"theme"`
+	Locale                   string                      `json:"locale"`
+	Backdrop                 string                      `json:"backdrop"`
+	RenderBackend            string                      `json:"render_backend"`
+	RoundedCorners           bool                        `json:"rounded_corners"`
+	LayeredForeground        bool                        `json:"layered_foreground"`
+	TitleBarMode             string                      `json:"title_bar_mode"`
+	ControllerChrome         string                      `json:"controller_chrome,omitempty"`
+	NativeMenus              bool                        `json:"native_menus,omitempty"`
+	BorderMode               string                      `json:"border_mode"`
+	SettingsTab              int                         `json:"settings_tab"`
+	SettingsBounds           WindowBounds                `json:"settings_bounds"`
 	// ShowTitleBar is retained for configurations written before the
 	// none/custom/native title-bar selector was introduced. Normalize keeps
 	// it true only for the custom in-client title bar.
@@ -187,6 +190,11 @@ type UIConfig struct {
 	MagneticSnap         bool         `json:"magnetic_snap"`
 	MagneticSnapDistance int          `json:"magnetic_snap_distance"`
 	WindowBounds         WindowBounds `json:"window_bounds"`
+}
+
+type ControllerWidget struct {
+	Visible bool         `json:"visible"`
+	Bounds  WindowBounds `json:"bounds"`
 }
 
 // WindowBounds uses -1 for X or Y to request platform-default centering.
@@ -246,7 +254,7 @@ type DiagnosticsConfig struct {
 
 func defaultConfig() Config {
 	return Config{
-		Lamp: LampConfig{
+		Device: DeviceConfig{
 			BaseURL:        DefaultBaseURL,
 			RequestTimeout: Duration(5 * time.Second),
 			WebSocket:      true,
@@ -345,7 +353,7 @@ func NewAPIToken() (string, error) {
 }
 
 // ResolvePath applies config path precedence: a non-empty CLI path,
-// RAYANLAMP_CONFIG, then %AppData%\RayanLamp\config.json. Relative explicit
+// PCCONTROLLER_DESKTOP_CONFIG, then %AppData%\PCControllerDesktop\config.json. Relative explicit
 // paths are made absolute.
 func ResolvePath(cliPath string) (string, error) {
 	path := strings.TrimSpace(cliPath)
@@ -361,7 +369,7 @@ func ResolvePath(cliPath string) (string, error) {
 				return "", fmt.Errorf("resolve user config directory: %w", err)
 			}
 		}
-		path = filepath.Join(root, "RayanLamp", "config.json")
+		path = filepath.Join(root, "PCControllerDesktop", "config.json")
 	}
 
 	path = filepath.Clean(os.ExpandEnv(path))
@@ -405,6 +413,10 @@ func Load(path string) (Config, error) {
 	}
 	if len(data) > maxConfigSize {
 		return Config{}, fmt.Errorf("config %q exceeds %d bytes", resolved, maxConfigSize)
+	}
+	data, err = migrateConnectionConfig(data)
+	if err != nil {
+		return Config{}, fmt.Errorf("migrate config %q: %w", resolved, err)
 	}
 
 	decoder := json.NewDecoder(bytes.NewReader(data))
@@ -575,7 +587,7 @@ func (c *Config) Normalize() error {
 		return errors.New("config is nil")
 	}
 
-	if err := normalizeLamp(&c.Lamp); err != nil {
+	if err := normalizeDevice(&c.Device); err != nil {
 		return err
 	}
 	if err := normalizeUI(&c.UI); err != nil {
@@ -637,24 +649,24 @@ func normalizeAutomation(automation *AutomationConfig) error {
 	return nil
 }
 
-func normalizeLamp(lamp *LampConfig) error {
-	rawURL := strings.TrimSpace(lamp.BaseURL)
+func normalizeDevice(device *DeviceConfig) error {
+	rawURL := strings.TrimSpace(device.BaseURL)
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
-		return fmt.Errorf("lamp.base_url: %w", err)
+		return fmt.Errorf("device.base_url: %w", err)
 	}
 	parsed.Scheme = strings.ToLower(parsed.Scheme)
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return errors.New("lamp.base_url: scheme must be http or https")
+		return errors.New("device.base_url: scheme must be http or https")
 	}
 	if parsed.Host == "" {
-		return errors.New("lamp.base_url: host is required")
+		return errors.New("device.base_url: host is required")
 	}
 	if parsed.User != nil {
-		return errors.New("lamp.base_url: embedded credentials are not allowed")
+		return errors.New("device.base_url: embedded credentials are not allowed")
 	}
 	if parsed.RawQuery != "" || parsed.Fragment != "" {
-		return errors.New("lamp.base_url: query and fragment are not allowed")
+		return errors.New("device.base_url: query and fragment are not allowed")
 	}
 	parsed.Host = strings.ToLower(parsed.Host)
 	if parsed.Path == "/" {
@@ -662,32 +674,32 @@ func normalizeLamp(lamp *LampConfig) error {
 	} else {
 		parsed.Path = strings.TrimRight(parsed.Path, "/")
 	}
-	lamp.BaseURL = strings.TrimRight(parsed.String(), "/")
+	device.BaseURL = strings.TrimRight(parsed.String(), "/")
 
-	requestTimeout := lamp.RequestTimeout.Value()
+	requestTimeout := device.RequestTimeout.Value()
 	if requestTimeout < 100*time.Millisecond || requestTimeout > 5*time.Minute {
-		return errors.New("lamp.request_timeout: must be between 100ms and 5m")
+		return errors.New("device.request_timeout: must be between 100ms and 5m")
 	}
-	reconnectMin := lamp.ReconnectMin.Value()
-	reconnectMax := lamp.ReconnectMax.Value()
+	reconnectMin := device.ReconnectMin.Value()
+	reconnectMax := device.ReconnectMax.Value()
 	if reconnectMin < 100*time.Millisecond || reconnectMin > 5*time.Minute {
-		return errors.New("lamp.reconnect_min: must be between 100ms and 5m")
+		return errors.New("device.reconnect_min: must be between 100ms and 5m")
 	}
 	if reconnectMax < reconnectMin || reconnectMax > 15*time.Minute {
-		return errors.New("lamp.reconnect_max: must be >= reconnect_min and <= 15m")
+		return errors.New("device.reconnect_max: must be >= reconnect_min and <= 15m")
 	}
-	httpPoll := lamp.HTTPPoll.Value()
+	httpPoll := device.HTTPPoll.Value()
 	if httpPoll < 0 || httpPoll > 24*time.Hour {
-		return errors.New("lamp.http_poll: must be 0 (disabled) or <= 24h")
+		return errors.New("device.http_poll: must be 0 (disabled) or <= 24h")
 	}
 	if httpPoll > 0 && httpPoll < time.Second {
-		return errors.New("lamp.http_poll: non-zero interval must be >= 1s")
+		return errors.New("device.http_poll: non-zero interval must be >= 1s")
 	}
-	if lamp.TelnetPort == 0 {
-		lamp.TelnetPort = defaultConfig().Lamp.TelnetPort
+	if device.TelnetPort == 0 {
+		device.TelnetPort = defaultConfig().Device.TelnetPort
 	}
-	if lamp.TelnetPort < 1 || lamp.TelnetPort > 65535 {
-		return errors.New("lamp.telnet_port: must be between 1 and 65535")
+	if device.TelnetPort < 1 || device.TelnetPort > 65535 {
+		return errors.New("device.telnet_port: must be between 1 and 65535")
 	}
 	return nil
 }

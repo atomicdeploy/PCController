@@ -12,7 +12,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"rayanlamp.local/app/internal/design"
+	"pccontroller.local/desktop/internal/design"
 )
 
 const (
@@ -207,6 +207,8 @@ func setDialogComboTheme(
 		stopDialogComboAnimationScheduler(hwnd)
 	}
 	updateDialogComboRegion(hwnd)
+	// Our colored focus ring replaces only the native dotted rectangle.
+	callDefSubclassProc(hwnd, 0x0128 /* WM_UPDATEUISTATE */, 0x00010001 /* SET HIDEFOCUS */, 0)
 	themeDialogComboPopup(hwnd, dark)
 	presentDialogComboChrome(hwnd)
 }
@@ -223,6 +225,13 @@ func clearDialogComboTheme(hwnd uintptr) {
 	}
 	if isWindow(hwnd) {
 		_, _, _ = dialogComboSetWindowRgn.Call(hwnd, 0, 1)
+		parent, _, _ := dialogComboGetParent.Call(hwnd)
+		ui, _, _ := dialogThemeSendMessage.Call(parent, 0x0129, 0, 0)
+		action := uintptr(2) // UIS_CLEAR
+		if ui&1 != 0 {
+			action = 1
+		}
+		callDefSubclassProc(hwnd, 0x0128, action|0x00010000, 0)
 		clearDialogComboPopup(hwnd)
 	}
 	_ = RemoveWindowSubclass(hwnd, dialogComboSubclassID)
@@ -709,6 +718,9 @@ func renderDialogComboFrame(
 		buffer.memory,
 		targetDC,
 		func(surface uintptr) {
+			// Keyboard cue updates can restore USER32's dotted rectangle. Keep
+			// only that native ornament hidden; our focused chrome remains visible.
+			callDefSubclassProc(hwnd, 0x0128, 0x00010001, 0)
 			// DefSubclassProc calls the native COMBOBOX directly, bypassing
 			// this subclass's WM_PRINTCLIENT branch and therefore avoiding a
 			// recursive composition pass. Keyboard, IME, type-ahead, list
@@ -787,6 +799,7 @@ func drawDialogComboChrome(
 		return false
 	}
 	radius := dialogComboRadius(width, height, dpi)
+	restoreDialogAACorners(hwnd, dc, width, height, radius, state.Dark)
 	enabled, _, _ := dialogComboIsWindowEnabled.Call(hwnd)
 	palette := dialogComboColors(state.Dark)
 	interaction := state.Hover
@@ -943,6 +956,9 @@ func drawDialogComboChevron(
 ) {
 	left, middle, right := dialogComboChevronPoints(button, open, dpi)
 	stroke := dialogFieldStroke(dpi, 1)
+	if drawDialogAAPolyline(dc, []dialogComboPoint{left, middle, right}, color, stroke) {
+		return
+	}
 	drawDialogComboLine(dc, left, middle, color, stroke)
 	drawDialogComboLine(dc, middle, right, color, stroke)
 }
@@ -984,6 +1000,9 @@ func drawDialogComboLine(
 	color uint32,
 	stroke int32,
 ) {
+	if drawDialogAAPolyline(dc, []dialogComboPoint{first, second}, color, stroke) {
+		return
+	}
 	pen, _, _ := dialogFieldGetStockObject.Call(dialogFieldDCPen)
 	if pen == 0 {
 		return
@@ -1042,6 +1061,9 @@ func fillDialogComboRoundedButton(
 	color uint32,
 	width, height, radius int32,
 ) {
+	if fillDialogAARoundedPart(dc, rect, width, height, radius, color) {
+		return
+	}
 	if dc == 0 || width < 1 || height < 1 || radius < 1 {
 		fillDialogComboRect(dc, rect, color)
 		return
@@ -1071,26 +1093,7 @@ func updateDialogComboRegion(hwnd uintptr) {
 	if hwnd == 0 || !isWindow(hwnd) {
 		return
 	}
-	var window dialogFieldRect
-	ok, _, _ := dialogComboGetWindowRect.Call(
-		hwnd,
-		uintptr(unsafe.Pointer(&window)),
-	)
-	width := window.Right - window.Left
-	height := window.Bottom - window.Top
-	if ok == 0 || width < 1 || height < 1 {
-		return
-	}
-	radius := dialogComboRadius(width, height, dialogComboDPI(hwnd))
-	region := createDialogComboRoundedRegion(width, height, radius)
-	if region == 0 {
-		return
-	}
-	applied, _, _ := dialogComboSetWindowRgn.Call(hwnd, region, 1)
-	if applied == 0 {
-		_, _, _ = dialogComboDeleteObject.Call(region)
-	}
-	runtime.KeepAlive(&window)
+	_, _, _ = dialogComboSetWindowRgn.Call(hwnd, 0, 1)
 }
 
 func createDialogComboRoundedRegion(

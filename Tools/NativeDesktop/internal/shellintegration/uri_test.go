@@ -13,15 +13,15 @@ func TestParseURIMapsAllowedActions(t *testing.T) {
 		raw    string
 		method string
 	}{
-		{"rayan-lamp://on", "lamp.on"},
-		{"RAYAN-LAMP://OFF", "lamp.off"},
-		{"rayan-lamp://toggle/", "lamp.toggle"},
-		{"rayan-lamp:/show", "window.show"},
-		{"rayan-lamp:/hide", "window.hide"},
-		{"rayan-lamp://reconnect", "reconnect"},
-		{"rayan-lamp://settings", "settings.show"},
-		{"rayan-lamp://diagnostics", "diagnostics.show"},
-		{"rayan-lamp://web", "web.show"},
+		{"pccontroller-desktop://on", "device.on"},
+		{"PCCONTROLLER-DESKTOP://OFF", "device.off"},
+		{"pccontroller-desktop://toggle/", "device.toggle"},
+		{"pccontroller-desktop:/show", "window.show"},
+		{"pccontroller-desktop:/hide", "window.hide"},
+		{"pccontroller-desktop://reconnect", "reconnect"},
+		{"pccontroller-desktop://settings", "settings.show"},
+		{"pccontroller-desktop://diagnostics", "diagnostics.show"},
+		{"pccontroller-desktop://web", "web.show"},
 	}
 	for _, test := range tests {
 		test := test
@@ -41,32 +41,32 @@ func TestParseURIMapsAllowedActions(t *testing.T) {
 func TestParseURIRejectsNonCanonicalOrUnsafeInput(t *testing.T) {
 	t.Parallel()
 
-	tooLong := "rayan-lamp://" + strings.Repeat("a", maxURIBytes)
+	tooLong := "pccontroller-desktop://" + strings.Repeat("a", maxURIBytes)
 	tests := []string{
 		"",
 		" ",
-		" rayan-lamp://on",
-		"rayan-lamp://on ",
+		" pccontroller-desktop://on",
+		"pccontroller-desktop://on ",
 		"http://on",
-		"rayan-lamp:on",
-		"rayan-lamp://",
-		"rayan-lamp:/",
-		"rayan-lamp:///on",
-		"rayan-lamp://on/off",
-		"rayan-lamp:/on/off",
-		"rayan-lamp://user@on",
-		"rayan-lamp://on:80",
-		"rayan-lamp://on?source=browser",
-		"rayan-lamp://on?",
-		"rayan-lamp://on#fragment",
-		"rayan-lamp://%6fn",
-		"rayan-lamp:/%6fn",
-		`rayan-lamp:\on`,
-		"rayan-lamp://on\n",
-		"rayan-lamp://ön",
-		"rayan-lamp://on-off",
-		"rayan-lamp://status",
-		"rayan-lamp://quit",
+		"pccontroller-desktop:on",
+		"pccontroller-desktop://",
+		"pccontroller-desktop:/",
+		"pccontroller-desktop:///on",
+		"pccontroller-desktop://on/off",
+		"pccontroller-desktop:/on/off",
+		"pccontroller-desktop://user@on",
+		"pccontroller-desktop://on:80",
+		"pccontroller-desktop://on?source=browser",
+		"pccontroller-desktop://on?",
+		"pccontroller-desktop://on#fragment",
+		"pccontroller-desktop://%6fn",
+		"pccontroller-desktop:/%6fn",
+		`pccontroller-desktop:\on`,
+		"pccontroller-desktop://on\n",
+		"pccontroller-desktop://ön",
+		"pccontroller-desktop://on-off",
+		"pccontroller-desktop://status",
+		"pccontroller-desktop://quit",
 		tooLong,
 	}
 	for _, raw := range tests {

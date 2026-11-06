@@ -63,7 +63,7 @@ func TestDiagnosticDocumentFormatsJSONAndSanitizesContent(t *testing.T) {
 	t.Setenv("FORCE_COLOR", "")
 
 	dark, err := renderDiagnosticDocument(
-		`{"lamp":{"state":"on"},"reachable":true}`,
+		`{"device":{"state":"on"},"reachable":true}`,
 		64,
 		true,
 	)
@@ -71,7 +71,7 @@ func TestDiagnosticDocumentFormatsJSONAndSanitizesContent(t *testing.T) {
 		t.Fatal(err)
 	}
 	light, err := renderDiagnosticDocument(
-		`{"lamp":{"state":"on"},"reachable":true}`,
+		`{"device":{"state":"on"},"reachable":true}`,
 		64,
 		false,
 	)
@@ -85,12 +85,12 @@ func TestDiagnosticDocumentFormatsJSONAndSanitizesContent(t *testing.T) {
 		t.Error("colored diagnostic render omitted terminal styling")
 	}
 	rendered := ansi.Strip(dark)
-	for _, fragment := range []string{"lamp", "state", "reachable", "true"} {
+	for _, fragment := range []string{"device", "state", "reachable", "true"} {
 		if !strings.Contains(rendered, fragment) {
 			t.Errorf("rendered JSON omitted %q:\n%s", fragment, rendered)
 		}
 	}
-	if !strings.Contains(rendered, "\"lamp\": {\n") ||
+	if !strings.Contains(rendered, "\"device\": {\n") ||
 		!strings.Contains(rendered, "\n  \"reachable\": true") {
 		t.Errorf("JSON was not pretty-printed:\n%s", rendered)
 	}
@@ -265,7 +265,7 @@ func TestDiagnosticErrorsStayInOverlay(t *testing.T) {
 		t.Errorf("overlay error = %q", model.diagnostics.err)
 	}
 	if model.lastError != "" {
-		t.Errorf("diagnostic error incorrectly marked lamp offline: %q", model.lastError)
+		t.Errorf("diagnostic error incorrectly marked device offline: %q", model.lastError)
 	}
 }
 

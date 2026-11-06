@@ -8,15 +8,15 @@ import (
 	"time"
 )
 
-type LampState uint8
+type OutputState uint8
 
 const (
-	StateUnknown LampState = iota
+	StateUnknown OutputState = iota
 	StateOff
 	StateOn
 )
 
-func ParseLampState(s string) LampState {
+func ParseOutputState(s string) OutputState {
 	switch strings.ToUpper(strings.TrimSpace(s)) {
 	case "ON", "1", "TRUE", "HIGH":
 		return StateOn
@@ -27,7 +27,7 @@ func ParseLampState(s string) LampState {
 	}
 }
 
-func (s LampState) String() string {
+func (s OutputState) String() string {
 	switch s {
 	case StateOn:
 		return "on"
@@ -38,16 +38,16 @@ func (s LampState) String() string {
 	}
 }
 
-func (s LampState) MarshalJSON() ([]byte, error) {
+func (s OutputState) MarshalJSON() ([]byte, error) {
 	return json.Marshal(s.String())
 }
 
 // UnmarshalJSON accepts the stable string representation emitted by the IPC
 // and local HTTP API. Keeping this on the shared model lets every controller
 // consume a Snapshot without maintaining a transport-specific shadow type.
-func (s *LampState) UnmarshalJSON(data []byte) error {
+func (s *OutputState) UnmarshalJSON(data []byte) error {
 	if s == nil {
-		return fmt.Errorf("lamp state: cannot unmarshal into nil receiver")
+		return fmt.Errorf("device state: cannot unmarshal into nil receiver")
 	}
 	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
 		*s = StateUnknown
@@ -55,29 +55,29 @@ func (s *LampState) UnmarshalJSON(data []byte) error {
 	}
 	var value string
 	if err := json.Unmarshal(data, &value); err != nil {
-		return fmt.Errorf("lamp state must be a string: %w", err)
+		return fmt.Errorf("device state must be a string: %w", err)
 	}
-	parsed := ParseLampState(value)
+	parsed := ParseOutputState(value)
 	if parsed == StateUnknown &&
 		!strings.EqualFold(strings.TrimSpace(value), StateUnknown.String()) {
-		return fmt.Errorf("invalid lamp state %q", value)
+		return fmt.Errorf("invalid device state %q", value)
 	}
 	*s = parsed
 	return nil
 }
 
 type Snapshot struct {
-	State            LampState `json:"state"`
-	HTTPReachable    bool      `json:"http_reachable"`
-	WebSocketOnline  bool      `json:"websocket_online"`
-	DeviceURL        string    `json:"device_url"`
-	LastEvent        string    `json:"last_event,omitempty"`
-	LastError        string    `json:"last_error,omitempty"`
-	PendingCommand   string    `json:"pending_command,omitempty"`
-	LastSource       string    `json:"last_source,omitempty"`
-	LastChanged      time.Time `json:"last_changed,omitempty"`
-	LastConnected    time.Time `json:"last_connected,omitempty"`
-	ReconnectAttempt int       `json:"reconnect_attempt"`
+	State            OutputState `json:"state"`
+	HTTPReachable    bool        `json:"http_reachable"`
+	WebSocketOnline  bool        `json:"websocket_online"`
+	DeviceURL        string      `json:"device_url"`
+	LastEvent        string      `json:"last_event,omitempty"`
+	LastError        string      `json:"last_error,omitempty"`
+	PendingCommand   string      `json:"pending_command,omitempty"`
+	LastSource       string      `json:"last_source,omitempty"`
+	LastChanged      time.Time   `json:"last_changed,omitempty"`
+	LastConnected    time.Time   `json:"last_connected,omitempty"`
+	ReconnectAttempt int         `json:"reconnect_attempt"`
 }
 
 type EventKind uint8
@@ -92,7 +92,7 @@ const (
 type Event struct {
 	Kind          EventKind
 	Snapshot      Snapshot
-	PreviousState LampState
+	PreviousState OutputState
 	InitialSync   bool
 	Title         string
 	Message       string

@@ -67,13 +67,13 @@ workspace's `work/history-regression-pass/control`; it must never be packaged.
 
 These extend VIS-022 and VIS-023. Screenshots are observations only: no desktop
 capture is fed to any renderer. No computer-control tool or input injection
-was used, and no lamp-control command was sent.
+was used, and no device-control command was sent.
 
 ## Results
 
-- Full `go test -tags rayanlamp_develop -count=1 ./...`: **47 packages passed**.
+- Full `go test -tags pccontroller_desktop_develop -count=1 ./...`: **47 packages passed**.
   The previously blocked socket tests now run with network access available.
-- `go vet -tags rayanlamp_develop ./...`: passed.
+- `go vet -tags pccontroller_desktop_develop ./...`: passed.
 - Expanded manifest-equipped native suite: passed; **31 screen captures**.
   The final run also verifies its pixel classifier against the fresh bad-border
   screenshot from the negative control.
@@ -84,7 +84,7 @@ was used, and no lamp-control command was sent.
   `settings-negative`, and `go-test.log` in the enclosing workspace.
 
 This is not all-Windows/all-monitor acceptance. Physical mixed-DPI monitor
-movement, Explorer tray behavior, interactive TUI, lamp hardware, and every
+movement, Explorer tray behavior, interactive TUI, device hardware, and every
 historical UI complaint are not re-certified by these fixtures. The DWM border
 attribute getter still returns unsupported here; actual captures and geometry
 are used instead of claiming successful attribute readback.
@@ -97,9 +97,9 @@ Go test suite were enabled, followed by resources, compilation, and PE checks.
 Only frontend rebuilding was skipped; the unchanged checked-in develop Web
 bundle was reused and its edition verified.
 
-- Artifact: `dist/RayanLamp.exe`, Windows/amd64, CGO disabled.
+- Artifact: `dist/PCControllerDesktop.exe`, Windows/amd64, CGO disabled.
 - SHA-256: `31D4A0299C0A28C1ECBB246574EB6C7AD2AE6662B7E14CF2AAF0E44455467810`.
 - The previous executable is preserved as
-  `work/history-regression-pass/RayanLamp-before.exe` in the enclosing workspace.
-- No running RayanLamp process was found or terminated; no installation,
+  `work/history-regression-pass/PCControllerDesktop-before.exe` in the enclosing workspace.
+- No running PCControllerDesktop process was found or terminated; no installation,
   registry change, device command, or GitHub push was performed.

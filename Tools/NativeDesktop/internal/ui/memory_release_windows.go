@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"rayanlamp.local/app/internal/animation"
+	"pccontroller.local/desktop/internal/animation"
 )
 
 const (

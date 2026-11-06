@@ -21,16 +21,16 @@ const (
 )
 
 var expectedExports = []string{
-	"RayanLamp_ABIVersion",
-	"RayanLamp_EnsurePrimaryW",
-	"RayanLamp_ExecuteUtf8",
-	"RayanLamp_ExecuteW",
-	"RayanLamp_Free",
-	"RayanLamp_GetState",
-	"RayanLamp_IsRunning",
-	"RayanLamp_Off",
-	"RayanLamp_On",
-	"RayanLamp_Toggle",
+	"PCControllerDesktop_ABIVersion",
+	"PCControllerDesktop_EnsurePrimaryW",
+	"PCControllerDesktop_ExecuteUtf8",
+	"PCControllerDesktop_ExecuteW",
+	"PCControllerDesktop_Free",
+	"PCControllerDesktop_GetState",
+	"PCControllerDesktop_IsRunning",
+	"PCControllerDesktop_Off",
+	"PCControllerDesktop_On",
+	"PCControllerDesktop_Toggle",
 }
 
 var allowedSystemImports = map[string]bool{
@@ -53,7 +53,7 @@ type options struct {
 
 func main() {
 	var opts options
-	flag.StringVar(&opts.filePath, "file", "", "RayanLamp.dll to inspect")
+	flag.StringVar(&opts.filePath, "file", "", "PCControllerDesktop.dll to inspect")
 	flag.StringVar(
 		&opts.architecture,
 		"arch",
@@ -74,7 +74,7 @@ func main() {
 	}
 	_, _ = fmt.Fprintf(
 		os.Stdout,
-		"Verified Windows/%s RayanLamp SDK DLL ABI and resources (%s).\n",
+		"Verified Windows/%s PCControllerDesktop SDK DLL ABI and resources (%s).\n",
 		opts.architecture,
 		opts.fileVersion,
 	)
@@ -140,8 +140,8 @@ func verify(opts options) error {
 		return fmt.Errorf("read DLL bytes: %w", err)
 	}
 	for _, value := range []string{
-		"Rayan Lamp Native SDK",
-		"RayanLamp.dll",
+		"PCController Native SDK",
+		"PCControllerDesktop.dll",
 		opts.fileVersion,
 	} {
 		if !bytes.Contains(data, utf16LE(value)) {

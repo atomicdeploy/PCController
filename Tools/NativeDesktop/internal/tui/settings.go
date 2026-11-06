@@ -15,9 +15,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
-	"rayanlamp.local/app/internal/commands"
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/i18n"
+	"pccontroller.local/desktop/internal/commands"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/i18n"
 )
 
 const (
@@ -39,7 +39,7 @@ const (
 type settingsSection string
 
 const (
-	settingsLamp          settingsSection = "lamp"
+	settingsDevice        settingsSection = "device"
 	settingsAppearance    settingsSection = "appearance"
 	settingsWindow        settingsSection = "window"
 	settingsNotifications settingsSection = "notifications"
@@ -214,7 +214,7 @@ func (m *Model) openSettingsMenu() tea.Cmd {
 		Title(m.text("Choose a configuration workspace")).
 		Description(m.text("Each Apply is validated, saved atomically, and synchronized live.")).
 		Options(
-			huh.NewOption(m.text("💡 Lamp connection & recovery"), settingsLamp),
+			huh.NewOption(m.text("💡 Device connection & recovery"), settingsDevice),
 			huh.NewOption(m.text("🎨 Appearance & rendering"), settingsAppearance),
 			huh.NewOption(m.text("🪟 Window behavior & placement"), settingsWindow),
 			huh.NewOption(m.text("🔔 Notifications & sound"), settingsNotifications),
@@ -316,8 +316,8 @@ func (m *Model) settingsEditorGroups(
 	section settingsSection,
 ) []*huh.Group {
 	switch section {
-	case settingsLamp:
-		return m.lampSettingsGroups()
+	case settingsDevice:
+		return m.deviceSettingsGroups()
 	case settingsAppearance:
 		return m.appearanceSettingsGroups()
 	case settingsWindow:
@@ -351,11 +351,11 @@ func newSettingsDraft(cfg config.Config) settingsDraft {
 	advanced := string(data)
 	return settingsDraft{
 		cfg:               cfg,
-		requestTimeout:    cfg.Lamp.RequestTimeout.String(),
-		reconnectMin:      cfg.Lamp.ReconnectMin.String(),
-		reconnectMax:      cfg.Lamp.ReconnectMax.String(),
-		httpPoll:          cfg.Lamp.HTTPPoll.String(),
-		telnetPort:        strconv.Itoa(cfg.Lamp.TelnetPort),
+		requestTimeout:    cfg.Device.RequestTimeout.String(),
+		reconnectMin:      cfg.Device.ReconnectMin.String(),
+		reconnectMax:      cfg.Device.ReconnectMax.String(),
+		httpPoll:          cfg.Device.HTTPPoll.String(),
+		telnetPort:        strconv.Itoa(cfg.Device.TelnetPort),
 		settingsTab:       strconv.Itoa(cfg.UI.SettingsTab),
 		snapDistance:      strconv.Itoa(cfg.UI.MagneticSnapDistance),
 		windowX:           strconv.Itoa(cfg.UI.WindowBounds.X),
@@ -425,23 +425,23 @@ func (m *Model) settingsSelect(
 		Value(value)
 }
 
-func (m *Model) lampSettingsGroups() []*huh.Group {
+func (m *Model) deviceSettingsGroups() []*huh.Group {
 	d := &m.settings.draft
 	return []*huh.Group{
 		huh.NewGroup(
 			settingsInput(
-				m.text("Lamp base URL"),
+				m.text("Device base URL"),
 				m.text("HTTP(S) origin; `.local` is resolved and cached by the coordinator."),
-				&d.cfg.Lamp.BaseURL,
-				validateLampURL,
+				&d.cfg.Device.BaseURL,
+				validateDeviceURL,
 			),
 			settingsInput(m.text("Request timeout"), m.text("100ms–5m"), &d.requestTimeout, durationRange(100*time.Millisecond, 5*time.Minute, false)),
-			m.settingsBool(m.text("WebSocket events"), m.text("Listen on /ws and reconnect with backoff."), &d.cfg.Lamp.WebSocket),
+			m.settingsBool(m.text("WebSocket events"), m.text("Listen on /ws and reconnect with backoff."), &d.cfg.Device.WebSocket),
 			settingsInput(m.text("Reconnect minimum"), m.text("100ms–5m"), &d.reconnectMin, durationRange(100*time.Millisecond, 5*time.Minute, false)),
 			settingsInput(m.text("Reconnect maximum"), m.text("At least the minimum; at most 15m."), &d.reconnectMax, durationRange(100*time.Millisecond, 15*time.Minute, false)),
 			settingsInput(m.text("HTTP fallback poll"), m.text("0 disables polling; otherwise 1s–24h."), &d.httpPoll, durationRange(time.Second, 24*time.Hour, true)),
 			settingsInput(m.text("Telnet port"), m.text("Device terminal port, 1–65535."), &d.telnetPort, integerRange(1, 65535)),
-		).Title(m.text("Lamp connection")).Description(m.text("Ctrl+S applies this section immediately · Esc discards")),
+		).Title(m.text("Device connection")).Description(m.text("Ctrl+S applies this section immediately · Esc discards")),
 	}
 }
 
@@ -450,7 +450,7 @@ func (m *Model) appearanceSettingsGroups() []*huh.Group {
 	language := huh.NewSelect[string]().
 		Key("ui.locale").
 		Title(m.text("Language")).
-		Description(m.text("Choose the language used by every RayanLamp surface.")).
+		Description(m.text("Choose the language used by every PCControllerDesktop surface.")).
 		Options(
 			huh.NewOption(m.text("System default"), config.LocaleAuto),
 			huh.NewOption(m.text("English"), config.LocaleEnglish),
@@ -461,7 +461,7 @@ func (m *Model) appearanceSettingsGroups() []*huh.Group {
 	return []*huh.Group{
 		huh.NewGroup(
 			language,
-			m.settingsSelect(m.text("View"), m.text("Compact lamp or larger dashboard."), &d.cfg.UI.ViewMode, config.ViewCompact, config.ViewDashboard),
+			m.settingsSelect(m.text("View"), m.text("Compact device or larger dashboard."), &d.cfg.UI.ViewMode, config.ViewCompact, config.ViewDashboard),
 			m.settingsSelect(m.text("Theme"), m.text("Follow Windows or force a palette."), &d.cfg.UI.Theme, "system", "light", "dark"),
 			m.settingsSelect(
 				m.text("Backdrop"),
@@ -496,7 +496,7 @@ func (m *Model) windowSettingsGroups() []*huh.Group {
 	d := &m.settings.draft
 	return []*huh.Group{
 		huh.NewGroup(
-			m.settingsBool(m.text("Always on top"), m.text("Keep the lamp above ordinary windows."), &d.cfg.UI.AlwaysOnTop),
+			m.settingsBool(m.text("Always on top"), m.text("Keep the device above ordinary windows."), &d.cfg.UI.AlwaysOnTop),
 			m.settingsBool(m.text("Close to tray"), m.text("Close hides the window while the coordinator remains active."), &d.cfg.UI.CloseToTray),
 			m.settingsBool(m.text("Prewarm tray menu"), m.text("Keep the acrylic menu ready to avoid first-open flash."), &d.cfg.UI.PrewarmTrayMenu),
 			m.settingsBool(m.text("Start minimized"), m.text("Begin in the notification area."), &d.cfg.UI.StartMinimized),
@@ -537,12 +537,12 @@ func (m *Model) notificationSettingsGroups() []*huh.Group {
 	return []*huh.Group{
 		huh.NewGroup(
 			m.settingsBool(m.text("Notifications"), m.text("Master notification switch."), &d.cfg.Notifications.Enabled),
-			m.settingsBool(m.text("State changes"), m.text("Notify when lamp state changes."), &d.cfg.Notifications.StateChanges),
+			m.settingsBool(m.text("State changes"), m.text("Notify when device state changes."), &d.cfg.Notifications.StateChanges),
 			m.settingsBool(m.text("Initial sync"), m.text("Notify after the first confirmed state."), &d.cfg.Notifications.InitialSync),
 			m.settingsBool(m.text("Custom messages"), m.text("Render `message:` device events."), &d.cfg.Notifications.CustomMessage),
 			m.settingsBool(m.text("Audible cues"), m.text("Play cues independently of toast delivery."), &d.cfg.Notifications.Sound),
 			m.settingsSelect(m.text("Sound source"), m.text("Use the shared bundled catalog or a content-addressed custom WAV."), &d.cfg.Notifications.SoundSource, config.SoundSourceBundled, config.SoundSourceCustom),
-			settingsInput(m.text("Import custom WAV"), m.text("Optional local PCM WAV path; Apply imports it through the active GUI/headless primary."), &d.customSoundPath, cleanSingleLine),
+			settingsInput(m.text("Import custom sound"), m.text("WAV, MP3 or FLAC path"), &d.customSoundPath, cleanSingleLine),
 			settingsInput(m.text("Custom sound asset"), m.text("SHA-256 ID imported by the native or Web settings surface."), &d.cfg.Notifications.SoundFile, soundAssetID),
 			settingsInput(m.text("Custom sound name"), m.text("Reader-facing name shared by native and Web settings."), &d.cfg.Notifications.SoundName, nil),
 			m.settingsSelect(m.text("Delivery"), m.text("Automatic modern toast with legacy balloon fallback."), &d.cfg.Notifications.Delivery, "auto", "toast", "balloon"),
@@ -576,11 +576,11 @@ func (m *Model) automationSettingsGroups() []*huh.Group {
 	d := &m.settings.draft
 	return []*huh.Group{
 		huh.NewGroup(
-			m.settingsBool(m.text("Automation"), m.text("Run scripts after lamp and Windows lifecycle events."), &d.cfg.Automation.Enabled),
+			m.settingsBool(m.text("Automation"), m.text("Run scripts after device and Windows lifecycle events."), &d.cfg.Automation.Enabled),
 			settingsInput(m.text("On script"), m.text("Executable/script invoked after ON."), &d.cfg.Automation.OnScript, cleanSingleLine),
 			settingsInput(m.text("Off script"), m.text("Executable/script invoked after OFF."), &d.cfg.Automation.OffScript, cleanSingleLine),
 			settingsInput(m.text("Message script"), m.text("Executable/script invoked for custom messages."), &d.cfg.Automation.MessageScript, cleanSingleLine),
-		).Title(m.text("Lamp & message events")).Description(m.text("Page 1 of 3 · Ctrl+S applies every automation page · Esc discards")),
+		).Title(m.text("Device & message events")).Description(m.text("Page 1 of 3 · Ctrl+S applies every automation page · Esc discards")),
 		huh.NewGroup(
 			settingsInput(m.text("Lock script"), m.text("Invoked when Windows locks the session."), &d.cfg.Automation.LockScript, cleanSingleLine),
 			settingsInput(m.text("Unlock script"), m.text("Invoked when Windows unlocks the session."), &d.cfg.Automation.UnlockScript, cleanSingleLine),
@@ -651,7 +651,7 @@ func (m *Model) integrationSettingsGroups() []*huh.Group {
 				Title(m.text("Confirm ownership-safe unregistration")).
 				Description(
 					m.text(
-						"Required only when unregistering. RayanLamp rechecks every "+
+						"Required only when unregistering. PCControllerDesktop rechecks every "+
 							"owned registry view before removing shared entries.",
 					),
 				).
@@ -697,7 +697,7 @@ func (m *Model) diagnosticSettingsGroups() []*huh.Group {
 		d.expertEndpoints +
 		"\n\n" + m.text(
 		"Sensitive /config projections are sanitized before retention. "+
-			"Non-lamp ASA routes remain excluded by compiled policy.",
+			"Non-device ASA routes remain excluded by compiled policy.",
 	)
 	return []*huh.Group{
 		huh.NewGroup(
@@ -716,7 +716,7 @@ func (m *Model) advancedSettingsGroups() []*huh.Group {
 	return []*huh.Group{
 		huh.NewGroup(
 			huh.NewText().
-				Title(m.text("Complete RayanLamp configuration")).
+				Title(m.text("Complete PCControllerDesktop configuration")).
 				Description(m.text("JSON object · token is masked · Ctrl+S validates and atomically applies.")).
 				Value(&d.advancedJSON).
 				Lines(22).
@@ -1033,20 +1033,20 @@ func (m *Model) settingsPatch() (map[string]any, error) {
 	candidate := d.cfg
 	var err error
 	switch m.settings.section {
-	case settingsLamp:
-		if candidate.Lamp.RequestTimeout, err = parseConfigDuration(d.requestTimeout); err != nil {
+	case settingsDevice:
+		if candidate.Device.RequestTimeout, err = parseConfigDuration(d.requestTimeout); err != nil {
 			return nil, fmt.Errorf("request timeout: %w", err)
 		}
-		if candidate.Lamp.ReconnectMin, err = parseConfigDuration(d.reconnectMin); err != nil {
+		if candidate.Device.ReconnectMin, err = parseConfigDuration(d.reconnectMin); err != nil {
 			return nil, fmt.Errorf("reconnect minimum: %w", err)
 		}
-		if candidate.Lamp.ReconnectMax, err = parseConfigDuration(d.reconnectMax); err != nil {
+		if candidate.Device.ReconnectMax, err = parseConfigDuration(d.reconnectMax); err != nil {
 			return nil, fmt.Errorf("reconnect maximum: %w", err)
 		}
-		if candidate.Lamp.HTTPPoll, err = parseConfigDuration(d.httpPoll); err != nil {
+		if candidate.Device.HTTPPoll, err = parseConfigDuration(d.httpPoll); err != nil {
 			return nil, fmt.Errorf("HTTP poll: %w", err)
 		}
-		if candidate.Lamp.TelnetPort, err = strconv.Atoi(strings.TrimSpace(d.telnetPort)); err != nil {
+		if candidate.Device.TelnetPort, err = strconv.Atoi(strings.TrimSpace(d.telnetPort)); err != nil {
 			return nil, errors.New("telnet port must be an integer")
 		}
 	case settingsWindow:
@@ -1124,8 +1124,8 @@ func diffSettingsSection(
 	var key string
 	var oldValue, newValue any
 	switch section {
-	case settingsLamp:
-		key, oldValue, newValue = "lamp", before.Lamp, after.Lamp
+	case settingsDevice:
+		key, oldValue, newValue = "device", before.Device, after.Device
 	case settingsAppearance, settingsWindow:
 		key, oldValue, newValue = "ui", before.UI, after.UI
 	case settingsNotifications:
@@ -1208,7 +1208,7 @@ func integerRange(minimum, maximum int) func(string) error {
 	}
 }
 
-func validateLampURL(value string) error {
+func validateDeviceURL(value string) error {
 	parsed, err := url.Parse(strings.TrimSpace(value))
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") ||
 		parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" ||
@@ -1279,8 +1279,8 @@ func validateConfigJSON(value string) error {
 
 func (m *Model) settingsSectionTitle(section settingsSection) string {
 	switch section {
-	case settingsLamp:
-		return m.text("Lamp connection")
+	case settingsDevice:
+		return m.text("Device connection")
 	case settingsAppearance:
 		return m.text("Appearance")
 	case settingsWindow:

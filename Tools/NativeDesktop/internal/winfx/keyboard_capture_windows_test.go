@@ -72,8 +72,8 @@ func TestKeyboardCaptureLifecycleIsExclusiveAndIdempotent(t *testing.T) {
 }
 
 func TestKeyboardCaptureReceivesInjectedSendInput(t *testing.T) {
-	if os.Getenv("RAYANLAMP_INTERACTIVE_TESTS") != "1" {
-		t.Skip("set RAYANLAMP_INTERACTIVE_TESTS=1 to inject an F24 test chord")
+	if os.Getenv("PCCONTROLLER_DESKTOP_INTERACTIVE_TESTS") != "1" {
+		t.Skip("set PCCONTROLLER_DESKTOP_INTERACTIVE_TESTS=1 to inject an F24 test chord")
 	}
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()

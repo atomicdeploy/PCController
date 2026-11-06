@@ -1,4 +1,4 @@
-// Package terminal centralizes RayanLamp's terminal capability and output
+// Package terminal centralizes PCControllerDesktop's terminal capability and output
 // policy. Console output stays plain when redirected, honors the conventional
 // opt-out environment variables, and emits complete SGR sequences only when
 // the destination can consume them.
@@ -14,7 +14,7 @@ import (
 
 const (
 	// Reset is the complete SGR reset sequence. Styled always appends it so a
-	// RayanLamp label cannot leak its attributes into the caller's prompt.
+	// PCControllerDesktop label cannot leak its attributes into the caller's prompt.
 	Reset = "\x1b[0m"
 
 	BoldRed   = "\x1b[1;31m"
@@ -139,7 +139,7 @@ func colorEnabled(interactive bool) bool {
 func forceColorRequested() bool {
 	return environmentEnabled("FORCE_COLOR") ||
 		environmentEnabled("CLICOLOR_FORCE") ||
-		environmentEnabled("RAYANLAMP_FORCE_COLOR")
+		environmentEnabled("PCCONTROLLER_DESKTOP_FORCE_COLOR")
 }
 
 func emojiEnabled(interactive bool, file *os.File) bool {
@@ -170,7 +170,7 @@ func environmentEnabled(name string) bool {
 }
 
 func emojiOverride() (bool, bool) {
-	value, present := os.LookupEnv("RAYANLAMP_EMOJI")
+	value, present := os.LookupEnv("PCCONTROLLER_DESKTOP_EMOJI")
 	if !present {
 		return false, false
 	}

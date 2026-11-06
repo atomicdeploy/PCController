@@ -1,6 +1,6 @@
 import type { AudioCue, NotificationsConfig } from "./contracts";
 
-const audioDatabaseName = "rayanlamp.web.audio.v1";
+const audioDatabaseName = "pccontroller-desktop.web.audio.v1";
 const audioStoreName = "sounds";
 const maxAudioBytes = 4 << 20;
 const maxAudioSeconds = 10;
@@ -27,7 +27,7 @@ export interface BrowserAudioPlayback {
     settings: NotificationsConfig,
     count?: number
   ): Promise<void>;
-  importCustomWAV(file: File): Promise<StoredAudioAsset>;
+  importCustomAudio(file: File): Promise<StoredAudioAsset>;
   describe(id: string): Promise<StoredAudioAsset | null>;
   armUserGestureUnlock(target?: Document): () => void;
 }
@@ -114,11 +114,14 @@ export class BrowserAudioPlayer implements BrowserAudioPlayback {
     return operation;
   }
 
-  async importCustomWAV(file: File): Promise<StoredAudioAsset> {
+  async importCustomAudio(file: File): Promise<StoredAudioAsset> {
     if (file.size > maxAudioBytes) {
       throw new Error("Custom audio must be 4 MiB or smaller.");
     }
-    const data = await file.arrayBuffer();
+    const source = await file.arrayBuffer();
+    const data = await normalizeImportedAudio(source, (bytes) =>
+      this.audioContext().decodeAudioData(bytes)
+    );
     const info = inspectWAV(data);
     const id = await audioContentID(data);
     const importedAt = new Date().toISOString();
@@ -227,7 +230,7 @@ export class BrowserAudioPlayer implements BrowserAudioPlayback {
         }
       } catch {
         // A missing, corrupt, or unavailable browser asset must not make every
-        // future event silent. DirectLampAPI repairs the persisted selection;
+        // future event silent. DirectDeviceAPI repairs the persisted selection;
         // this last-resort path still plays the cue-specific bundled effect.
       }
     }
@@ -264,6 +267,80 @@ export const browserAudio = new BrowserAudioPlayer();
 
 export function bundledAudioURL(cue: AudioCue, baseURL: string): string {
   return new URL(`shared/sfx/${cue}.wav`, baseURL).href;
+}
+
+export const audioImportAccept = ".wav,.mp3,.flac,audio/wav,audio/mpeg,audio/flac";
+
+export function audioImportContentType(file: File): string {
+  const extension = file.name.split(".").pop()?.toLowerCase();
+  const types: Record<string, string> = {
+    wav: "audio/wav", mp3: "audio/mpeg", flac: "audio/flac"
+  };
+  return types[extension || ""] || file.type || "application/octet-stream";
+}
+
+// Direct/browser-only mode has no host decoder. Decode with Web Audio once,
+// without resuming the context or connecting a source to the speakers. Persist
+// the same bounded PCM format used by the native host, not compressed bytes.
+export async function normalizeImportedAudio(
+  data: ArrayBuffer,
+  decode: (data: ArrayBuffer) => Promise<AudioBuffer>
+): Promise<ArrayBuffer> {
+  if (data.byteLength > maxAudioBytes) {
+    throw new Error("Custom audio must be 4 MiB or smaller.");
+  }
+  const bytes = new Uint8Array(data);
+  if (fourCC(bytes, 0) === "RIFF") {
+    inspectWAV(data);
+    return data;
+  }
+  if (!(fourCC(bytes, 0) === "fLaC" ||
+    (bytes[0] === 73 && bytes[1] === 68 && bytes[2] === 51) ||
+    (bytes[0] === 255 && (bytes[1] & 0xe0) === 0xe0))) {
+    throw new Error("Choose PCM WAV, MP3 or FLAC audio.");
+  }
+  let buffer: AudioBuffer;
+  try {
+    buffer = await decode(data.slice(0));
+  } catch {
+    throw new Error("This browser cannot decode this audio file. Try importing it through the desktop host.");
+  }
+  const { sampleRate, numberOfChannels: channels, length: frames } = buffer;
+  if (sampleRate < 8000 || sampleRate > 96000 || channels < 1 || channels > 2 ||
+    frames < 1 || frames > sampleRate * maxAudioSeconds) {
+    throw new Error("Custom audio must be mono or stereo, 8–96 kHz and no longer than 10 seconds.");
+  }
+  const size = frames * channels * 2;
+  if (size + 44 > maxAudioBytes) {
+    throw new Error("Decoded custom audio must be 4 MiB or smaller.");
+  }
+  const wave = new ArrayBuffer(44 + size);
+  const out = new Uint8Array(wave);
+  const view = new DataView(wave);
+  const tag = (offset: number, text: string) => {
+    for (let i = 0; i < text.length; i++) out[offset + i] = text.charCodeAt(i);
+  };
+  tag(0, "RIFF"); tag(8, "WAVEfmt "); tag(36, "data");
+  view.setUint32(4, wave.byteLength - 8, true);
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, channels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * channels * 2, true);
+  view.setUint16(32, channels * 2, true);
+  view.setUint16(34, 16, true);
+  view.setUint32(40, size, true);
+  for (let channel = 0; channel < channels; channel++) {
+    const values = buffer.getChannelData(channel);
+    for (let i = 0; i < frames; i++) {
+      if (!Number.isFinite(values[i])) throw new Error("Invalid audio sample.");
+      const value = Math.max(-1, Math.min(1, values[i]));
+      view.setInt16(44 + (i * channels + channel) * 2,
+        Math.round(value * (value < 0 ? 32768 : 32767)), true);
+    }
+  }
+  inspectWAV(wave);
+  return wave;
 }
 
 export function inspectWAV(data: ArrayBuffer): WAVInfo {

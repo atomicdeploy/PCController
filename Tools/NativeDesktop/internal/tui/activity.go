@@ -3,7 +3,7 @@ package tui
 import (
 	"strings"
 
-	"rayanlamp.local/app/internal/terminal"
+	"pccontroller.local/desktop/internal/terminal"
 )
 
 // activityLevel and activityEvent intentionally use the same string contract
@@ -25,8 +25,8 @@ const (
 	activityAppStart              activityEvent = "app.start"
 	activityTransportReady        activityEvent = "transport.ready"
 	activityTransportError        activityEvent = "transport.error"
-	activityLampState             activityEvent = "lamp.state"
-	activityLampCommand           activityEvent = "lamp.command"
+	activityOutputState           activityEvent = "device.state"
+	activityDeviceCommand         activityEvent = "device.command"
 	activityWebSocketConnected    activityEvent = "websocket.connected"
 	activityWebSocketDisconnected activityEvent = "websocket.disconnected"
 	activityMessageReceived       activityEvent = "message.received"
@@ -45,8 +45,8 @@ var activityPresentations = map[activityEvent]activityPresentation{
 	activityAppStart:              {emoji: "🚀", ascii: "[START]"},
 	activityTransportReady:        {emoji: "🔌", ascii: "[LINK]"},
 	activityTransportError:        {emoji: "⚠️", ascii: "[WARN]"},
-	activityLampState:             {emoji: "💡", ascii: "[LAMP]"},
-	activityLampCommand:           {emoji: "⚡", ascii: "[CMD]"},
+	activityOutputState:           {emoji: "💡", ascii: "[DEVICE]"},
+	activityDeviceCommand:         {emoji: "⚡", ascii: "[CMD]"},
 	activityWebSocketConnected:    {emoji: "📡", ascii: "[WS]"},
 	activityWebSocketDisconnected: {emoji: "📡", ascii: "[WS]"},
 	activityMessageReceived:       {emoji: "💬", ascii: "[MSG]"},
