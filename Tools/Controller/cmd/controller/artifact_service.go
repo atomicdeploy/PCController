@@ -336,7 +336,7 @@ func artifactProgrammingContext(ctx artifacts.Context, progress artifacts.Progre
 func (executor *primaryArtifactExecutor) StageHostUpdate(
 	ctx artifacts.Context,
 	artifact artifacts.Descriptor,
-	_ artifacts.UpdateRequest,
+	request artifacts.UpdateRequest,
 	progress artifacts.ProgressFunc,
 ) error {
 	current, err := os.Executable()
@@ -345,7 +345,7 @@ func (executor *primaryArtifactExecutor) StageHostUpdate(
 	}
 	progress("staging", -1, "verifying and staging host replacement")
 	options := artifacts.SelfUpdateOptions{CurrentPath: current, ArtifactPath: artifact.LocalPath,
-		ExpectedSHA256: artifact.SHA256, Arguments: os.Args[1:]}
+		ExpectedSHA256: artifact.SHA256, Arguments: os.Args[1:], OperationID: request.OperationID}
 	serviceUpdate := os.Getenv("PCCONTROLLER_WINDOWS_SERVICE") == "1"
 	if serviceUpdate {
 		options.WindowsService = "PCController"
@@ -357,7 +357,7 @@ func (executor *primaryArtifactExecutor) StageHostUpdate(
 	if !serviceUpdate {
 		executor.scheduleHostUpdateShutdown(500*time.Millisecond, 12*time.Second)
 	}
-	return nil
+	return artifacts.ErrHostActivationPending
 }
 
 func (executor *primaryArtifactExecutor) scheduleHostUpdateShutdown(gracefulDelay, forceDelay time.Duration) {

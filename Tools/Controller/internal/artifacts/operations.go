@@ -54,6 +54,16 @@ func (service *Service) reserveOperation(
 			return status, true, nil
 		}
 	}
+	// A deferred host replacement outlives its staging worker. Never admit a
+	// second helper, or queue a hardware write that shutdown could interrupt.
+	// Exact idempotent requests above still observe their original operation.
+	for _, active := range service.operations {
+		busy := !terminalOperationState(active.State) || pendingHostActivation(active)
+		if busy && (kind == "host" || active.Kind == "host") {
+			service.mu.Unlock()
+			return UpdateStatus{}, false, errors.New("host replacement cannot overlap another update operation; wait for its verified outcome")
+		}
+	}
 	status := UpdateStatus{
 		ID: newOperationID(), Kind: kind, State: "queued", ProgressPercent: 0,
 		Stage: "queued", StageStartedAt: now,
@@ -114,7 +124,7 @@ func (service *Service) loadOperationJournals() error {
 			entry.Name() != journal.Status.ID+".json" {
 			return fmt.Errorf("operation journal %q has an invalid identity", entry.Name())
 		}
-		if !terminalOperationState(journal.Status.State) {
+		if !terminalOperationState(journal.Status.State) && !pendingHostActivation(journal.Status) {
 			journal.Status.State = "failed"
 			journal.Status.ProgressKnown = false
 			journal.Status.ErrorCode = "host_restarted"

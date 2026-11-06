@@ -41,6 +41,7 @@ type selfUpdateJournal struct {
 	ParentPID         int       `json:"parent_pid"`
 	ChildPID          int       `json:"child_pid,omitempty"`
 	WindowsService    string    `json:"windows_service,omitempty"`
+	OperationID       string    `json:"operation_id,omitempty"`
 	CurrentPath       string    `json:"current_path"`
 	StagedPath        string    `json:"staged_path"`
 	BackupPath        string    `json:"backup_path"`
@@ -90,6 +91,7 @@ type SelfUpdateOptions struct {
 	Launcher         HelperLauncher
 	// Set only by the installed service host, never from RPC parameters.
 	WindowsService string
+	OperationID    string
 }
 
 func PrepareSelfUpdateWithOptions(ctx context.Context, options SelfUpdateOptions) (SelfUpdatePlan, error) {
@@ -186,6 +188,7 @@ func PrepareSelfUpdateWithOptions(ctx context.Context, options SelfUpdateOptions
 		State: "prepared", UpdatedAt: time.Now().UTC(),
 		ParentPID: os.Getpid(), CurrentPath: plan.CurrentPath, StagedPath: plan.StagedPath,
 		WindowsService: options.WindowsService,
+		OperationID:    options.OperationID,
 		BackupPath:     plan.BackupPath, HelperPath: plan.HelperPath, JournalPath: plan.JournalPath,
 		HealthPath: plan.HealthPath, HealthToken: token,
 		HealthTimeoutMS: options.HealthTimeout.Milliseconds(),
