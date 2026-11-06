@@ -583,6 +583,29 @@ geometry/reopen tests. Main-renderer and popup HFONTs are checked at 96, 120,
 pages and diagnostics. Fixture HWNDs are topmost so unrelated windows do not
 invalidate screen evidence; no input is injected into another application.
 
+## VIS-025: native dialog chrome uses fractional coverage
+
+Rounded input/button HWNDs must not use binary `SetWindowRgn` masks for their
+visible contours. Settings chrome shares `dialograster_windows.go`: rounded
+gradient fills, borders/focus rings, tab highlights, checkbox marks, chevrons
+and recorder pills use premultiplied BGRA coverage at the final physical size.
+Keep existing canonical control radii and native-resolution text; do not blur
+or supersample entire controls to hide jagged geometry. The main/tray DWM corner
+ownership is unchanged.
+
+Rounded input corners blend into the aligned ancestor material, not the input's
+own solid brush or a guessed flat dialog color. The native input remains in
+charge of text, IME, selection, type-ahead and accessibility. The custom colored
+focus ring replaces only the native dotted focus ornament; clearing custom
+theming restores native keyboard cues and High Contrast behavior.
+
+The shared chrome cache is bounded to 64 DIBs / 16 MiB and cleared with native
+paint-buffer destruction/invalidation. Parent-material masks are refreshed from
+the live ancestor brush, never from screen capture; unchanged masks/colored
+rasters reuse resources between hover frames. Coverage tests include 96, 120,
+144 and 192 DPI, symmetric fractional edges, premultiplied channels, stroke-only
+transparent interiors, joined glyph strokes, real-HDC blending and cache bounds.
+
 ## Change gate
 
 Any edit to `internal/ui`, `internal/traymenu`, dialog paint code, or relevant

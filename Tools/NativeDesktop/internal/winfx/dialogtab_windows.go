@@ -945,6 +945,7 @@ func newDialogTabPaintBuffer(
 }
 
 func releaseDialogTabPaintBuffer(hwnd uintptr) {
+	releaseDialogRasterCache()
 	if hwnd == 0 {
 		return
 	}
@@ -1332,6 +1333,9 @@ func fillDialogTabRoundRect(
 	radius int32,
 ) {
 	if dc == 0 || rect.Right <= rect.Left || rect.Bottom <= rect.Top {
+		return
+	}
+	if drawDialogAARoundRect(dc, dialogButtonRect{Left: rect.Left, Top: rect.Top, Right: rect.Right, Bottom: rect.Bottom}, color, color, 0, radius, 0, true) {
 		return
 	}
 	if radius <= 0 {

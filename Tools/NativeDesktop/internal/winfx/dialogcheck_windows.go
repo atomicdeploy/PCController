@@ -90,6 +90,13 @@ func paintDialogCheckGlyph(hwnd uintptr, dc win.HDC, dark bool) {
 	if checked == 0 {
 		return
 	}
+	markPoints := []dialogComboPoint{{X: x + size*3/13, Y: y + size*6/13}, {X: x + size*5/13, Y: y + size*9/13}, {X: x + size*10/13, Y: y + size*3/13}}
+	if checked == 2 {
+		markPoints = []dialogComboPoint{{X: x + size*3/13, Y: y + size/2}, {X: x + size*10/13, Y: y + size/2}}
+	}
+	if drawDialogAAPolyline(uintptr(dc), markPoints, mark, max(1, scaleDialogButtonMetric(2, dpi))) {
+		return
+	}
 	pen, releasePen := acquireDialogButtonPen(uintptr(dc), nil, mark, max(1, scaleDialogButtonMetric(2, dpi)))
 	if pen == 0 {
 		return
