@@ -38,7 +38,7 @@ try {
     $before = Get-CimInstance Win32_Service -Filter "Name='PCController'"
     $manifest = Rpc 'controller.artifact.manifest' @{}
     if ($manifest.board.connected) { throw 'Isolated service unexpectedly connected to hardware.' }
-    $upload = Rpc 'controller.artifact.upload.begin' @{kind='host-executable';name='controller.exe';sha256=$digest;bytes=$size;platform='windows-amd64'}
+    $upload = Rpc 'controller.artifact.upload.begin' @{kind='host-executable';name='controller.exe';sha256=$digest;bytes=$size;platform='windows/amd64'}
     $input = [IO.File]::OpenRead($candidate)
     try {
         $offset = [long]0
