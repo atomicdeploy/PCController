@@ -58,6 +58,8 @@ type Service struct {
 	operationMeta          map[string]operationJournal
 	transaction            chan struct{}
 	peerUploads            map[string]*peerUpload
+	peerDownloads          map[string]*peerDownload
+	peerDownloadPending    int
 	peerUploadWait         sync.WaitGroup
 	peerUploadOps          sync.WaitGroup
 	peerUploadsClosed      bool
@@ -114,6 +116,10 @@ func (service *Service) Close() {
 		_ = upload.file.Close()
 		_ = os.Remove(upload.path)
 		delete(service.peerUploads, id)
+	}
+	for id, download := range service.peerDownloads {
+		_ = download.file.Close()
+		delete(service.peerDownloads, id)
 	}
 	service.mu.Unlock()
 }
@@ -599,6 +605,9 @@ func (service *Service) LatestStatus() *UpdateStatus {
 func (service *Service) DispatchRPC(ctx context.Context, method string, params json.RawMessage) (any, bool, error) {
 	method = strings.ToLower(strings.TrimSpace(method))
 	switch method {
+	case "controller.artifact.download.begin", "controller.artifact.download.chunk", "controller.artifact.download.close":
+		value, err := service.dispatchPeerDownload(method, params)
+		return value, true, err
 	case "controller.artifact.manifest":
 		value, err := service.Manifest()
 		return value, true, err

@@ -1979,6 +1979,10 @@ func (service *Service) dispatch(
 	}
 	response.Result = result
 	return response
+		if strings.HasPrefix(request.Method, "controller.software.") {
+			result, err = service.dispatchSoftware(ctx, request.Method, request.Params)
+			break
+		}
 }
 
 func dispatchRPCError(err error) *RPCError {
@@ -2470,6 +2474,15 @@ func bridgeIngressCanPivot(method string, params json.RawMessage) bool {
 		return false
 	}
 }
+	if method == "controller.software.call" {
+		if _, err := validateSoftwareCall(params); err != nil {
+			return err
+		}
+		if err := service.authorizeCapability(access, method, capabilityProgramming); err != nil {
+			return err
+		}
+		return service.authorizeCapability(access, method, capabilityBridgeCalls)
+	}
 
 func bridgeCommandCanPivot(command string) bool {
 	words := bridgeCommandWords(command)
@@ -2617,7 +2630,8 @@ func requestCapability(method string, params json.RawMessage) string {
 	case "controller.event.next", "controller.event.latest", "controller.subscribe",
 		"controller.unsubscribe":
 		return capabilityEvents
-	case "controller.artifact.manifest", "controller.artifact.list", "controller.update.status":
+	case "controller.artifact.manifest", "controller.artifact.list", "controller.update.status",
+		"controller.artifact.download.begin", "controller.artifact.download.chunk", "controller.artifact.download.close":
 		return capabilityRead
 	case "controller.discovery.github.workflow", "controller.discovery.github.release",
 		"controller.discovery.manifest", "controller.discovery.local_manifest",
@@ -2633,6 +2647,12 @@ func requestCapability(method string, params json.RawMessage) string {
 		"controller.firmware.build":
 		return capabilityProgramming
 	case "controller.connect", "controller.open", "controller.port.open",
+	if method == "controller.software.targets" || method == "controller.software.bundle.list" || method == "controller.software.bundle.read" {
+		return capabilityRead
+	}
+	if method == "controller.software.call" {
+		return capabilityProgramming
+	}
 		"controller.close", "controller.port.close":
 		return capabilityConnection
 	case "controller.audio.cues":

@@ -180,7 +180,7 @@ func PrepareSelfUpdateWithOptions(ctx context.Context, options SelfUpdateOptions
 		CurrentSHA256:   currentDigest, ReplacementSHA256: expected,
 		Arguments: append([]string(nil), options.Arguments...), WorkingDirectory: workingDirectory,
 	}
-	if err := writeJSONAtomic(plan.JournalPath, journal); err != nil {
+	if err := writeUpdateJSON(plan.JournalPath, journal); err != nil {
 		_ = os.Remove(plan.HelperPath)
 		_ = os.Remove(plan.StagedPath)
 		return SelfUpdatePlan{}, fmt.Errorf("write self-update journal: %w", err)
@@ -220,7 +220,7 @@ func RunSelfUpdateHelper(ctx context.Context, journalPath string) error {
 	}
 	journal.State = "replacing"
 	journal.UpdatedAt = time.Now().UTC()
-	if err := writeJSONAtomic(journal.JournalPath, journal); err != nil {
+	if err := writeUpdateJSON(journal.JournalPath, journal); err != nil {
 		return err
 	}
 	if err := copyVerifiedArtifact(journal.CurrentPath, journal.BackupPath, journal.CurrentSHA256); err != nil {
@@ -228,6 +228,10 @@ func RunSelfUpdateHelper(ctx context.Context, journalPath string) error {
 	}
 	if err := replaceExecutable(journal.StagedPath, journal.CurrentPath); err != nil {
 		return updateJournalFailure(&journal, "replacement-failed", err)
+	}
+	if err := setUpdateHidden(journal.CurrentPath, false); err != nil {
+		_ = rollbackSelfUpdate(&journal)
+		return updateJournalFailure(&journal, "replacement-visibility-failed", err)
 	}
 	if err := verifyFileDigest(journal.CurrentPath, journal.ReplacementSHA256); err != nil {
 		_ = rollbackSelfUpdate(&journal)
@@ -244,7 +248,7 @@ func RunSelfUpdateHelper(ctx context.Context, journalPath string) error {
 	journal.ChildPID = child.Process.Pid
 	journal.State = "awaiting-health"
 	journal.UpdatedAt = time.Now().UTC()
-	if err := writeJSONAtomic(journal.JournalPath, journal); err != nil {
+	if err := writeUpdateJSON(journal.JournalPath, journal); err != nil {
 		_ = child.Process.Kill()
 		_ = child.Wait()
 		_ = rollbackSelfUpdate(&journal)
@@ -265,7 +269,7 @@ func RunSelfUpdateHelper(ctx context.Context, journalPath string) error {
 		journal.State = "rolled-back"
 		journal.Failure = err.Error()
 		journal.UpdatedAt = time.Now().UTC()
-		_ = writeJSONAtomic(journal.JournalPath, journal)
+		_ = writeUpdateJSON(journal.JournalPath, journal)
 		if restartErr := launchRestoredHost(journal); restartErr != nil {
 			return fmt.Errorf("candidate unhealthy (%v); rollback succeeded but restart failed: %w", err, restartErr)
 		}
@@ -274,7 +278,7 @@ func RunSelfUpdateHelper(ctx context.Context, journalPath string) error {
 	journal.State = "committed"
 	journal.Failure = ""
 	journal.UpdatedAt = time.Now().UTC()
-	if err := writeJSONAtomic(journal.JournalPath, journal); err != nil {
+	if err := writeUpdateJSON(journal.JournalPath, journal); err != nil {
 		return err
 	}
 	_ = os.Remove(journal.BackupPath)
@@ -305,7 +309,7 @@ func ScheduleSelfUpdateHealthAcknowledgement(delay time.Duration) {
 			if journal, err := loadSelfUpdateJournal(journalPath); err == nil {
 				journal.State = "candidate-healthy"
 				journal.UpdatedAt = time.Now().UTC()
-				_ = writeJSONAtomic(journal.JournalPath, journal)
+				_ = writeUpdateJSON(journal.JournalPath, journal)
 			}
 		}
 		_ = writeHealthAcknowledgement(path, token)
@@ -353,7 +357,7 @@ func recoverOrphanedSelfUpdates() error {
 			continue
 		}
 		journal.UpdatedAt = time.Now().UTC()
-		_ = writeJSONAtomic(journal.JournalPath, journal)
+		_ = writeUpdateJSON(journal.JournalPath, journal)
 	}
 	return nil
 }
@@ -392,7 +396,7 @@ func waitForSelfUpdateHealth(ctx context.Context, path, token string, timeout ti
 }
 
 func writeHealthAcknowledgement(path, token string) error {
-	return writeJSONAtomic(path, map[string]string{"token": token})
+	return writeUpdateJSON(path, map[string]string{"token": token})
 }
 
 func healthAcknowledged(path, token string) bool {
@@ -461,6 +465,9 @@ func rollbackSelfUpdate(journal *selfUpdateJournal) error {
 	if err := replaceExecutable(journal.BackupPath, journal.CurrentPath); err != nil {
 		return fmt.Errorf("restore previous executable: %w", err)
 	}
+	if err := setUpdateHidden(journal.CurrentPath, false); err != nil {
+		return err
+	}
 	return verifyFileDigest(journal.CurrentPath, journal.CurrentSHA256)
 }
 
@@ -520,8 +527,15 @@ func updateJournalFailure(journal *selfUpdateJournal, state string, cause error)
 	journal.State = state
 	journal.Failure = cause.Error()
 	journal.UpdatedAt = time.Now().UTC()
-	_ = writeJSONAtomic(journal.JournalPath, *journal)
+	_ = writeUpdateJSON(journal.JournalPath, *journal)
 	return cause
+}
+
+func writeUpdateJSON(path string, value any) error {
+	if err := writeJSONAtomic(path, value); err != nil {
+		return err
+	}
+	return setUpdateHidden(path, true)
 }
 
 func copyVerifiedArtifact(source, destination, expected string) error {
@@ -536,6 +550,10 @@ func copyVerifiedArtifact(source, destination, expected string) error {
 	}
 	temporaryPath := temporary.Name()
 	defer os.Remove(temporaryPath)
+	if err := setUpdateHidden(temporaryPath, true); err != nil {
+		_ = temporary.Close()
+		return err
+	}
 	if err := temporary.Chmod(0o700); err != nil {
 		_ = temporary.Close()
 		return err
