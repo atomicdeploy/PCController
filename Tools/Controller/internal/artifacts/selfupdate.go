@@ -379,6 +379,9 @@ func ScheduleSelfUpdateHealthAcknowledgement(delay time.Duration) {
 			}
 		}
 		_ = writeHealthAcknowledgement(path, token)
+		if journalPath != "" {
+			scheduleSelfUpdateCleanup(journalPath)
+		}
 	}()
 }
 
@@ -405,7 +408,11 @@ func recoverOrphanedSelfUpdates() error {
 	}
 	for _, path := range paths {
 		journal, loadErr := loadSelfUpdateJournal(path)
-		if loadErr != nil || journal.CurrentPath != current || selfUpdateTerminal(journal.State) {
+		if loadErr != nil || journal.CurrentPath != current {
+			continue
+		}
+		if selfUpdateTerminal(journal.State) {
+			_ = cleanupTerminalSelfUpdate(journal.JournalPath, current)
 			continue
 		}
 		if journal.WindowsService != "" {
@@ -442,6 +449,7 @@ func recoverOrphanedSelfUpdates() error {
 		}
 		journal.UpdatedAt = time.Now().UTC()
 		_ = writeUpdateJSON(journal.JournalPath, journal)
+		scheduleSelfUpdateCleanup(journal.JournalPath)
 	}
 	return nil
 }
@@ -465,7 +473,11 @@ func acknowledgeServiceReplacement(journal selfUpdateJournal, current string) er
 			if err := writeUpdateJSON(fresh.JournalPath, fresh); err != nil {
 				return err
 			}
-			return writeHealthAcknowledgement(fresh.HealthPath, fresh.HealthToken)
+			if err := writeHealthAcknowledgement(fresh.HealthPath, fresh.HealthToken); err != nil {
+				return err
+			}
+			scheduleSelfUpdateCleanup(fresh.JournalPath)
+			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
