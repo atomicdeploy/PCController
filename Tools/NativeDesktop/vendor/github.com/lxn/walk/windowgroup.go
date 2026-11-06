@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build windows
 // +build windows
 
 package walk
@@ -208,21 +207,8 @@ func (g *WindowGroup) Synchronize(f func()) {
 // synchronizeLayout can be called from any thread.
 func (g *WindowGroup) synchronizeLayout(result *formLayoutResult) {
 	g.syncMutex.Lock()
-	g.layoutResultsByForm[result.form] = newestFormLayoutResult(
-		g.layoutResultsByForm[result.form],
-		result,
-	)
+	g.layoutResultsByForm[result.form] = result
 	g.syncMutex.Unlock()
-}
-
-func newestFormLayoutResult(current, candidate *formLayoutResult) *formLayoutResult {
-	if candidate == nil {
-		return current
-	}
-	if current == nil || candidate.generation > current.generation {
-		return candidate
-	}
-	return current
 }
 
 // RunSynchronized runs all of the function calls queued by Synchronize
@@ -243,10 +229,6 @@ func (g *WindowGroup) RunSynchronized() {
 	g.syncMutex.Unlock()
 
 	for _, result := range results {
-		if result == nil || result.form == nil ||
-			result.generation != result.form.AsFormBase().layoutGeneration {
-			continue
-		}
 		applyLayoutResults(result.results, result.stopwatch)
 	}
 	for _, f := range funcs {
