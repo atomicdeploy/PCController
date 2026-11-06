@@ -24,6 +24,13 @@ executable is visible.
 
 ## Windows service ownership
 
+Host staging is not terminal completion. The durable operation remains pending
+across restart until its exact private helper transaction commits or rolls back.
+Pending host activation rejects overlapping updates rather than launching a
+second helper or queuing hardware writes during shutdown. Historical results
+remain valid after later upgrades. Identical images report current without
+staging, helper launch or restart.
+
 The installed service now uses the same verified replacement/rollback engine,
 with SCM stop/start instead of launching a second interactive host. Preparation
 checks the fixed service name, configured executable, current SCM PID and needed
