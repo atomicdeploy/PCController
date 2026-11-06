@@ -598,6 +598,7 @@ func newSettingsDialogSession(
 		session.preview.Close()
 		return nil, fmt.Errorf("create settings dialog: %w", err)
 	}
+	configureSettingsFormLayouts(controls.tabs)
 	geometry, geometryErr := winfx.AttachResponsiveDialogGeometry(
 		uintptr(session.dialog.Handle()),
 	)
@@ -767,6 +768,21 @@ func newSettingsDialogSession(
 		return nil, fmt.Errorf("prepare settings dialog monitor geometry: %w", err)
 	}
 	return session, nil
+}
+
+// Full-width checkboxes and spacers must not make the label column consume
+// half of a wide dialog. Give the editor column the spare width and center
+// short native labels beside their taller inputs, consistently on every page.
+func configureSettingsFormLayouts(tabs *walk.TabWidget) {
+	if tabs == nil {
+		return
+	}
+	for index := 0; index < tabs.Pages().Len(); index++ {
+		if grid, ok := tabs.Pages().At(index).Layout().(*walk.GridLayout); ok {
+			_ = grid.SetAlignment(walk.AlignHNearVCenter)
+			_ = grid.SetColumnStretchFactor(1, 4)
+		}
+	}
 }
 
 func (session *settingsDialogSession) requestSave() {
@@ -1164,29 +1180,28 @@ func settingsAppearancePage(controls *settingsControls, cfg config.Config) decl.
 				Text:       "Enable APNG animation and motion",
 				Checked:    cfg.UI.Animations,
 			},
-			decl.CheckBox{
-				AssignTo:    &controls.magneticSnap,
-				Row:         14,
-				Column:      0,
-				Text:        "Magnetic edge snap",
-				Checked:     cfg.UI.MagneticSnap,
-				ToolTipText: "Hold Ctrl while dragging to temporarily disable snapping; release Ctrl to resume it immediately.",
-				OnCheckedChanged: func() {
-					updateSettingsEnabled(controls)
+			decl.Composite{
+				Row: 14, Column: 0, ColumnSpan: 3,
+				Layout: decl.HBox{MarginsZero: true, Spacing: 8},
+				Children: []decl.Widget{
+					decl.CheckBox{
+						AssignTo:         &controls.magneticSnap,
+						Text:             "Magnetic edge snap",
+						Checked:          cfg.UI.MagneticSnap,
+						ToolTipText:      "Hold Ctrl while dragging to temporarily disable snapping; release Ctrl to resume it immediately.",
+						OnCheckedChanged: func() { updateSettingsEnabled(controls) },
+					},
+					decl.HSpacer{},
+					decl.Label{Text: "Distance:"},
+					decl.NumberEdit{
+						AssignTo: &controls.snapDistance,
+						MinSize:  decl.Size{Width: 72},
+						MaxSize:  decl.Size{Width: 96},
+						Value:    float64(cfg.UI.MagneticSnapDistance),
+						MinValue: 1, MaxValue: 128, Increment: 1,
+						Decimals: 0, SpinButtonsVisible: true, Suffix: " px",
+					},
 				},
-			},
-			decl.Label{Row: 14, Column: 1, Text: "Distance:"},
-			decl.NumberEdit{
-				AssignTo:           &controls.snapDistance,
-				Row:                14,
-				Column:             2,
-				Value:              float64(cfg.UI.MagneticSnapDistance),
-				MinValue:           1,
-				MaxValue:           128,
-				Increment:          1,
-				Decimals:           0,
-				SpinButtonsVisible: true,
-				Suffix:             " px",
 			},
 			decl.Label{Row: 15, Column: 0, Text: dialogText(localizer, "Language:")},
 			decl.ComboBox{

@@ -16,7 +16,7 @@ including dependencies, assets, tests, tools, documentation and recovery records
 - Parent integration commit: `3aed9ef6`.
 - The subtree tree object equals the donor tree object exactly. This verifies
   every pathname, file mode and blob, not merely file counts or ancestry.
-- Current working-copy result: **2,051 identical files, 374 adapted files, seven
+- Current working-copy result: **2,049 identical files, 376 adapted files, seven
   regenerated content-hashed Web bundles, one explicitly excluded font, zero
   missing source files**. Exact old/new generated bundle paths are audited; the
   original bytes remain in the immutable import. Git clean/EOL filters

@@ -608,6 +608,16 @@ transparent interiors, joined glyph strokes, real-HDC blending and cache bounds.
 
 ## Change gate
 
+Settings form geometry must reserve visible scrollbar footprints even for
+ordinary non-wrapping grids. Its content must never extend beneath a vertical
+scrollbar without an actual horizontal scroll range. Center row labels against
+the measured native dropdown HWND height, not a dialog-unit estimate that
+USER32 later clamps. Give spare form width to editors rather than label columns;
+compound snap controls own a separate row. Native viewport regression coverage
+switches every tab, resizes to normal/minimum/wide bounds, and changes English
+and Persian live without replacing native input or dialog ownership (VIS-017,
+VIS-018, VIS-023).
+
 Any edit to `internal/ui`, `internal/traymenu`, dialog paint code, or relevant
 `internal/winfx` composition/region helpers must:
 
