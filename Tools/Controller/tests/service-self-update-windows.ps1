@@ -36,6 +36,9 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Service installation failed: $LASTEXITCODE" }
     $owned = $true
     $before = Get-CimInstance Win32_Service -Filter "Name='PCController'"
+    $bridge = Rpc 'controller.app.bridge' @{}
+    Write-Host ('SCM before: '+($before | Select-Object ProcessId,State,PathName,StartName,StartMode | ConvertTo-Json -Compress))
+    Write-Host ('API owner: '+($bridge | ConvertTo-Json -Depth 5 -Compress))
     $manifest = Rpc 'controller.artifact.manifest' @{}
     if ($manifest.board.connected) { throw 'Isolated service unexpectedly connected to hardware.' }
     $upload = Rpc 'controller.artifact.upload.begin' @{kind='host-executable';name='controller.exe';sha256=$digest;bytes=$size;platform='windows/amd64'}
@@ -65,6 +68,7 @@ try {
     }
     if (-not $verified) { throw 'SCM replacement did not reach verified terminal completion.' }
     $after = Get-CimInstance Win32_Service -Filter "Name='PCController'"
+    Write-Host ('SCM after: '+($after | Select-Object ProcessId,State,PathName,StartName,StartMode | ConvertTo-Json -Compress))
     if ($after.ProcessId -eq $before.ProcessId -or $after.State -ne 'Running' -or $after.PathName -ne $before.PathName -or $after.StartName -ne $before.StartName -or $after.StartMode -ne $before.StartMode) { throw 'SCM identity/configuration mismatch after update.' }
     if ($manifest.board.connected -or (Get-FileHash -LiteralPath $installed -Algorithm SHA256).Hash.ToLowerInvariant() -ne $digest) { throw 'Replacement/hardware isolation mismatch.' }
     Write-Host "Verified real SCM self-update: healthy process replacement, exact digest, durable completed operation and unchanged service configuration."
