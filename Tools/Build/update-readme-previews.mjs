@@ -4,6 +4,9 @@ import { spawnSync } from 'node:child_process'
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { loadProjectEnv } from './env.mjs'
+
+loadProjectEnv()
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const args = new Set(process.argv.slice(2))

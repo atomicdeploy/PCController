@@ -3,6 +3,9 @@ import {execFileSync} from 'node:child_process';
 import {readFileSync,existsSync} from 'node:fs';
 import {resolve,dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {loadProjectEnv} from './env.mjs';
+
+loadProjectEnv();
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'../..');
 const migration=JSON.parse(readFileSync(resolve(root,'Tools/Audit/native-desktop-path-migration.json'),'utf8'));
