@@ -22,6 +22,31 @@ pinned once, quota/TTL limited and closed through the existing service lifecycle
 Windows staging/helper/backup/health files are hidden; an installed or rolled-back
 executable is visible.
 
+## Windows service ownership
+
+The installed service now uses the same verified replacement/rollback engine,
+with SCM stop/start instead of launching a second interactive host. Preparation
+checks the fixed service name, configured executable, current SCM PID and needed
+permissions before staging. Only that SCM-owned replacement can acknowledge its
+private health journal after startup survival. Normal account, arguments,
+startup and recovery configuration remain unchanged. A failed candidate exits
+cleanly to SCM while the helper owns rollback, avoiding a crash-recovery race.
+
+Administrative `service install` / `service repair` grants only the dedicated
+service SID start/stop/query on itself and modify access in its installation
+directory. It does not grant SCM administration or service configuration access.
+The update RPC never elevates privileges or repairs an installation. An older
+service that explicitly disables self-update needs one administrative upgrade
+and service repair before it can participate. It cannot be bootstrapped through
+an API it never implemented. `service install --no-auto` keeps hardware discovery
+paused for isolated verification and preserves this choice across restarts.
+
+The opt-in `TestSoftwareGatewayLivePealayerUpdate` exercise replaced a real,
+isolated older HTTP-only player through the controller gateway, then verified
+the exact running digest and healthy replacement. Service lifecycle tests cover
+healthy commit, health timeout rollback and startup failure restoration; these
+are not evidence of an actual production SCM restart.
+
 `controller.software.bundle.list/read` publishes explicitly packaged candidates
 from `software-bundle.json` beside the executable. The shared format is
 `digitalogic-software-bundle`, with at most 16 `{id, path, manifest}` entries.

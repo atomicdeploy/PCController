@@ -827,6 +827,9 @@
             "controller.app.navigation.commit",
             "controller.app.page",
             "controller.artifact.capture",
+            "controller.artifact.download.begin",
+            "controller.artifact.download.chunk",
+            "controller.artifact.download.close",
             "controller.artifact.fetch",
             "controller.artifact.list",
             "controller.artifact.manifest",
@@ -979,6 +982,10 @@
             "controller.session.snapshot",
             "controller.session.snapshot.last",
             "controller.snapshot",
+            "controller.software.bundle.list",
+            "controller.software.bundle.read",
+            "controller.software.call",
+            "controller.software.targets",
             "controller.status",
             "controller.status_led.release",
             "controller.status_led.set",
@@ -1345,6 +1352,21 @@
       "capability": "programming",
       "summary": "artifact capture",
       "idempotency": "non-idempotent"
+    },
+    "controller.artifact.download.begin": {
+      "capability": "read",
+      "summary": "Pin a verified artifact for a bounded peer download without copying it.",
+      "idempotency": "safe"
+    },
+    "controller.artifact.download.chunk": {
+      "capability": "read",
+      "summary": "Read an exact bounded range from a pinned peer artifact download.",
+      "idempotency": "safe"
+    },
+    "controller.artifact.download.close": {
+      "capability": "read",
+      "summary": "Release a pinned peer artifact download handle.",
+      "idempotency": "safe"
     },
     "controller.artifact.fetch": {
       "capability": "programming",
@@ -2128,6 +2150,26 @@
     "controller.snapshot": {
       "capability": "read",
       "summary": "Return the authoritative cached controller snapshot.",
+      "idempotency": "safe"
+    },
+    "controller.software.bundle.list": {
+      "capability": "read",
+      "summary": "List verified software candidates from the adjacent confined bundle catalog without exposing local paths.",
+      "idempotency": "safe"
+    },
+    "controller.software.bundle.read": {
+      "capability": "read",
+      "summary": "Read a bounded verified software bundle range for transfer to an explicit peer.",
+      "idempotency": "safe"
+    },
+    "controller.software.call": {
+      "capability": "programming",
+      "summary": "Relay only allowlisted update operations to an explicit current software owner; require programming and bridge authorization.",
+      "idempotency": "non-idempotent"
+    },
+    "controller.software.targets": {
+      "capability": "read",
+      "summary": "List revision-fenced software update owners among registered application instances.",
       "idempotency": "safe"
     },
     "controller.status": {

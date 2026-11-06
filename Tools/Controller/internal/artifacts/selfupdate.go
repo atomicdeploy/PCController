@@ -40,6 +40,7 @@ type selfUpdateJournal struct {
 	UpdatedAt         time.Time `json:"updated_at"`
 	ParentPID         int       `json:"parent_pid"`
 	ChildPID          int       `json:"child_pid,omitempty"`
+	WindowsService    string    `json:"windows_service,omitempty"`
 	CurrentPath       string    `json:"current_path"`
 	StagedPath        string    `json:"staged_path"`
 	BackupPath        string    `json:"backup_path"`
@@ -87,6 +88,8 @@ type SelfUpdateOptions struct {
 	WorkingDirectory string
 	HealthTimeout    time.Duration
 	Launcher         HelperLauncher
+	// Set only by the installed service host, never from RPC parameters.
+	WindowsService string
 }
 
 func PrepareSelfUpdateWithOptions(ctx context.Context, options SelfUpdateOptions) (SelfUpdatePlan, error) {
@@ -103,6 +106,14 @@ func PrepareSelfUpdateWithOptions(ctx context.Context, options SelfUpdateOptions
 	}
 	if currentPath == artifactPath {
 		return SelfUpdatePlan{}, errors.New("self-update artifact must not be the running executable")
+	}
+	if options.WindowsService != "" {
+		if options.WindowsService != "PCController" {
+			return SelfUpdatePlan{}, errors.New("only the PCController service can update itself")
+		}
+		if err := serviceUpdates.Validate(options.WindowsService, currentPath, os.Getpid()); err != nil {
+			return SelfUpdatePlan{}, fmt.Errorf("validate service update ownership and permissions: %w", err)
+		}
 	}
 	expected, err := normalizeSHA256(options.ExpectedSHA256)
 	if err != nil {
@@ -174,7 +185,8 @@ func PrepareSelfUpdateWithOptions(ctx context.Context, options SelfUpdateOptions
 	journal := selfUpdateJournal{
 		State: "prepared", UpdatedAt: time.Now().UTC(),
 		ParentPID: os.Getpid(), CurrentPath: plan.CurrentPath, StagedPath: plan.StagedPath,
-		BackupPath: plan.BackupPath, HelperPath: plan.HelperPath, JournalPath: plan.JournalPath,
+		WindowsService: options.WindowsService,
+		BackupPath:     plan.BackupPath, HelperPath: plan.HelperPath, JournalPath: plan.JournalPath,
 		HealthPath: plan.HealthPath, HealthToken: token,
 		HealthTimeoutMS: options.HealthTimeout.Milliseconds(),
 		CurrentSHA256:   currentDigest, ReplacementSHA256: expected,
@@ -199,15 +211,62 @@ func IsSelfUpdateHelperInvocation(args []string) bool {
 	return len(args) == 2 && args[0] == selfUpdateHelperCommand && strings.TrimSpace(args[1]) != ""
 }
 
+// PendingServiceReplacement prevents SCM's crash recovery from racing the
+// helper's rollback. The helper, not recovery policy, owns this one startup.
+// Successful service execution and all ordinary startups retain normal SCM
+// recovery settings unchanged.
+func PendingServiceReplacement(name string) bool {
+	current, err := os.Executable()
+	if err != nil || name != "PCController" {
+		return false
+	}
+	paths, err := filepath.Glob(filepath.Join(filepath.Dir(current), "."+filepath.Base(current)+".update-*.journal.json"))
+	if err != nil || len(paths) == 0 {
+		return false
+	}
+	digest, err := fileDigest(current)
+	if err != nil {
+		return false
+	}
+	for _, path := range paths {
+		journal, err := loadSelfUpdateJournal(path)
+		if err == nil && journal.CurrentPath == current && journal.WindowsService == name &&
+			!selfUpdateTerminal(journal.State) && journal.ReplacementSHA256 == digest {
+			return true
+		}
+	}
+	return false
+}
+
 // RunSelfUpdateHelper performs atomic replacement, starts the candidate with
 // the preserved argv/cwd, and rolls back if it exits or misses health timeout.
-func RunSelfUpdateHelper(ctx context.Context, journalPath string) error {
+func RunSelfUpdateHelper(ctx context.Context, journalPath string) (resultErr error) {
 	journal, err := loadSelfUpdateJournal(journalPath)
 	if err != nil {
 		return err
 	}
 	if err := validateSelfUpdateJournal(journal); err != nil {
 		return err
+	}
+	if journal.WindowsService != "" {
+		// Give the accepted RPC response time to leave before SCM closes its host.
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
+		if err := serviceUpdates.Stop(ctx, journal.WindowsService, journal.CurrentPath, journal.ParentPID); err != nil {
+			return updateJournalFailure(&journal, "service-stop-failed", err)
+		}
+		// Any pre-launch failure must leave the original service usable. Never
+		// start an unverified candidate or rewrite the SCM configuration.
+		defer func() {
+			if resultErr != nil && verifyFileDigest(journal.CurrentPath, journal.CurrentSHA256) == nil {
+				if restartErr := launchRestoredHost(journal); restartErr != nil {
+					resultErr = errors.Join(resultErr, restartErr)
+				}
+			}
+		}()
 	}
 	if err := waitForProcessExit(ctx, journal.ParentPID, 3*time.Minute); err != nil {
 		return updateJournalFailure(&journal, "parent-wait-failed", err)
@@ -237,19 +296,16 @@ func RunSelfUpdateHelper(ctx context.Context, journalPath string) error {
 		_ = rollbackSelfUpdate(&journal)
 		return updateJournalFailure(&journal, "replacement-verification-failed", err)
 	}
-	child := exec.Command(journal.CurrentPath, journal.Arguments...)
-	child.Dir = journal.WorkingDirectory
-	child.Env = selfUpdateEnvironment(os.Environ(), journal)
-	inheritSelfUpdateIO(child)
-	if err := platformStartReplacementProcess(child); err != nil {
+	child, err := startUpdateProcess(ctx, journal)
+	if err != nil {
 		_ = rollbackSelfUpdate(&journal)
 		return updateJournalFailure(&journal, "candidate-start-failed", err)
 	}
-	journal.ChildPID = child.Process.Pid
+	journal.ChildPID = child.PID()
 	journal.State = "awaiting-health"
 	journal.UpdatedAt = time.Now().UTC()
 	if err := writeUpdateJSON(journal.JournalPath, journal); err != nil {
-		_ = child.Process.Kill()
+		_ = child.Stop()
 		_ = child.Wait()
 		_ = rollbackSelfUpdate(&journal)
 		return err
@@ -258,7 +314,7 @@ func RunSelfUpdateHelper(ctx context.Context, journalPath string) error {
 	go func() { exited <- child.Wait() }()
 	healthTimeout := time.Duration(journal.HealthTimeoutMS) * time.Millisecond
 	if err := waitForSelfUpdateHealth(ctx, journal.HealthPath, journal.HealthToken, healthTimeout, exited); err != nil {
-		_ = child.Process.Kill()
+		_ = child.Stop()
 		select {
 		case <-exited:
 		case <-time.After(2 * time.Second):
@@ -340,6 +396,27 @@ func recoverOrphanedSelfUpdates() error {
 	for _, path := range paths {
 		journal, loadErr := loadSelfUpdateJournal(path)
 		if loadErr != nil || journal.CurrentPath != current || selfUpdateTerminal(journal.State) {
+			continue
+		}
+		if journal.WindowsService != "" {
+			// SCM does not inherit the helper's environment. Only the exact service
+			// process may acknowledge its private journal after startup survival;
+			// secondary CLI/UI processes may not commit or clean up this transaction.
+			if currentHash == journal.CurrentSHA256 && os.Getenv("PCCONTROLLER_WINDOWS_SERVICE") == "1" &&
+				serviceUpdates.Validate(journal.WindowsService, current, os.Getpid()) == nil {
+				journal.State = "rolled-back-recovered"
+				journal.UpdatedAt = time.Now().UTC()
+				_ = writeUpdateJSON(journal.JournalPath, journal)
+				_ = os.Remove(journal.StagedPath)
+			} else if currentHash == journal.ReplacementSHA256 && os.Getenv("PCCONTROLLER_WINDOWS_SERVICE") == "1" &&
+				(journal.State == "awaiting-health" || journal.State == "candidate-healthy") &&
+				journal.ChildPID == os.Getpid() && serviceUpdates.Validate(journal.WindowsService, current, os.Getpid()) == nil {
+				journal.State = "candidate-healthy"
+				journal.UpdatedAt = time.Now().UTC()
+				if writeUpdateJSON(journal.JournalPath, journal) == nil {
+					_ = writeHealthAcknowledgement(journal.HealthPath, journal.HealthToken)
+				}
+			}
 			continue
 		}
 		switch currentHash {
@@ -428,6 +505,9 @@ func loadSelfUpdateJournal(path string) (selfUpdateJournal, error) {
 }
 
 func validateSelfUpdateJournal(journal selfUpdateJournal) error {
+	if journal.WindowsService != "" && journal.WindowsService != "PCController" {
+		return errors.New("self-update journal names an unsupported service")
+	}
 	if journal.State != "prepared" || journal.UpdatedAt.IsZero() || journal.ParentPID <= 0 ||
 		strings.TrimSpace(journal.HealthToken) == "" {
 		return errors.New("self-update journal is not a prepared transaction")
@@ -472,6 +552,10 @@ func rollbackSelfUpdate(journal *selfUpdateJournal) error {
 }
 
 func launchRestoredHost(journal selfUpdateJournal) error {
+	if journal.WindowsService != "" {
+		_, err := serviceUpdates.Start(context.Background(), journal.WindowsService, journal.CurrentPath)
+		return err
+	}
 	command := exec.Command(journal.CurrentPath, journal.Arguments...)
 	command.Dir = journal.WorkingDirectory
 	command.Env = withoutSelfUpdateEnvironment(os.Environ())

@@ -1956,6 +1956,10 @@ func (service *Service) dispatch(
 			service.Shutdown()
 		}()
 	default:
+		if strings.HasPrefix(request.Method, "controller.software.") {
+			result, err = service.dispatchSoftware(ctx, request.Method, request.Params)
+			break
+		}
 		if service.ReleaseDiscovery != nil {
 			var handled bool
 			result, handled, err = service.ReleaseDiscovery.DispatchRPC(ctx, request.Method, request.Params)
@@ -1979,10 +1983,6 @@ func (service *Service) dispatch(
 	}
 	response.Result = result
 	return response
-		if strings.HasPrefix(request.Method, "controller.software.") {
-			result, err = service.dispatchSoftware(ctx, request.Method, request.Params)
-			break
-		}
 }
 
 func dispatchRPCError(err error) *RPCError {
@@ -2431,6 +2431,15 @@ func (service *Service) authorizeAccess(
 	if !access.Remote {
 		return nil
 	}
+	if method == "controller.software.call" {
+		if _, err := validateSoftwareCall(params); err != nil {
+			return err
+		}
+		if err := service.authorizeCapability(access, method, capabilityProgramming); err != nil {
+			return err
+		}
+		return service.authorizeCapability(access, method, capabilityBridgeCalls)
+	}
 	if strings.EqualFold(strings.TrimSpace(access.Transport), "bridge") {
 		if err := ValidateBridgeRequest(Request{Method: method, Params: params}); err != nil {
 			return err
@@ -2474,15 +2483,6 @@ func bridgeIngressCanPivot(method string, params json.RawMessage) bool {
 		return false
 	}
 }
-	if method == "controller.software.call" {
-		if _, err := validateSoftwareCall(params); err != nil {
-			return err
-		}
-		if err := service.authorizeCapability(access, method, capabilityProgramming); err != nil {
-			return err
-		}
-		return service.authorizeCapability(access, method, capabilityBridgeCalls)
-	}
 
 func bridgeCommandCanPivot(command string) bool {
 	words := bridgeCommandWords(command)
@@ -2603,6 +2603,12 @@ func remoteCapabilityAllowed(
 
 func requestCapability(method string, params json.RawMessage) string {
 	method = strings.ToLower(strings.TrimSpace(method))
+	if method == "controller.software.targets" || method == "controller.software.bundle.list" || method == "controller.software.bundle.read" {
+		return capabilityRead
+	}
+	if method == "controller.software.call" {
+		return capabilityProgramming
+	}
 	// Configuration is host-owned; mirror writes/resync are board commands.
 	// Read-only diagnostics must not grant write permission by association.
 	switch method {
@@ -2647,12 +2653,6 @@ func requestCapability(method string, params json.RawMessage) string {
 		"controller.firmware.build":
 		return capabilityProgramming
 	case "controller.connect", "controller.open", "controller.port.open",
-	if method == "controller.software.targets" || method == "controller.software.bundle.list" || method == "controller.software.bundle.read" {
-		return capabilityRead
-	}
-	if method == "controller.software.call" {
-		return capabilityProgramming
-	}
 		"controller.close", "controller.port.close":
 		return capabilityConnection
 	case "controller.audio.cues":

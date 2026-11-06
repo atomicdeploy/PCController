@@ -23,6 +23,7 @@ type serviceRuntimeOptions struct {
 	Listen     string
 	Start      bool
 	BinaryPath string
+	NoAuto     bool
 }
 
 func runServiceCommand(args []string, configPath string, stdout, stderr io.Writer) error {
@@ -50,6 +51,7 @@ func parseServiceRuntimeOptions(command string, args []string, configPath string
 	flags.SetOutput(stderr)
 	flags.StringVar(&options.DataDir, "data-dir", options.DataDir, "absolute durable data/log directory owned by the service")
 	flags.StringVar(&options.Listen, "listen", "", "optional transient loopback WebUI address")
+	flags.BoolVar(&options.NoAuto, "no-auto", false, "start the service with automatic hardware connection paused")
 	if command == "install" || command == "repair" {
 		flags.BoolVar(&options.Start, "start", true, "start the service after reconciling it")
 		flags.StringVar(&options.BinaryPath, "binary", "", "controller.exe to register (defaults to this executable)")
@@ -91,6 +93,9 @@ func serviceImageArguments(options serviceRuntimeOptions) []string {
 	args := []string{"--config=" + options.ConfigPath, "service", "run", "--data-dir=" + options.DataDir}
 	if strings.TrimSpace(options.Listen) != "" {
 		args = append(args, "--listen="+options.Listen)
+	}
+	if options.NoAuto {
+		args = append(args, "--no-auto")
 	}
 	return args
 }

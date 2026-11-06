@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -68,6 +69,16 @@ export function validateMethodCatalog({ catalogued, dispatched, required = [] })
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const outputDirectory = resolve(root, "Tools", "Controller", "api");
 const checkOnly = process.argv.includes("--check");
+// Generate against a committed dispatcher during concurrent UI development,
+// without resetting another contributor's working tree or making a checkout.
+const sourceRefIndex = process.argv.indexOf("--source-ref");
+const sourceRef = sourceRefIndex < 0 ? null : process.argv[sourceRefIndex + 1];
+if (sourceRefIndex >= 0 && (!sourceRef || !/^[a-zA-Z0-9_./-]+$/u.test(sourceRef))) {
+  throw new Error("--source-ref requires an explicit Git revision");
+}
+const readContractSource = (file) => sourceRef
+  ? execFileSync("git", ["show", `${sourceRef}:${file}`], { cwd: root, encoding: "utf8", maxBuffer: 8 << 20 })
+  : readFileSync(resolve(root, file), "utf8");
 const productMetadata = JSON.parse(readFileSync(resolve(root, "Tools", "Controller", "web", "package.json"), "utf8"));
 const product = productIdentity(productMetadata);
 
@@ -84,6 +95,7 @@ const capabilityGroups = {
     "controller.artifact.upload.finish", "controller.artifact.upload.abort",
     "controller.update.firmware", "controller.restore.flash", "controller.update.eeprom",
     "controller.update.host", "controller.peer.update.host", "controller.discovery.stage",
+    "controller.software.call",
   ],
   connection_control: [
     "controller.connect", "controller.open", "controller.port.open", "controller.close", "controller.port.close",
@@ -119,6 +131,8 @@ const capabilityGroups = {
 		"controller.mirror.inspect", "controller.mirror.status",
 		"controller.audio.cues",
     "controller.artifact.manifest", "controller.artifact.list", "controller.update.status",
+    "controller.artifact.download.begin", "controller.artifact.download.chunk", "controller.artifact.download.close",
+    "controller.software.targets", "controller.software.bundle.list", "controller.software.bundle.read",
     "controller.discovery.github.workflow", "controller.discovery.github.release",
     "controller.discovery.manifest", "controller.discovery.local_manifest", "controller.discovery.check",
     "controller.discovery.status", "controller.host_menu.config", "controller.host_menu.config.get",
@@ -212,6 +226,13 @@ const methodOverrides = {
   "controller.artifact.upload.chunk": "Append one ordered bounded chunk to a peer artifact transfer.",
   "controller.artifact.upload.finish": "Revalidate and publish a completed peer artifact transfer.",
   "controller.artifact.upload.abort": "Abort and remove an incomplete peer artifact transfer.",
+  "controller.artifact.download.begin": "Pin a verified artifact for a bounded peer download without copying it.",
+  "controller.artifact.download.chunk": "Read an exact bounded range from a pinned peer artifact download.",
+  "controller.artifact.download.close": "Release a pinned peer artifact download handle.",
+  "controller.software.targets": "List revision-fenced software update owners among registered application instances.",
+  "controller.software.call": "Relay only allowlisted update operations to an explicit current software owner; require programming and bridge authorization.",
+  "controller.software.bundle.list": "List verified software candidates from the adjacent confined bundle catalog without exposing local paths.",
+  "controller.software.bundle.read": "Read a bounded verified software bundle range for transfer to an explicit peer.",
   "controller.peer.update.host": "Transfer a verified executable using a caller-generated idempotency_key, wait through the peer restart, and verify its exact active SHA-256 acknowledgement. Retry uncertain outcomes with the same key.",
   "controller.webhooks.status": "Return bounded outbound queue and dead-letter counters.",
   "controller.webhooks.pending": "List bounded non-secret pending outbound deliveries.",
@@ -264,6 +285,7 @@ const nonIdempotentMethods = new Set([
   "controller.update.firmware", "controller.board.firmware.upload", "controller.restore.flash",
   "controller.artifact.upload.begin", "controller.artifact.upload.chunk",
   "controller.artifact.upload.finish", "controller.artifact.upload.abort",
+  "controller.software.call",
   "controller.update.eeprom", "controller.update.host", "controller.peer.update.host",
   "controller.discovery.stage",
   "controller.webhooks.replay",
@@ -962,7 +984,7 @@ const dispatcherFiles = [
 ];
 const dispatcherSources = [];
 for (const file of dispatcherFiles) {
-  dispatcherSources.push(readFileSync(resolve(root, file), "utf8"));
+  dispatcherSources.push(readContractSource(file));
 }
 const dispatched = extractGoCaseMethods(dispatcherSources);
 const catalogued = new Set(methods.map(({ name }) => name));
@@ -980,7 +1002,7 @@ const routeSourceFiles = [
 ];
 const routeLiterals = new Set();
 for (const file of routeSourceFiles) {
-  const source = readFileSync(resolve(root, file), "utf8");
+  const source = readContractSource(file);
 	for (const match of source.matchAll(/"(\/(?:healthz|api[^"? ]*|upnp\/public\.json))"/gu)) routeLiterals.add(match[1]);
 }
 const documentedPaths = Object.keys(openAPIPaths);

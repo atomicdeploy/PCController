@@ -224,6 +224,11 @@ jobs:
         run: |
           node Tools/Build/check-desktop-identity.mjs && node Tools/Build/go-tests.mjs --module Tools/NativeDesktop
 
+      - name: "🔄 Verify real Windows service self-update"
+        if: matrix.windows
+        shell: pwsh
+        run: ./Tools/Controller/tests/service-self-update-windows.ps1 -Executable ./Tools/Controller/bin/controller.exe
+
       - name: "🌐 Verify retained native Web UI"
         if: matrix.windows
         shell: bash
