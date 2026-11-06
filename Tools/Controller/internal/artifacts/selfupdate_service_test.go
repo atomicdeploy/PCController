@@ -130,3 +130,39 @@ func TestSelfUpdateRejectsOtherServiceNamesBeforeStaging(t *testing.T) {
 		t.Fatal("rejected service wrote staging files")
 	}
 }
+
+func TestServiceHealthWaitsForRecordedReadinessAndRejectsAnotherPID(t *testing.T) {
+	root := t.TempDir()
+	journal := selfUpdateJournal{State: "replacing", CurrentPath: filepath.Join(root, "controller.exe"),
+		JournalPath: filepath.Join(root, "update.journal.json"), HealthPath: filepath.Join(root, "healthy"),
+		WindowsService: "PCController", ReplacementSHA256: "fixture-sha", HealthToken: "fixture-token"}
+	if err := writeUpdateJSON(journal.JournalPath, journal); err != nil {
+		t.Fatal(err)
+	}
+	previous := serviceUpdates
+	serviceUpdates = &fakeUpdateService{}
+	defer func() { serviceUpdates = previous }()
+	written := make(chan error, 1)
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		ready := journal
+		ready.State, ready.ChildPID = "awaiting-health", os.Getpid()
+		written <- writeUpdateJSON(ready.JournalPath, ready)
+	}()
+	if err := acknowledgeServiceReplacement(journal, journal.CurrentPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-written; err != nil {
+		t.Fatal(err)
+	}
+	if !healthAcknowledged(journal.HealthPath, journal.HealthToken) {
+		t.Fatal("delayed service readiness was not acknowledged")
+	}
+	journal.ChildPID = os.Getpid() + 1
+	if err := writeUpdateJSON(journal.JournalPath, journal); err != nil {
+		t.Fatal(err)
+	}
+	if err := acknowledgeServiceReplacement(journal, journal.CurrentPath); err == nil {
+		t.Fatal("another PID acknowledged service health")
+	}
+}
