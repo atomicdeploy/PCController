@@ -1955,11 +1955,9 @@ func (service *Service) dispatch(
 			time.Sleep(25 * time.Millisecond)
 			service.Shutdown()
 		}()
+	case "controller.software.targets", "controller.software.call", "controller.software.bundle.list", "controller.software.bundle.read":
+		result, err = service.dispatchSoftware(ctx, request.Method, request.Params)
 	default:
-		if strings.HasPrefix(request.Method, "controller.software.") {
-			result, err = service.dispatchSoftware(ctx, request.Method, request.Params)
-			break
-		}
 		if service.ReleaseDiscovery != nil {
 			var handled bool
 			result, handled, err = service.ReleaseDiscovery.DispatchRPC(ctx, request.Method, request.Params)
