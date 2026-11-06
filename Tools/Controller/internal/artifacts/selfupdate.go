@@ -408,14 +408,11 @@ func recoverOrphanedSelfUpdates() error {
 				journal.UpdatedAt = time.Now().UTC()
 				_ = writeUpdateJSON(journal.JournalPath, journal)
 				_ = os.Remove(journal.StagedPath)
-			} else if currentHash == journal.ReplacementSHA256 && os.Getenv("PCCONTROLLER_WINDOWS_SERVICE") == "1" &&
-				(journal.State == "awaiting-health" || journal.State == "candidate-healthy") &&
-				journal.ChildPID == os.Getpid() && serviceUpdates.Validate(journal.WindowsService, current, os.Getpid()) == nil {
-				journal.State = "candidate-healthy"
-				journal.UpdatedAt = time.Now().UTC()
-				if writeUpdateJSON(journal.JournalPath, journal) == nil {
-					_ = writeHealthAcknowledgement(journal.HealthPath, journal.HealthToken)
-				}
+			} else if currentHash == journal.ReplacementSHA256 && os.Getenv("PCCONTROLLER_WINDOWS_SERVICE") == "1" {
+				// Service readiness can legitimately follow the initial survival
+				// delay. Re-read this one journal, not the executable, while SCM
+				// finishes startup and the helper records the exact child PID.
+				_ = acknowledgeServiceReplacement(journal, current)
 			}
 			continue
 		}
@@ -437,6 +434,32 @@ func recoverOrphanedSelfUpdates() error {
 		_ = writeUpdateJSON(journal.JournalPath, journal)
 	}
 	return nil
+}
+
+func acknowledgeServiceReplacement(journal selfUpdateJournal, current string) error {
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		fresh, err := loadSelfUpdateJournal(journal.JournalPath)
+		if err != nil {
+			return err
+		}
+		if fresh.CurrentPath != current || fresh.WindowsService != journal.WindowsService ||
+			fresh.HealthToken != journal.HealthToken || fresh.ReplacementSHA256 != journal.ReplacementSHA256 ||
+			selfUpdateTerminal(fresh.State) || (fresh.ChildPID != 0 && fresh.ChildPID != os.Getpid()) {
+			return errors.New("service update transaction changed before health acknowledgement")
+		}
+		if fresh.ChildPID == os.Getpid() && (fresh.State == "awaiting-health" || fresh.State == "candidate-healthy") &&
+			serviceUpdates.Validate(fresh.WindowsService, current, os.Getpid()) == nil {
+			fresh.State = "candidate-healthy"
+			fresh.UpdatedAt = time.Now().UTC()
+			if err := writeUpdateJSON(fresh.JournalPath, fresh); err != nil {
+				return err
+			}
+			return writeHealthAcknowledgement(fresh.HealthPath, fresh.HealthToken)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return errors.New("service readiness did not precede health acknowledgement deadline")
 }
 
 func selfUpdateTerminal(state string) bool {
