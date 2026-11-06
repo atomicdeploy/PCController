@@ -38,6 +38,7 @@ func (service *Service) reserveOperation(
 		lookup = scope + ":" + key
 	}
 	now := time.Now().UTC()
+	service.reconcilePendingHostActivations()
 	service.mu.Lock()
 	if lookup != "" {
 		if prior, ok := service.idempotency[lookup]; ok {

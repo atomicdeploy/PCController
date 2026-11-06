@@ -351,6 +351,10 @@ func (executor *primaryArtifactExecutor) StageHostUpdate(
 		options.WindowsService = "PCController"
 	}
 	if _, err := artifacts.PrepareSelfUpdateWithOptions(ctx, options); err != nil {
+		if errors.Is(err, artifacts.ErrHostAlreadyCurrent) {
+			progress("current", 100, "the exact host executable is already installed")
+			return nil
+		}
 		return err
 	}
 	progress("staged", -1, "host replacement staged; primary will restart")

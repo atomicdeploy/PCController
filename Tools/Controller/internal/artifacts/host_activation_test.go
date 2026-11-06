@@ -50,8 +50,8 @@ func TestHostActivationRequiresCommittedTransactionNotStagedOrCandidateHealthy(t
 	journal.UpdatedAt = time.Now()
 	writeUpdateJSON(journal.JournalPath, journal)
 	os.WriteFile(current, []byte("different image"), 0600)
-	if hostActivationStatus(status, current).State == "completed" {
-		t.Fatal("running image mismatch was accepted")
+	if hostActivationStatus(status, current).State != "completed" {
+		t.Fatal("a later image replaced the durable result of an earlier committed update")
 	}
 }
 

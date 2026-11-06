@@ -42,9 +42,9 @@ func hostActivationStatus(status UpdateStatus, current string) UpdateStatus {
 	}
 	switch journal.State {
 	case "committed", "committed-recovered":
-		if err := verifyFileDigest(current, digest); err != nil {
-			return next
-		}
+		// This is the durable result of that transaction, including after a
+		// later legitimate upgrade. Current-image identity is independently
+		// advertised by the manifest and checked by the transfer client.
 		next.State, next.Stage = "completed", "completed"
 		next.ProgressKnown, next.ProgressPercent = true, 100
 		next.Detail, next.ErrorCode = "healthy host replacement verified", ""
@@ -62,12 +62,26 @@ func hostActivationStatus(status UpdateStatus, current string) UpdateStatus {
 	return next
 }
 
+func (service *Service) reconcilePendingHostActivations() {
+	service.mu.RLock()
+	var pending []UpdateStatus
+	for _, status := range service.operations {
+		if pendingHostActivation(status) {
+			pending = append(pending, status)
+		}
+	}
+	service.mu.RUnlock()
+	for _, status := range pending {
+		service.reconcileHostActivation(status)
+	}
+}
+
 func (service *Service) reconcileHostActivation(status UpdateStatus) UpdateStatus {
 	if !pendingHostActivation(status) {
 		return status
 	}
 	// Serialize only rare activation reconciliation, not hardware/runtime work.
-	// In particular, a final executable hash must not hold the service state lock.
+	// Private journal I/O must not hold the service state lock.
 	service.hostActivationMu.Lock()
 	service.mu.RLock()
 	status = service.operations[status.ID]

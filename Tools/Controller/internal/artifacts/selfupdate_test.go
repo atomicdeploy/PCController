@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -20,6 +21,30 @@ func TestInheritSelfUpdateIOPreservesInteractiveStreams(t *testing.T) {
 	inheritSelfUpdateIO(command)
 	if command.Stdin != os.Stdin || command.Stdout != os.Stdout || command.Stderr != os.Stderr {
 		t.Fatal("self-update process did not inherit the coordinator terminal streams")
+	}
+}
+
+func TestPrepareSelfUpdateSkipsIdenticalCandidateWithoutStaging(t *testing.T) {
+	directory := t.TempDir()
+	current, candidate := filepath.Join(directory, "current.exe"), filepath.Join(directory, "candidate.exe")
+	if err := copyTestExecutable(os.Args[0], current, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(current, candidate); err != nil {
+		t.Fatal(err)
+	}
+	digest, _ := fileDigest(current)
+	launched := false
+	_, err := PrepareSelfUpdateWithOptions(context.Background(), SelfUpdateOptions{
+		CurrentPath: current, ArtifactPath: candidate, ExpectedSHA256: digest,
+		Launcher: HelperLauncherFunc(func(context.Context, string, string) error { launched = true; return nil }),
+	})
+	if !errors.Is(err, ErrHostAlreadyCurrent) || launched {
+		t.Fatalf("same image staged or launched: err=%v launched=%v", err, launched)
+	}
+	entries, _ := os.ReadDir(directory)
+	if len(entries) != 2 {
+		t.Fatal("identical candidate created update scratch files")
 	}
 }
 

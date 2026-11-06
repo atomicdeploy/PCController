@@ -24,6 +24,8 @@ const (
 	defaultHealthTimeout     = 30 * time.Second
 )
 
+var ErrHostAlreadyCurrent = errors.New("the exact host executable is already installed")
+
 // SelfUpdatePlan records every recoverable file in the deferred transaction.
 type SelfUpdatePlan struct {
 	CurrentPath string `json:"current_path"`
@@ -113,9 +115,6 @@ func PrepareSelfUpdateWithOptions(ctx context.Context, options SelfUpdateOptions
 		if options.WindowsService != "PCController" {
 			return SelfUpdatePlan{}, errors.New("only the PCController service can update itself")
 		}
-		if err := serviceUpdates.Validate(options.WindowsService, currentPath, os.Getpid()); err != nil {
-			return SelfUpdatePlan{}, fmt.Errorf("validate service update ownership and permissions: %w", err)
-		}
 	}
 	expected, err := normalizeSHA256(options.ExpectedSHA256)
 	if err != nil {
@@ -141,6 +140,14 @@ func PrepareSelfUpdateWithOptions(ctx context.Context, options SelfUpdateOptions
 	currentDigest, err := fileDigest(currentPath)
 	if err != nil {
 		return SelfUpdatePlan{}, fmt.Errorf("hash running executable: %w", err)
+	}
+	if currentDigest == expected {
+		return SelfUpdatePlan{}, ErrHostAlreadyCurrent
+	}
+	if options.WindowsService != "" {
+		if err := serviceUpdates.Validate(options.WindowsService, currentPath, os.Getpid()); err != nil {
+			return SelfUpdatePlan{}, fmt.Errorf("validate service update ownership and permissions: %w", err)
+		}
 	}
 	workingDirectory := strings.TrimSpace(options.WorkingDirectory)
 	if workingDirectory == "" {
