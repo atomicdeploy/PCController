@@ -50,6 +50,21 @@ func TestRequestWriteGuardRechecksAfterQueuedAdmissionWithoutLateWrite(t *testin
 	}
 }
 
+func TestRequestWriteGuardCompositionRetainsExistingFence(t *testing.T) {
+	port := newFakePort()
+	var writes, nextCalls atomic.Int32
+	port.onWrite = func([]byte) { writes.Add(1) }
+	session := NewForPort("COMPOSED-GUARD", port)
+	defer session.Close()
+	ended := errors.New("prior owner changed")
+	ctx := WithRequestWriteGuard(context.Background(), func() error { return ended })
+	ctx = WithRequestWriteGuard(ctx, func() error { nextCalls.Add(1); return nil })
+	_, err := session.Request(ctx, native.OpRelaySide, []byte{0, 1}, native.OpACK)
+	if !errors.Is(err, ended) || writes.Load() != 0 || nextCalls.Load() != 0 {
+		t.Fatalf("prior guard was replaced: err=%v writes=%d next=%d", err, writes.Load(), nextCalls.Load())
+	}
+}
+
 func TestRequestSlotTimeoutIdentifiesActiveOpcodeWithoutLateWrite(t *testing.T) {
 	port := newFakePort()
 	entered := make(chan struct{}, 1)

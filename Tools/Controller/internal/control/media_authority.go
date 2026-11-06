@@ -198,7 +198,7 @@ func (runtime *Runtime) ChangeMediaAuthority(request MediaAuthorityRequest) (Med
 	return result, nil
 }
 func (runtime *Runtime) rejectExclusiveMediaControl(ctx context.Context, opcode byte) error {
-	if runtime.emergencyStop.Load() || ctx.Value(mediaTimelineContextKey{}) != nil || !hostRecordableOpcode(opcode) {
+	if runtime.emergencyStop.Load() || ctx.Value(emergencySafetyContextKey{}) != nil || ctx.Value(mediaTimelineContextKey{}) != nil || !hostRecordableOpcode(opcode) {
 		return nil
 	}
 	actor, _ := ctx.Value(mediaActorKey{}).(string)

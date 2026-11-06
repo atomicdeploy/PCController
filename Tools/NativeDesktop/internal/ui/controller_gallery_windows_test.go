@@ -142,7 +142,7 @@ func TestControllerDocumentationGallery(t *testing.T) {
 	pumpControllerFixture(s)
 	backdrop.SetBoundsPixels(walk.Rectangle{X: 40, Y: 40, Width: 1280, Height: 900})
 	for i := 0; i < 120; i++ {
-		s.controllerHistory = append(s.controllerHistory, controllerTelemetryPoint{at: time.Unix(100+int64(i), 0), power: true, thermal: true, volts: 12 + 0.04*math.Sin(float64(i)/8), amps: 1.4 + 0.3*math.Sin(float64(i)/12), temperature: 36 + 1.5*math.Sin(float64(i)/24)})
+		s.controllerHistory = append(s.controllerHistory, controllerTelemetryPoint{at: time.Unix(100+int64(i), 0), power: true, thermal: true, thermalBT: true, volts: 12 + 0.04*math.Sin(float64(i)/8), amps: 1.4 + 0.3*math.Sin(float64(i)/12), busVolts: 11.9 + 0.04*math.Sin(float64(i)/8), watts: 16.7 + 0.8*math.Sin(float64(i)/12), temperatureBT: 31 + math.Sin(float64(i)/24), temperature: 36 + 1.5*math.Sin(float64(i)/24)})
 	}
 	for i, id := range []string{"front-panel", "channel:pwm.1", "telemetry"} {
 		if err := s.openControllerWidget(id); err != nil {

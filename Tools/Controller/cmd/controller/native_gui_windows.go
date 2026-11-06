@@ -31,7 +31,7 @@ func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Stor
 	tokenRef := flags.String("ipc-token-ref", "", "OS-vault/environment reference for a remote IPC token")
 	noAuto := flags.Bool("no-auto", false, "do not automatically connect a newly started local core to hardware")
 	preview := flags.Bool("preview", false, "render an explicitly offline UI preview without starting a core or opening any transport")
-	previewPage := flags.String("preview-page", "", "offline capture page: outputs, preferences, rf, programs, buzzer, strip, display, settings")
+	previewPage := flags.String("preview-page", "", "offline capture page: outputs, preferences, menu, motion or a native activity key")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -43,7 +43,7 @@ func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Stor
 			return errors.New("--preview-page requires --preview")
 		}
 		switch *previewPage {
-		case "outputs", "preferences", "menu", "rf", "programs", "buzzer", "strip", "display", "settings", "connection", "firmware", "events":
+		case "outputs", "preferences", "menu", "motion", "rf", "programs", "buzzer", "strip", "display", "settings", "connection", "firmware", "events", "board", "menus", "terminal", "diagnostics", "host", "updates", "safety", "i2c", "network", "history", "host-tools", "local-device", "firmware-tools", "status-lighting", "integration-settings", "discovery-settings", "udp-settings", "os-policy", "pwm-settings", "data", "board-automations", "rf-bindings", "releases", "profiles", "status-policy", "peers", "hotkeys", "host-automations", "rf-transmit":
 		default:
 			return errors.New("unknown preview page")
 		}
@@ -75,6 +75,7 @@ func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Stor
 			}
 			sample.Channels = append(sample.Channels, ch)
 		}
+		sample.Seats = []desktop.Seat{{Key: "seat.a", Name: "Seat A", Side: 1, State: "stop", Known: true}, {Key: "seat.b", Name: "Seat B", Side: 2, State: "stop", Known: true}}
 		updates <- sample
 		pages := nativePages{preview: true}
 		return desktop.Run(ctx, desktop.Options{Title: productidentity.Title(store.Current().UI.AppTitle) + " — Preview", PreviewPage: *previewPage, ConfigPath: filepath.Join(filepath.Dir(store.Path()), "native-preview.json"), Updates: updates, LoadPage: pages.load, SubmitPage: pages.submit, Log: func(format string, args ...any) { fmt.Fprintf(stderr, format+"\n", args...) }, Execute: func(context.Context, string) error { return errors.New("preview cannot control hardware") }})
@@ -129,18 +130,34 @@ func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Stor
 	messages := make(chan desktop.Message, 32)
 	readbacks := make(chan control.Snapshot, 1)
 	type channelCatalog struct {
-		Controls     []appconfig.ControlDescriptor `json:"controls"`
-		BoardProfile struct {
-			Revision string `json:"revision"`
+		Preferences    *desktop.Preferences
+		HostInstanceID string                        `json:"host_instance_id"`
+		Generation     uint64                        `json:"connection_generation"`
+		PWMRevision    string                        `json:"pwm_configuration_revision"`
+		Controls       []appconfig.ControlDescriptor `json:"controls"`
+		BoardProfile   struct {
+			Identity   string `json:"board_identity"`
+			Revision   string `json:"revision"`
+			Attached   bool   `json:"attached"`
+			Configured bool   `json:"configured"`
 		} `json:"board_profile"`
 	}
 	catalogUpdates := make(chan channelCatalog, 1)
 	refreshCatalog := make(chan struct{}, 1)
 	go func() {
+		var lastPreferences *desktop.Preferences
 		for {
 			var catalog channelCatalog
+			catalog.Preferences = lastPreferences
 			readCtx, done := context.WithTimeout(ctx, 5*time.Second)
 			err := client.call(readCtx, "controller.peripherals.get", map[string]any{}, &catalog)
+			if err == nil {
+				var preferences nativeHostPreferences
+				if preferenceErr := client.call(readCtx, "controller.ui.preferences.get", map[string]any{}, &preferences); preferenceErr == nil {
+					catalog.Preferences = desktopPreferences(preferences)
+					lastPreferences = catalog.Preferences
+				}
+			}
 			done()
 			if err == nil {
 				select {
@@ -176,8 +193,15 @@ func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Stor
 		var catalog channelCatalog
 		publish := func() {
 			snapshot := desktopSnapshot(state, *address, productidentity.Title(store.Current().UI.AppTitle))
-			snapshot.Channels = desktopChannels(state, catalog.Controls)
-			snapshot.CatalogRevision = catalog.BoardProfile.Revision
+			_, liveOwner := client.liveSourceMarker()
+			if catalog.Generation == state.ConnectionGeneration && (liveOwner == "" || catalog.HostInstanceID == liveOwner) {
+				snapshot.Channels = desktopChannels(state, catalog.Controls)
+				snapshot.Seats = desktopSeats(state, catalog.Controls)
+				snapshot.ProfileAttached, snapshot.ProfileConfigured = catalog.BoardProfile.Attached, catalog.BoardProfile.Configured
+				snapshot.CatalogRevision = catalog.BoardProfile.Revision
+				snapshot.ControlOwner = desktop.ControlOwner{HostInstanceID: catalog.HostInstanceID, Generation: catalog.Generation, BoardIdentity: catalog.BoardProfile.Identity, Revision: catalog.BoardProfile.Revision, PWMRevision: catalog.PWMRevision}
+			}
+			snapshot.Preferences = catalog.Preferences
 			select {
 			case updates <- snapshot:
 			case <-ctx.Done():
@@ -203,7 +227,7 @@ func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Stor
 				case pageChanges <- struct{}{}:
 				default:
 				}
-				if event.Kind == "peripherals.changed" {
+				if event.Kind == "peripherals.changed" || event.Kind == "config" || strings.HasPrefix(event.Kind, "config.") || strings.HasPrefix(event.Kind, "ui.") {
 					select {
 					case refreshCatalog <- struct{}{}:
 					default:
@@ -249,6 +273,12 @@ func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Stor
 				}
 				if update.Snapshot != nil {
 					next := *update.Snapshot
+					if next.ConnectionGeneration != state.ConnectionGeneration {
+						select {
+						case refreshCatalog <- struct{}{}:
+						default:
+						}
+					}
 					if next.ConnectionGeneration == state.ConnectionGeneration && next.FrontPanelUpdated.Before(state.FrontPanelUpdated) {
 						next.FrontPanel = state.FrontPanel
 						next.FrontPanelUpdated = state.FrontPanelUpdated
@@ -267,18 +297,38 @@ func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Stor
 				}
 				if update.ConnectionChange {
 					state.Connected = update.Connected
+					select {
+					case refreshCatalog <- struct{}{}:
+					default:
+					}
 				}
 				publish()
 			}
 		}
 	}()
 	console := newNativeConsole(store.Path(), *address, auth)
-	pages := nativePages{client: client, events: eventHistory}
+	pages := nativePages{client: client, events: eventHistory, rfCache: &nativeRFCache{}}
 	notifiers := map[string]hostui.Notifier{}
 	for _, delivery := range []string{"auto", "toast", "balloon"} {
 		notifiers[delivery] = hostui.NewNotifier(hostui.NotifierOptions{Delivery: delivery})
 	}
 	return desktop.Run(ctx, desktop.Options{
+		MotionHold: func(ctx context.Context, phase string, lease desktop.MotionHoldLease, direction string) (desktop.MotionHoldLease, error) {
+			if phase != "start" && phase != "renew" && phase != "release" {
+				return desktop.MotionHoldLease{}, errors.New("invalid motion hold phase")
+			}
+			var params any = lease
+			if phase == "start" {
+				params = map[string]any{"id": lease.ID, "expires_at": lease.ExpiresAt, "side": lease.Side, "generation": lease.Generation, "direction": direction}
+			}
+			var result desktop.MotionHoldLease
+			var target any = &result
+			if phase == "release" {
+				target = &map[string]bool{}
+			}
+			err := client.call(ctx, "controller.motion.hold."+phase, params, target)
+			return result, err
+		},
 		Notify: func(ctx context.Context, title, message, delivery string) error {
 			if delivery == "off" {
 				return nil
@@ -294,7 +344,10 @@ func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Stor
 		ConfigPath: filepath.Join(filepath.Dir(store.Path()), "native-desktop.json"), Updates: updates, Messages: messages,
 		Log:     func(format string, args ...any) { fmt.Fprintf(stderr, format+"\n", args...) },
 		Execute: func(ctx context.Context, command string) error { _, err := client.Execute(ctx, command); return err },
-		SetPWM: func(actionCtx context.Context, key string, percent float64) error {
+		SetPWM: func(actionCtx context.Context, owner desktop.ControlOwner, key string, percent float64) error {
+			if owner.HostInstanceID == "" || owner.Generation == 0 || owner.BoardIdentity == "" || owner.Revision == "" || owner.PWMRevision == "" {
+				return errors.New("refresh the current board controls before changing PWM")
+			}
 			if !strings.HasPrefix(key, "pwm.") {
 				return errors.New("not a PWM channel")
 			}
@@ -303,7 +356,12 @@ func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Stor
 				return err
 			}
 			var reply any
-			if err = client.call(actionCtx, "controller.pwm.set", map[string]any{"channel": channel, "percent": percent}, &reply); err != nil {
+			params := struct {
+				desktop.ControlOwner
+				Channel int     `json:"channel"`
+				Percent float64 `json:"percent"`
+			}{owner, channel, percent}
+			if err = client.call(actionCtx, "controller.pwm.set", params, &reply); err != nil {
 				return err
 			}
 			state, err := client.Snapshot(actionCtx)
@@ -345,11 +403,18 @@ func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Stor
 				return actionCtx.Err()
 			}
 		},
-		InvokeAction: func(actionCtx context.Context, id string) error {
+		InvokeAction: func(actionCtx context.Context, owner desktop.ControlOwner, id string) error {
+			if owner.HostInstanceID == "" || owner.Generation == 0 || owner.BoardIdentity == "" || owner.Revision == "" {
+				return errors.New("refresh the current board controls before invoking an action")
+			}
 			var reply struct {
 				Accepted bool `json:"accepted"`
 			}
-			if err := client.call(actionCtx, "controller.action.invoke", map[string]string{"action_id": id}, &reply); err != nil {
+			params := struct {
+				desktop.ControlOwner
+				ActionID string `json:"action_id"`
+			}{owner, id}
+			if err := client.call(actionCtx, "controller.action.invoke", params, &reply); err != nil {
 				return err
 			}
 			if !reply.Accepted {
@@ -425,6 +490,7 @@ func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Stor
 		ConsoleVisible: console.visible.Load,
 		LoadPage:       pages.load, SubmitPage: pages.submit,
 		PageChanges: pageChanges,
+		PageVersion: eventHistory.version,
 	})
 }
 
@@ -437,12 +503,44 @@ func desktopSnapshot(state control.Snapshot, address, title string) desktop.Snap
 		Busy:      state.EmergencyStop.Active || state.Programming.Active || state.Programming.RestorationPending,
 		Connected: state.Connected, HavePanel: state.HaveFrontPanel || state.HaveFrontPanelSegments,
 		HaveStatus: state.HaveStatus, CanNavigate: state.Connected && state.Hello.Capabilities&native.CapabilityMenuRemote != 0,
-		HavePower:       state.HaveStatus && state.Status.INA219Available,
-		HaveTemperature: state.HaveStatus && state.Status.TLEDAvailable,
-		Segments:        state.FrontPanel.RawSegments, Brightness: state.FrontPanel.Brightness, PressedKeys: state.FrontPanel.PressedKeys,
+		HavePower:         state.HaveStatus && state.Status.INA219Available && state.Status.INA219ValuesValid(),
+		HaveTemperature:   state.HaveStatus && state.Status.TLEDAvailable && state.Status.TLEDValueValid(),
+		HaveTemperatureBT: state.HaveStatus && state.Status.TBTAvailable && state.Status.TBTValueValid(),
+		BusMV:             state.Status.BusMV, PowerMW: state.Status.PowerMW, TemperatureBTC: float64(state.Status.TBTCenti) / 100,
+		Segments: state.FrontPanel.RawSegments, Brightness: state.FrontPanel.Brightness, PressedKeys: state.FrontPanel.PressedKeys,
 		LCDLine1: state.FrontPanel.LCDLine1, LCDLine2: state.FrontPanel.LCDLine2, Mode: strconv.Itoa(int(state.FrontPanel.ProgramMode)), Endpoint: address,
 		SupplyMV: state.Status.SupplyMV, CurrentMA: state.Status.CurrentMA, TemperatureC: float64(state.Status.TLEDCenti) / 100,
 	}
+}
+
+func desktopSeats(state control.Snapshot, controls []appconfig.ControlDescriptor) []desktop.Seat {
+	var seats []desktop.Seat
+	for _, item := range controls {
+		if item.Kind != "seat" || item.Hidden {
+			continue
+		}
+		side := byte(1)
+		motion := state.Motion.Left
+		if item.Key == "seat.b" {
+			side = 2
+			motion = state.Motion.Right
+		} else if item.Key != "seat.a" {
+			continue
+		}
+		seat := desktop.Seat{Key: item.Key, Name: item.Name, Side: side, State: motion.Applied, Known: state.HaveStatus, Locked: item.Locked}
+		for _, action := range item.Actions {
+			if action.Verb == "stop" {
+				seat.StopAction = action.ID
+			}
+		}
+		seats = append(seats, seat)
+	}
+	return seats
+}
+
+func desktopPreferences(value nativeHostPreferences) *desktop.Preferences {
+	v := value.Settings
+	return &desktop.Preferences{Revision: value.ETag, Theme: v.Appearance.Theme, Locale: v.Appearance.Locale, ReduceMotion: v.Appearance.ReduceMotion, ShowGraphs: v.ShowGraphs, ShowSupplyVoltage: v.ShowSupplyVoltage, ShowBusVoltage: v.ShowBusVoltage, ShowCurrent: v.ShowCurrent, ShowPower: v.ShowPower, ShowTemperatureLED: v.ShowTemperatureLED, ShowTemperatureBT: v.ShowTemperatureBT, VoltageDecimals: v.VoltageDecimals, CurrentDecimals: v.CurrentDecimals, PowerDecimals: v.PowerDecimals, TemperatureDecimals: v.TemperatureDecimals}
 }
 
 func desktopTrayState(state control.Snapshot, title string) nativeshell.State {

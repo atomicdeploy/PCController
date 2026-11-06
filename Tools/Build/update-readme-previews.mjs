@@ -43,6 +43,9 @@ if (!args.has('--tui-only')) {
   run(process.execPath, ['Tools/Build/go-tests.mjs', '--module', 'Tools/NativeDesktop', '--package', 'internal/ui', '--run', '^TestControllerDocumentationGallery$', '--retest'], root, false, {
     GOFLAGS: '-mod=vendor', PCCONTROLLER_DESKTOP_WINDOW_TESTS: '1', PCCONTROLLER_DESKTOP_CAPTURE_TOOL: capture, PCCONTROLLER_DESKTOP_SCREENSHOTS: staging, PCCONTROLLER_DESKTOP_CAPTURE_MARGIN: '0'
   })
+  run(process.execPath, ['Tools/Build/go-tests.mjs', '--module', 'Tools/NativeDesktop', '--package', 'internal/ui', '--run', '^TestControllerActivityFormNativeLayout$', '--retest'], root, false, {
+    GOFLAGS: '-mod=vendor', PCCONTROLLER_DESKTOP_WINDOW_TESTS: '1', PCCONTROLLER_DESKTOP_CAPTURE_TOOL: capture, PCCONTROLLER_DESKTOP_SCREENSHOTS: staging
+  })
 }
 const start = '<!-- controller-preview-gallery:start -->', end = '<!-- controller-preview-gallery:end -->'
 const gallery = `${start}
@@ -66,6 +69,10 @@ These are reproducible **offline previews**, rendered by the actual application 
 
 ![PCController desktop preferences](docs/assets/screenshots/gui-settings.png)
 
+### Native activities
+
+![Native RF activity with tabbed editors and fixed actions](docs/assets/screenshots/gui-rf-activity.png)
+
 | TUI dashboard | TUI Control page |
 | --- | --- |
 | ![PCController TUI dashboard](docs/assets/screenshots/tui-dashboard.svg) | ![PCController TUI Control page](docs/assets/screenshots/tui-controls.svg) |
@@ -79,7 +86,7 @@ if ((a < 0) !== (b < 0) || (a >= 0 && b < a)) throw new Error('Malformed README 
 if (a !== readme.lastIndexOf(start) || b !== readme.lastIndexOf(end)) throw new Error('Duplicate README gallery markers; refusing to rewrite')
 const files = ['tui-dashboard.svg', 'tui-controls.svg']
 if (!args.has('--tui-only')) {
-  for (const name of ['dashboard', 'channels', 'inline-rename', 'windows-titlebar', 'compact', 'widgets', 'settings']) {
+  for (const name of ['dashboard', 'channels', 'inline-rename', 'windows-titlebar', 'compact', 'widgets', 'settings', 'rf-activity']) {
     const file = `gui-${name}.png`
     const png = readFileSync(join(staging, file))
     if (png.length < 100 || png.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a') throw new Error(`Invalid ${file}`)

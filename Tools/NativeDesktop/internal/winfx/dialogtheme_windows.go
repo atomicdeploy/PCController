@@ -594,6 +594,8 @@ func dialogControlTheme(className string, dark bool) string {
 		return "Explorer"
 	}
 	switch strings.ToLower(strings.TrimSpace(className)) {
+	case "sysheader32":
+		return "DarkMode_ItemsView"
 	case "edit", "richedit", "richedit20w", "richedit50w",
 		"combobox", "comboboxex32":
 		return "DarkMode_CFD"

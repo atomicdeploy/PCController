@@ -96,6 +96,10 @@ These are reproducible **offline previews**, rendered by the actual application 
 
 ![PCController desktop preferences](docs/assets/screenshots/gui-settings.png)
 
+### Native activities
+
+![Native RF activity with tabbed editors and fixed actions](docs/assets/screenshots/gui-rf-activity.png)
+
 | TUI dashboard | TUI Control page |
 | --- | --- |
 | ![PCController TUI dashboard](docs/assets/screenshots/tui-dashboard.svg) | ![PCController TUI Control page](docs/assets/screenshots/tui-controls.svg) |

@@ -280,6 +280,8 @@ type Runtime struct {
 	motionIntentToken      [2]uint64
 	motionIntentPending    [2]bool
 	motionIntentDeadline   [2]time.Time
+	motionHolds            [2]MotionHoldLease
+	motionHoldRevoked      map[string]time.Time
 	statusUpdated          time.Time
 	paused                 bool
 	connecting             bool
@@ -2010,6 +2012,7 @@ func (runtime *Runtime) requestAtGenerationPriority(
 			ctx = link.WithRequestWriteGuard(ctx, guard)
 		}
 	}
+	ctx = runtime.guardMotionHoldWrite(ctx, generation, opcode, payload)
 	wirePayload, err := runtime.stripWirePayload(ctx, opcode, payload)
 	if err != nil {
 		return native.Frame{}, err

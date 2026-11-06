@@ -3,7 +3,6 @@
 package ui
 
 import (
-	"fmt"
 	"github.com/lxn/walk"
 	"pccontroller.local/desktop/internal/config"
 	"strings"
@@ -216,24 +215,16 @@ func (s *Shell) paintController(canvas *walk.Canvas, bounds walk.Rectangle, colo
 		s.controllerText(canvas, state.LCDLine2, s.bodyFont, colors.secondary, walk.Rectangle{X: x + 18, Y: y + 31, Width: width - 36, Height: 24}, false)
 		y += 78
 	}
-	if state.HavePower || state.HaveTemperature {
-		labels, values := []string{}, []string{}
-		if state.HavePower {
-			labels = append(labels, "Supply", "Current")
-			values = append(values, fmt.Sprintf("%.2f V", float64(state.SupplyMV)/1000), fmt.Sprintf("%d mA", state.CurrentMA))
-		}
-		if state.HaveTemperature {
-			labels = append(labels, "Temperature")
-			values = append(values, fmt.Sprintf("%.1f °C", state.TemperatureC))
-		}
-		cw := (width - (len(labels)-1)*10) / len(labels)
-		for i, label := range labels {
-			rect := walk.Rectangle{X: x + i*(cw+10), Y: y, Width: cw, Height: 68}
+	if measurements := controllerMeasurements(state); len(measurements) > 0 {
+		columns := controllerMeasurementColumns(width, len(measurements))
+		cw := (width - (columns-1)*10) / columns
+		for i, item := range measurements {
+			rect := walk.Rectangle{X: x + (i%columns)*(cw+10), Y: y + (i/columns)*84, Width: cw, Height: 68}
 			s.controllerCard(canvas, rect, colors)
-			s.controllerText(canvas, label, s.captionFont, colors.secondary, walk.Rectangle{X: rect.X + 14, Y: y + 8, Width: cw - 28, Height: 20}, false)
-			s.controllerText(canvas, values[i], s.bodyFont, colors.text, walk.Rectangle{X: rect.X + 14, Y: y + 32, Width: cw - 28, Height: 25}, false)
+			s.controllerText(canvas, item.label, s.captionFont, colors.secondary, walk.Rectangle{X: rect.X + 14, Y: rect.Y + 8, Width: cw - 28, Height: 20}, false)
+			s.controllerText(canvas, item.value, s.bodyFont, colors.text, walk.Rectangle{X: rect.X + 14, Y: rect.Y + 32, Width: cw - 28, Height: 25}, false)
 		}
-		y += 84
+		y += controllerMeasurementHeight(state, width)
 	}
 	if !wide {
 		s.paintBoardControl(canvas, walk.Rectangle{X: x, Y: y, Width: width, Height: 168}, 2, colors)
@@ -252,12 +243,15 @@ func (s *Shell) paintController(canvas *walk.Canvas, bounds walk.Rectangle, colo
 func (s *Shell) paintBoardControl(canvas *walk.Canvas, bounds walk.Rectangle, columns int, colors palette) {
 	x, y, width := bounds.X, bounds.Y, bounds.Width
 	s.controllerCard(canvas, bounds, colors)
-	s.controllerText(canvas, "Board control", s.bodyFont, colors.text, walk.Rectangle{X: x + 16, Y: y + 8, Width: width - 132, Height: 26}, false)
+	s.controllerText(canvas, "Board control", s.bodyFont, colors.text, walk.Rectangle{X: x + 16, Y: y + 8, Width: width - 164, Height: 26}, false)
 	for i, item := range []struct {
 		id    actionID
 		glyph string
-	}{{actionConnection, "\uE839"}, {actionFirmware, "\uE896"}, {actionEvents, "\uE9D9"}} {
-		s.controllerControl(canvas, walk.Rectangle{X: x + width - 112 + i*32, Y: y + 6, Width: 28, Height: 28}, item.id, item.glyph, "", s.controller.LoadPage != nil, false, colors)
+	}{{actionActivities, "\uE80A"}, {actionConnection, "\uE839"}, {actionFirmware, "\uE896"}, {actionEvents, "\uE9D9"}} {
+		if item.id == actionEvents && len(s.controllerState.Seats) > 0 {
+			item.id, item.glyph = actionMotion, "\uE7C4"
+		}
+		s.controllerControl(canvas, walk.Rectangle{X: x + width - 144 + i*32, Y: y + 6, Width: 28, Height: 28}, item.id, item.glyph, "", s.controller.LoadPage != nil, false, colors)
 	}
 	actions := []struct {
 		label, glyph string
@@ -265,6 +259,9 @@ func (s *Shell) paintBoardControl(canvas *walk.Canvas, bounds walk.Rectangle, co
 	}{{"Outputs", "\uE9E9", actionChannels}, {"RF assignments", "\uE704", actionRF}, {"Programs & effects", "\uE768", actionPrograms}, {"Buzzer & melodies", "\uE767", actionBuzzer}, {"LED strip", "\uE793", actionStrip}, {"Display text", "\uE7F4", actionDisplay}}
 	bw := (width - 32 - (columns-1)*12) / columns
 	for i, item := range actions {
+		if item.action == actionChannels && s.controllerState.ProfileAttached && !s.controllerState.ProfileConfigured {
+			item.action, item.label, item.glyph = actionProfiles, "Configure board", "\uE713"
+		}
 		enabled := s.controller.LoadPage != nil
 		if item.action == actionChannels {
 			enabled = len(s.controllerState.Channels) > 0

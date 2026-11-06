@@ -923,6 +923,9 @@
             "controller.mirror.inspect",
             "controller.mirror.resync",
             "controller.mirror.status",
+            "controller.motion.hold.release",
+            "controller.motion.hold.renew",
+            "controller.motion.hold.start",
             "controller.network.peers.get",
             "controller.network.peers.set",
             "controller.opcode.exchange",
@@ -987,6 +990,8 @@
             "controller.software.call",
             "controller.software.targets",
             "controller.status",
+            "controller.status_led.policy.get",
+            "controller.status_led.policy.set",
             "controller.status_led.release",
             "controller.status_led.set",
             "controller.subscribe",
@@ -1003,6 +1008,8 @@
             "controller.ui.config.get",
             "controller.ui.config.open",
             "controller.ui.config.set",
+            "controller.ui.preferences.get",
+            "controller.ui.preferences.set",
             "controller.unsubscribe",
             "controller.update.eeprom",
             "controller.update.firmware",
@@ -1851,6 +1858,21 @@
       "summary": "mirror status",
       "idempotency": "safe"
     },
+    "controller.motion.hold.release": {
+      "capability": "board_commands",
+      "summary": "Revoke a pending or active owned hold and request safety-priority STOP; stale tokens cannot stop newer intents.",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.motion.hold.renew": {
+      "capability": "board_commands",
+      "summary": "Extend the owned 700 ms motion lease without retransmitting movement; reject expired owners and unsafe door status.",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.motion.hold.start": {
+      "capability": "board_commands",
+      "summary": "Start an advertised seat hold with a fresh 128-bit token, board generation and short press deadline; existing door and authority gates apply.",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
     "controller.network.peers.get": {
       "capability": "read",
       "summary": "Return persistent peer topology with secret references and no plaintext credentials.",
@@ -2177,6 +2199,16 @@
       "summary": "status",
       "idempotency": "safe"
     },
+    "controller.status_led.policy.get": {
+      "capability": "read",
+      "summary": "Return the host-owned reactive status-lighting policy.",
+      "idempotency": "safe"
+    },
+    "controller.status_led.policy.set": {
+      "capability": "host_configuration",
+      "summary": "Replace the reactive status-lighting policy with mandatory canonical JSON if_match revision and serialized validation.",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
     "controller.status_led.release": {
       "capability": "board_commands",
       "summary": "status led release",
@@ -2255,6 +2287,16 @@
     "controller.ui.config.set": {
       "capability": "host_configuration",
       "summary": "Atomically persist host UI fields; status_interval_ms is 50..60000 and measurement_freshness_ms is refresh+100..120000.",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.ui.preferences.get": {
+      "capability": "read",
+      "summary": "Return full typed host UI preferences and their ETag; no credentials or transport configuration.",
+      "idempotency": "safe"
+    },
+    "controller.ui.preferences.set": {
+      "capability": "host_configuration",
+      "summary": "Replace only UI preferences with mandatory if_match ETag, serialized compare-and-swap, validation and no-op suppression.",
       "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.unsubscribe": {

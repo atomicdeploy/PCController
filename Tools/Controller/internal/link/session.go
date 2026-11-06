@@ -731,6 +731,15 @@ func WithRequestWriteGuard(ctx context.Context, guard func() error) context.Cont
 	if guard == nil {
 		return ctx
 	}
+	if previous, ok := ctx.Value(requestWriteGuardKey{}).(func() error); ok {
+		next := guard
+		guard = func() error {
+			if err := previous(); err != nil {
+				return err
+			}
+			return next()
+		}
+	}
 	return context.WithValue(ctx, requestWriteGuardKey{}, guard)
 }
 

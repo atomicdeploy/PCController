@@ -408,7 +408,8 @@ type networkPeerConfig struct {
 }
 
 type networkPeersConfig struct {
-	Peers []networkPeerConfig `json:"peers"`
+	Peers   []networkPeerConfig `json:"peers"`
+	IfMatch string              `json:"if_match,omitempty"`
 }
 
 type hostFactsParams struct {
@@ -418,6 +419,7 @@ type hostFactsParams struct {
 
 type hotkeyMutation struct {
 	Operation string  `json:"operation"`
+	IfMatch   string  `json:"if_match,omitempty"`
 	Name      string  `json:"name"`
 	Enabled   *bool   `json:"enabled,omitempty"`
 	Chord     *string `json:"chord,omitempty"`
@@ -573,6 +575,7 @@ func (service *Service) dispatch(
 		ctx = control.WithPWMTraceOrigin(ctx, request.Method, request.ClientID, access.Transport)
 	}
 	if requestCapability(request.Method, request.Params) == capabilityBoard &&
+		request.Method != "controller.motion.hold.release" &&
 		request.Method != "controller.media.authority.change" && request.Method != "controller.media.playback.update" && request.Method != "controller.media.timeline.prepare" {
 		// Always admit the emergency latch, not an anonymous release during production.
 		var stop struct {
@@ -784,6 +787,10 @@ func (service *Service) dispatch(
 		}
 	case "controller.integrations.status":
 		result = map[string]any{"buzzer_runtime": service.buzzerRuntimeStatus()}
+	case "controller.status_led.policy.get":
+		result = service.persistentHostConfig().Integrations.StatusLED
+	case "controller.status_led.policy.set":
+		result, err = service.updateStatusPolicy(request.Params)
 	case "controller.integrations.local.set":
 		var params struct {
 			LocalDevice     appconfig.LocalDevice      `json:"local_device"`
@@ -820,6 +827,10 @@ func (service *Service) dispatch(
 		}
 	case "controller.ui.config", "controller.ui.config.get":
 		result = service.browserUISettings()
+	case "controller.ui.preferences.get":
+		result = fullUIPreferencesFor(service.persistentHostConfig().UI)
+	case "controller.ui.preferences.set":
+		result, err = service.updateFullUIPreferences(request.Params)
 	case "controller.ui.config.open":
 		var params struct {
 			Target string `json:"target"`
@@ -908,6 +919,7 @@ func (service *Service) dispatch(
 		}
 	case "controller.action.invoke":
 		var params struct {
+			controlIntentOwner
 			ActionID string `json:"action_id"`
 		}
 		if err = decodeStrictParams(request.Params, &params); err != nil {
@@ -915,7 +927,11 @@ func (service *Service) dispatch(
 		} else if strings.TrimSpace(params.ActionID) == "" {
 			err = &RPCError{Code: -32602, Message: "action_id is required"}
 		} else {
-			result, err = service.invokeSemanticAction(ctx, params.ActionID)
+			var guarded context.Context
+			guarded, err = service.guardControlIntent(ctx, params.controlIntentOwner, strings.HasPrefix(strings.ToLower(strings.TrimSpace(params.ActionID)), "pwm."))
+			if err == nil {
+				result, err = service.invokeSemanticAction(guarded, params.ActionID)
+			}
 		}
 	case "controller.peripherals.set":
 		var params struct {
@@ -1010,6 +1026,8 @@ func (service *Service) dispatch(
 		result = service.controllerSnapshot()
 	case "controller.estop.get":
 		result = service.Client.EmergencyStop()
+	case "controller.motion.hold.start", "controller.motion.hold.renew", "controller.motion.hold.release":
+		result, err = service.dispatchMotionHold(ctx, request.Method, request.Params)
 	case "controller.estop.set":
 		var params struct {
 			Active bool   `json:"active"`
@@ -1116,6 +1134,7 @@ func (service *Service) dispatch(
 		}
 	case "controller.pwm.set":
 		var params struct {
+			controlIntentOwner
 			Channel  int      `json:"channel"`
 			Percent  *float64 `json:"percent,omitempty"`
 			RawValue *int     `json:"raw_value,omitempty"`
@@ -1143,7 +1162,11 @@ func (service *Service) dispatch(
 					err = &RPCError{Code: -32602, Message: "raw_value must be 0..4095"}
 				}
 				if err == nil {
-					result, err = service.setPWMAndReadback(ctx, byte(params.Channel), uint16(raw))
+					var guarded context.Context
+					guarded, err = service.guardControlIntent(ctx, params.controlIntentOwner, true)
+					if err == nil {
+						result, err = service.setPWMAndReadback(guarded, byte(params.Channel), uint16(raw))
+					}
 				}
 			}
 		}
@@ -2141,6 +2164,23 @@ func (service *Service) setNetworkPeers(raw json.RawMessage) (networkPeersConfig
 		})
 	}
 	if err := service.UpdateHostConfig(func(value *appconfig.Config) error {
+		current := networkPeersConfig{Peers: make([]networkPeerConfig, 0, len(value.Integrations.WebSocketClients))}
+		for _, peer := range value.Integrations.WebSocketClients {
+			current.Peers = append(current.Peers, networkPeerFromConfig(peer))
+		}
+		if params.IfMatch != "" && canonicalSettingsDigest(current) != params.IfMatch {
+			return errors.New("Network peers changed; refresh before saving")
+		}
+		for index := range configured {
+			for _, previous := range value.Integrations.WebSocketClients {
+				// Never return plaintext tokens, drop them on a metadata-only edit,
+				// or forward an old credential to a newly selected endpoint.
+				if configured[index].Name == previous.Name && configured[index].URL == previous.URL && configured[index].AuthTokenRef == previous.AuthTokenRef {
+					configured[index].AuthToken = previous.AuthToken
+					break
+				}
+			}
+		}
 		value.Integrations.WebSocketClients = configured
 		return nil
 	}); err != nil {
@@ -2347,6 +2387,9 @@ func (service *Service) applyHotkeyMutation(params hotkeyMutation) (map[string]a
 	}
 	err := service.UpdateHostConfig(func(config *appconfig.Config) error {
 		bindings := append([]appconfig.Hotkey(nil), config.Integrations.Hotkeys...)
+		if params.IfMatch != "" && params.IfMatch != canonicalSettingsDigest(config.Integrations.Hotkeys) {
+			return errors.New("hotkeys changed; refresh before saving")
+		}
 		index := -1
 		for candidateIndex := range bindings {
 			if strings.EqualFold(bindings[candidateIndex].Name, name) {
@@ -2746,6 +2789,14 @@ func requestCapability(method string, params json.RawMessage) string {
 		return capabilityIntegrations
 	case "controller.pwm.channel.configure":
 		return capabilityHostConfig
+	case "controller.ui.preferences.set":
+		return capabilityHostConfig
+	case "controller.status_led.policy.set":
+		return capabilityHostConfig
+	case "controller.status_led.policy.get":
+		return capabilityRead
+	case "controller.ui.preferences.get":
+		return capabilityRead
 	case "controller.program_state.set", "controller.program-state.set":
 		return capabilityBoard
 	default:
