@@ -11,12 +11,85 @@ import (
 	"path/filepath"
 	"pccontroller.local/desktop/presentation"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
 func TestControllerAutomationTriggerLayout(t *testing.T) {
 	controllerControlFixture(t, "automation", 0, "en")
+}
+
+func TestControllerBuzzerLifecycleRetainsLiteralDraft(t *testing.T) {
+	s, _ := newControllerWindowFixture(t)
+	s.controller.Title = "PCController"
+	changes := make(chan struct{}, 1)
+	var version atomic.Uint64
+	var active atomic.Bool
+	s.controller.PageChanges = changes
+	s.controller.PageVersion = func(string) uint64 { return version.Load() }
+	s.controller.LoadPage = func(context.Context, string) (presentation.Page, error) {
+		p := presentation.Page{Title: "Buzzer & melodies", Fields: []presentation.Field{{Key: "frequency", Label: "Tone frequency (Hz)", Value: "880", Numeric: true, Min: 20, Max: 20000, Section: "Tone test"}}, Actions: []presentation.PageAction{{ID: "tone", Label: "Play tone", Enabled: true, Section: "Tone test"}}}
+		if active.Load() {
+			p.Actions = append(p.Actions, presentation.PageAction{ID: "stop", Label: "Stop buzzer", Enabled: true})
+		}
+		return p, nil
+	}
+	s.controller.SubmitPage = func(context.Context, string, string, map[string]string) (presentation.Page, error) {
+		t.Fatal("lifecycle observation must not execute a command")
+		return presentation.Page{}, nil
+	}
+	phase := 0
+	watchdog := time.AfterFunc(10*time.Second, func() { s.mw.Synchronize(func() { t.Error("buzzer lifecycle update timed out"); s.mw.Close() }) })
+	defer watchdog.Stop()
+	s.openControllerFormObserved("buzzer", func(dialog *walk.Dialog) {
+		var edit *walk.LineEdit
+		var find func(walk.Container)
+		find = func(c walk.Container) {
+			for i := 0; i < c.Children().Len(); i++ {
+				child := c.Children().At(i)
+				if e, ok := child.(*walk.LineEdit); ok {
+					edit = e
+				}
+				if tabs, ok := child.(*walk.TabWidget); ok {
+					for i := 0; i < tabs.Pages().Len(); i++ {
+						find(tabs.Pages().At(i))
+					}
+				}
+				if nested, ok := child.(walk.Container); ok {
+					find(nested)
+				}
+			}
+		}
+		find(dialog)
+		if edit == nil {
+			t.Error("tone field missing")
+			dialog.Cancel()
+			return
+		}
+		switch phase {
+		case 0:
+			phase++
+			_ = edit.SetText("invalid draft")
+			active.Store(true)
+			version.Add(1)
+			changes <- struct{}{}
+		case 1:
+			phase++
+			if edit.Text() != "invalid draft" || controllerFixtureButton(dialog, "Stop buzzer") == nil {
+				t.Error("start update reset draft or omitted Stop")
+			}
+			active.Store(false)
+			version.Add(1)
+			changes <- struct{}{}
+		case 2:
+			if edit.Text() != "invalid draft" || controllerFixtureButton(dialog, "Stop buzzer") != nil {
+				t.Error("completion reset draft or retained Stop")
+			}
+			_ = edit.SetText("880")
+			dialog.Cancel()
+		}
+	})
 }
 func TestControllerAutomationActionsLayout(t *testing.T) {
 	controllerControlFixture(t, "automation", 1, "en")
@@ -36,7 +109,7 @@ func controllerControlFixture(t *testing.T, key string, tab int, locale string) 
 		t.Skip("host adapter fixture documents not requested")
 	}
 	s, _ := newControllerWindowFixture(t)
-	s.controller.Title="PCController"
+	s.controller.Title = "PCController"
 	s.applyLocaleUI(locale)
 	data, err := os.ReadFile(filepath.Join(directory, key+".json"))
 	if err != nil {

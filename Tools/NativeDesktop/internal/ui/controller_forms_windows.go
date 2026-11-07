@@ -748,11 +748,22 @@ func (s *Shell) openControllerFormObserved(key string, observe func(*walk.Dialog
 		}()
 	}
 	if (key == "events" || key == "firmware" || key == "updates" || key == "rf" || key == "buzzer") && s.controller.PageChanges != nil {
+		resume := make(chan struct{}, 1)
+		retryLive := func() {
+			time.AfterFunc(100*time.Millisecond, func() {
+				select {
+				case <-ctx.Done():
+				case resume <- struct{}{}:
+				default:
+				}
+			})
+		}
 		go func() {
 			for {
 				select {
 				case <-ctx.Done():
 					return
+				case <-resume:
 				case _, ok := <-s.controller.PageChanges:
 					if !ok {
 						return
@@ -771,7 +782,11 @@ func (s *Shell) openControllerFormObserved(key string, observe func(*walk.Dialog
 				case <-timer.C:
 				}
 				dialog.Synchronize(func() {
-					if closed || busy {
+					if closed {
+						return
+					}
+					if busy {
+						retryLive()
 						return
 					}
 					version := uint64(0)
@@ -783,6 +798,7 @@ func (s *Shell) openControllerFormObserved(key string, observe func(*walk.Dialog
 					}
 					if key == "rf" || key == "buzzer" {
 						if liveBusy {
+							retryLive()
 							return
 						}
 						liveBusy = true
@@ -793,7 +809,11 @@ func (s *Shell) openControllerFormObserved(key string, observe func(*walk.Dialog
 							next, err := s.controller.LoadPage(request, key)
 							dialog.Synchronize(func() {
 								liveBusy = false
-								if closed || busy || generation != renderVersion {
+								if closed {
+									return
+								}
+								if busy || generation != renderVersion {
+									retryLive()
 									return
 								}
 								if err != nil {
