@@ -1955,6 +1955,8 @@ func (service *Service) dispatch(
 			time.Sleep(25 * time.Millisecond)
 			service.Shutdown()
 		}()
+	case "controller.software.targets", "controller.software.call", "controller.software.bundle.list", "controller.software.bundle.read":
+		result, err = service.dispatchSoftware(ctx, request.Method, request.Params)
 	default:
 		if service.ReleaseDiscovery != nil {
 			var handled bool
@@ -2427,6 +2429,15 @@ func (service *Service) authorizeAccess(
 	if !access.Remote {
 		return nil
 	}
+	if method == "controller.software.call" {
+		if _, err := validateSoftwareCall(params); err != nil {
+			return err
+		}
+		if err := service.authorizeCapability(access, method, capabilityProgramming); err != nil {
+			return err
+		}
+		return service.authorizeCapability(access, method, capabilityBridgeCalls)
+	}
 	if strings.EqualFold(strings.TrimSpace(access.Transport), "bridge") {
 		if err := ValidateBridgeRequest(Request{Method: method, Params: params}); err != nil {
 			return err
@@ -2590,6 +2601,12 @@ func remoteCapabilityAllowed(
 
 func requestCapability(method string, params json.RawMessage) string {
 	method = strings.ToLower(strings.TrimSpace(method))
+	if method == "controller.software.targets" || method == "controller.software.bundle.list" || method == "controller.software.bundle.read" {
+		return capabilityRead
+	}
+	if method == "controller.software.call" {
+		return capabilityProgramming
+	}
 	// Configuration is host-owned; mirror writes/resync are board commands.
 	// Read-only diagnostics must not grant write permission by association.
 	switch method {
@@ -2617,7 +2634,8 @@ func requestCapability(method string, params json.RawMessage) string {
 	case "controller.event.next", "controller.event.latest", "controller.subscribe",
 		"controller.unsubscribe":
 		return capabilityEvents
-	case "controller.artifact.manifest", "controller.artifact.list", "controller.update.status":
+	case "controller.artifact.manifest", "controller.artifact.list", "controller.update.status",
+		"controller.artifact.download.begin", "controller.artifact.download.chunk", "controller.artifact.download.close":
 		return capabilityRead
 	case "controller.discovery.github.workflow", "controller.discovery.github.release",
 		"controller.discovery.manifest", "controller.discovery.local_manifest",

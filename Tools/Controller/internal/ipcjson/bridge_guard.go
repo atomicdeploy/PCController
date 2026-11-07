@@ -11,6 +11,10 @@ import (
 // ValidateBridgeRequest prevents both immediate and persisted third-peer pivots.
 // This topology guard remains active while alpha authentication is disabled.
 func ValidateBridgeRequest(request Request) error {
+	if request.Method == "controller.software.call" {
+		_, err := validateSoftwareCall(request.Params)
+		return err
+	}
 	if peerUpdate, _ := requestInvokesPeerHostUpdate(request.Method, request.Params, 0); peerUpdate {
 		return errors.New("peer host updates may not be chained through a bridge; bridge ingress may not pivot")
 	}

@@ -336,23 +336,32 @@ func artifactProgrammingContext(ctx artifacts.Context, progress artifacts.Progre
 func (executor *primaryArtifactExecutor) StageHostUpdate(
 	ctx artifacts.Context,
 	artifact artifacts.Descriptor,
-	_ artifacts.UpdateRequest,
+	request artifacts.UpdateRequest,
 	progress artifacts.ProgressFunc,
 ) error {
-	if os.Getenv("PCCONTROLLER_WINDOWS_SERVICE") == "1" {
-		return errors.New("in-process host self-update is disabled for the Windows service; stop the service, deploy the verified controller.exe, run 'controller service repair', then start it")
-	}
 	current, err := os.Executable()
 	if err != nil {
 		return err
 	}
 	progress("staging", -1, "verifying and staging host replacement")
-	if _, err := artifacts.PrepareSelfUpdate(ctx, current, artifact.LocalPath, artifact.SHA256, nil); err != nil {
+	options := artifacts.SelfUpdateOptions{CurrentPath: current, ArtifactPath: artifact.LocalPath,
+		ExpectedSHA256: artifact.SHA256, Arguments: os.Args[1:], OperationID: request.OperationID}
+	serviceUpdate := os.Getenv("PCCONTROLLER_WINDOWS_SERVICE") == "1"
+	if serviceUpdate {
+		options.WindowsService = "PCController"
+	}
+	if _, err := artifacts.PrepareSelfUpdateWithOptions(ctx, options); err != nil {
+		if errors.Is(err, artifacts.ErrHostAlreadyCurrent) {
+			progress("current", 100, "the exact host executable is already installed")
+			return nil
+		}
 		return err
 	}
 	progress("staged", -1, "host replacement staged; primary will restart")
-	executor.scheduleHostUpdateShutdown(500*time.Millisecond, 12*time.Second)
-	return nil
+	if !serviceUpdate {
+		executor.scheduleHostUpdateShutdown(500*time.Millisecond, 12*time.Second)
+	}
+	return artifacts.ErrHostActivationPending
 }
 
 func (executor *primaryArtifactExecutor) scheduleHostUpdateShutdown(gracefulDelay, forceDelay time.Duration) {

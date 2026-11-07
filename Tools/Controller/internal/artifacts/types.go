@@ -200,6 +200,9 @@ type CaptureRequest struct {
 
 // UpdateRequest authorizes one immutable artifact application transaction.
 type UpdateRequest struct {
+	// Set by the owning service after reserving the durable operation; never
+	// accepted from transport JSON or included in the request fingerprint.
+	OperationID    string `json:"-"`
 	ArtifactSHA256 string `json:"artifact_sha256"`
 	Authorized     bool   `json:"authorized"`
 	Method         string `json:"method,omitempty"`

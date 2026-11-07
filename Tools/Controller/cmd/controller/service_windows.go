@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"golang.org/x/sys/windows/svc/mgr"
 
 	"pccontroller.local/controller/internal/appconfig"
+	"pccontroller.local/controller/internal/artifacts"
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/ownedstorage"
 )
@@ -107,6 +109,9 @@ func reconcileWindowsService(repair bool, options serviceRuntimeOptions, output 
 		}
 		return err
 	}
+	if err := grantWindowsServiceUpdateControl(service); err != nil {
+		return fmt.Errorf("grant the service control of its own update lifecycle: %w", err)
+	}
 	recovery := []mgr.RecoveryAction{
 		{Type: mgr.ServiceRestart, Delay: 5 * time.Second},
 		{Type: mgr.ServiceRestart, Delay: 15 * time.Second},
@@ -151,7 +156,7 @@ func grantWindowsServicePaths(options serviceRuntimeOptions) error {
 		{options.ConfigPath, `NT SERVICE\PCController:(M)`},
 		{filepath.Dir(options.ConfigPath), `NT SERVICE\PCController:(OI)(CI)(M)`},
 		{options.DataDir, `NT SERVICE\PCController:(OI)(CI)(M)`},
-		{filepath.Dir(options.BinaryPath), `NT SERVICE\PCController:(OI)(CI)(RX)`},
+		{filepath.Dir(options.BinaryPath), `NT SERVICE\PCController:(OI)(CI)(M)`},
 	}
 	for _, grant := range grants {
 		command := exec.Command("icacls.exe", grant.path, "/grant", grant.permission)
@@ -160,6 +165,40 @@ func grantWindowsServicePaths(options serviceRuntimeOptions) error {
 		}
 	}
 	return nil
+}
+
+// Installation/repair is already administrative. Grant the dedicated service
+// SID only start/stop and query rights on itself, not SCM administration or
+// configuration changes. Preserve every existing DACL entry.
+func grantWindowsServiceUpdateControl(service *mgr.Service) error {
+	sid, _, _, err := windows.LookupSID("", `NT SERVICE\PCController`)
+	if err != nil {
+		return err
+	}
+	var pinned runtime.Pinner
+	pinned.Pin(sid)
+	defer pinned.Unpin()
+	descriptor, err := windows.GetSecurityInfo(service.Handle, windows.SE_SERVICE, windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		return err
+	}
+	dacl, _, err := descriptor.DACL()
+	if err != nil {
+		return err
+	}
+	if dacl == nil {
+		return errors.New("service has an unrestricted DACL; refusing to replace it implicitly")
+	}
+	updated, err := windows.ACLFromEntries([]windows.EXPLICIT_ACCESS{{
+		AccessPermissions: windows.SERVICE_START | windows.SERVICE_STOP | windows.SERVICE_QUERY_CONFIG | windows.SERVICE_QUERY_STATUS,
+		AccessMode:        windows.GRANT_ACCESS,
+		Trustee: windows.TRUSTEE{TrusteeForm: windows.TRUSTEE_IS_SID, TrusteeType: windows.TRUSTEE_IS_USER,
+			TrusteeValue: windows.TrusteeValueFromSID(sid)},
+	}}, dacl)
+	if err != nil {
+		return err
+	}
+	return windows.SetSecurityInfo(service.Handle, windows.SE_SERVICE, windows.DACL_SECURITY_INFORMATION, nil, nil, updated, nil)
 }
 
 func printWindowsServiceStatus(output io.Writer) error {
@@ -289,7 +328,14 @@ type controllerWindowsService struct {
 	options serviceRuntimeOptions
 }
 
-func (service *controllerWindowsService) Execute(_ []string, requests <-chan svc.ChangeRequest, statuses chan<- svc.Status) (bool, uint32) {
+func (service *controllerWindowsService) Execute(_ []string, requests <-chan svc.ChangeRequest, statuses chan<- svc.Status) (serviceSpecific bool, exitCode uint32) {
+	defer func() {
+		if exitCode != 0 && artifacts.PendingServiceReplacement(windowsServiceName) {
+			// Errors remain in service.log and the helper observes lost health.
+			// A clean SCM exit prevents its delayed crash-restart from racing rollback.
+			serviceSpecific, exitCode = false, 0
+		}
+	}()
 	statuses <- svc.Status{State: svc.StartPending, CheckPoint: 1, WaitHint: 15000}
 	logFile, err := openWindowsServiceLog(service.options.DataDir)
 	if err != nil {
@@ -409,6 +455,9 @@ func runWindowsServiceWeb(ctx context.Context, options serviceRuntimeOptions, ou
 	}
 	configurePrimaryIPC(runtimeConfig)
 	args := []string{"--no-open", "--no-tray"}
+	if options.NoAuto {
+		args = append(args, "--no-auto")
+	}
 	if strings.TrimSpace(options.Listen) != "" {
 		args = append(args, "--listen", options.Listen)
 	}

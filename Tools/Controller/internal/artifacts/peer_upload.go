@@ -73,6 +73,11 @@ func (service *Service) BeginPeerUpload(request PeerUploadBeginRequest) (PeerUpl
 		_ = os.Remove(file.Name())
 		return PeerUploadBeginResult{}, err
 	}
+	if err := setUpdateHidden(file.Name(), true); err != nil {
+		_ = file.Close()
+		_ = os.Remove(file.Name())
+		return PeerUploadBeginResult{}, err
+	}
 	id := newOperationID()
 	upload := &peerUpload{file: file, path: file.Name(), started: now, updated: now, options: PutOptions{
 		Kind: request.Kind, Name: request.Name, Source: "authenticated-peer",
@@ -311,6 +316,7 @@ func peerUploadExpired(upload *peerUpload, now time.Time) bool {
 
 func (service *Service) cleanupExpiredPeerUploads(now time.Time) {
 	service.mu.Lock()
+	service.cleanupPeerDownloadsLocked(now)
 	expired := make([]*peerUpload, 0)
 	for transferID, upload := range service.peerUploads {
 		if upload.finishing || !peerUploadExpired(upload, now) {

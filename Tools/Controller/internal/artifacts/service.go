@@ -51,6 +51,7 @@ type Service struct {
 	ctx                    context.Context
 	cancel                 context.CancelFunc
 	mu                     sync.RWMutex
+	hostActivationMu       sync.Mutex
 	operations             map[string]UpdateStatus
 	order                  []string
 	defaults               map[Kind]string
@@ -58,6 +59,8 @@ type Service struct {
 	operationMeta          map[string]operationJournal
 	transaction            chan struct{}
 	peerUploads            map[string]*peerUpload
+	peerDownloads          map[string]*peerDownload
+	peerDownloadPending    int
 	peerUploadWait         sync.WaitGroup
 	peerUploadOps          sync.WaitGroup
 	peerUploadsClosed      bool
@@ -114,6 +117,10 @@ func (service *Service) Close() {
 		_ = upload.file.Close()
 		_ = os.Remove(upload.path)
 		delete(service.peerUploads, id)
+	}
+	for id, download := range service.peerDownloads {
+		_ = download.file.Close()
+		delete(service.peerDownloads, id)
 	}
 	service.mu.Unlock()
 }
@@ -446,6 +453,7 @@ func (service *Service) startUpdate(operationKind string, request UpdateRequest)
 	executionArtifact := cloneDescriptor(artifact)
 	responseArtifact := publicDescriptor(artifact)
 	decorateDescriptor(&responseArtifact)
+	request.OperationID = status.ID
 	go service.runTransaction(status.ID, func(ctx context.Context, progress ProgressFunc) (string, error) {
 		var updateErr error
 		if operationKind != "host" {
@@ -574,15 +582,15 @@ func (service *Service) importCaptured(captured []CapturedFile, components []str
 func (service *Service) Status(id string) (UpdateStatus, error) {
 	id = strings.TrimSpace(id)
 	service.mu.RLock()
-	defer service.mu.RUnlock()
 	if id == "" && len(service.order) != 0 {
 		id = service.order[len(service.order)-1]
 	}
 	status, ok := service.operations[id]
+	service.mu.RUnlock()
 	if !ok {
 		return UpdateStatus{}, os.ErrNotExist
 	}
-	return status, nil
+	return service.reconcileHostActivation(status), nil
 }
 
 // LatestStatus returns a copy of the newest operation, or nil when none exists.
@@ -599,6 +607,9 @@ func (service *Service) LatestStatus() *UpdateStatus {
 func (service *Service) DispatchRPC(ctx context.Context, method string, params json.RawMessage) (any, bool, error) {
 	method = strings.ToLower(strings.TrimSpace(method))
 	switch method {
+	case "controller.artifact.download.begin", "controller.artifact.download.chunk", "controller.artifact.download.close":
+		value, err := service.dispatchPeerDownload(method, params)
+		return value, true, err
 	case "controller.artifact.manifest":
 		value, err := service.Manifest()
 		return value, true, err
@@ -731,6 +742,10 @@ func (service *Service) run(id string, operation func(context.Context, ProgressF
 		service.updateStatus(id, state, percent, detail, "", "")
 	}
 	digest, err := operation(ctx, progress)
+	if errors.Is(err, ErrHostActivationPending) {
+		service.updateStatus(id, "awaiting-restart", -1, "waiting for verified healthy host replacement", "", "")
+		return
+	}
 	if err != nil {
 		service.failOperation(id, err)
 		return

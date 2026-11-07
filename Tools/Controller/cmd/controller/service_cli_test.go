@@ -30,3 +30,13 @@ func TestServiceRuntimeOptionsRejectNonLoopbackListen(t *testing.T) {
 		t.Fatal("non-loopback service endpoint accepted")
 	}
 }
+
+func TestServiceRuntimeOptionsPreservePausedHardwareConnection(t *testing.T) {
+	options, err := parseServiceRuntimeOptions("install", []string{"--no-auto"}, filepath.Join(t.TempDir(), "config.json"), io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !options.NoAuto || !slices.Contains(serviceImageArguments(options), "--no-auto") {
+		t.Fatal("lost no-auto during SCM restart")
+	}
+}
