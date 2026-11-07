@@ -83,11 +83,11 @@ func (p nativePages) submitNativeBoardAutomations(ctx context.Context, action st
 			key    string
 			target *byte
 		}{{"id", &record.ID}, {"event_value", &record.EventValue}, {"event_mask", &record.EventMask}, {"target", &record.ActionTarget}} {
-			n, err := nativeFormInteger(v, item.key, 0, 255)
+			n, err := nativeFormUint8(v, item.key, 0, 255)
 			if err != nil {
 				return desktop.Page{}, err
 			}
-			*item.target = byte(n)
+			*item.target = n
 		}
 		for _, item := range []struct {
 			key    string
@@ -97,7 +97,7 @@ func (p nativePages) submitNativeBoardAutomations(ctx context.Context, action st
 			if len(parts) == 0 {
 				return desktop.Page{}, errors.New("select event and action")
 			}
-			n, err := strconv.Atoi(parts[0])
+			n, err := strconv.ParseUint(parts[0], 10, 8)
 			if err != nil || n < 1 || n > 8 {
 				return desktop.Page{}, errors.New("invalid board event/action")
 			}
@@ -107,11 +107,11 @@ func (p nativePages) submitNativeBoardAutomations(ctx context.Context, action st
 			key    string
 			target *uint16
 		}{{"value", &record.Value}, {"extra", &record.Extra}} {
-			n, err := nativeFormInteger(v, item.key, 0, 65535)
+			n, err := nativeFormUint16(v, item.key, 0, 65535)
 			if err != nil {
 				return desktop.Page{}, err
 			}
-			*item.target = uint16(n)
+			*item.target = n
 		}
 		if v["enabled"] == "true" {
 			record.Flags = native.AutomationEnabled

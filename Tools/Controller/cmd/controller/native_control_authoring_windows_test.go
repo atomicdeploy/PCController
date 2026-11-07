@@ -23,6 +23,37 @@ func nativeTestValues(p desktop.Page) map[string]string {
 	return v
 }
 
+func TestNativeFixedWidthFormsRejectOverflowBeforeConversion(t *testing.T) {
+	for _, raw := range []string{"255", " 255 ", "+255"} {
+		got, err := nativeFormUint8(map[string]string{"n": raw}, "n", 0, 255)
+		if err != nil || got != 255 {
+			t.Fatalf("byte boundary %q: %d %v", raw, got, err)
+		}
+	}
+	for _, raw := range []string{"65535", " 65535 ", "+65535"} {
+		got, err := nativeFormUint16(map[string]string{"n": raw}, "n", 0, 65535)
+		if err != nil || got != 65535 {
+			t.Fatalf("word boundary %q: %d %v", raw, got, err)
+		}
+	}
+	for _, raw := range []string{"256", "65536", "-1", "1.5", "", "18446744073709551616"} {
+		if _, err := nativeFormUint8(map[string]string{"n": raw}, "n", 0, 255); err == nil {
+			t.Fatalf("byte accepted %q", raw)
+		}
+	}
+	for _, raw := range []string{"65536", "-1", "1.5", "", "18446744073709551616"} {
+		if _, err := nativeFormUint16(map[string]string{"n": raw}, "n", 0, 65535); err == nil {
+			t.Fatalf("word accepted %q", raw)
+		}
+	}
+	if _, err := nativeFormUint8(map[string]string{"n": "33"}, "n", 1, 32); err == nil {
+		t.Fatal("RF bit limit lost")
+	}
+	if _, err := nativeFormUint16(map[string]string{"n": "5001"}, "n", 1, 5000); err == nil {
+		t.Fatal("note timing limit lost")
+	}
+}
+
 func TestNativeControlFixtureDocuments(t *testing.T) {
 	directory := os.Getenv("PCCONTROLLER_NATIVE_PAGE_FIXTURES")
 	if directory == "" {

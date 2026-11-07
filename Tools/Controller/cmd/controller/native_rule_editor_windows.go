@@ -229,24 +229,24 @@ func nativeActionDraft(v map[string]string, old appconfig.AutomationAction) (app
 		r.Code = uint32(code)
 		for _, x := range []struct {
 			k   string
-			max int
+			max byte
 			dst *byte
 		}{{"rf_bits", 32, &r.Bits}, {"rf_protocol", 12, &r.Protocol}, {"rf_repeats", 20, &r.Repeats}} {
-			min := 1
+			min := byte(1)
 			if x.k == "rf_repeats" {
 				min = 0
 			}
-			n, err := nativeFormInteger(v, x.k, min, x.max)
+			n, err := nativeFormUint8(v, x.k, min, x.max)
 			if err != nil {
 				return a, err
 			}
-			*x.dst = byte(n)
+			*x.dst = n
 		}
-		n, err := nativeFormInteger(v, "rf_pulse", 0, 65535)
+		n, err := nativeFormUint16(v, "rf_pulse", 0, 65535)
 		if err != nil {
 			return a, err
 		}
-		r.PulseUS = uint16(n)
+		r.PulseUS = n
 		a.RF = &r
 	default:
 		return a, errors.New("select an action type")
@@ -270,23 +270,22 @@ func nativeRuleDraft(v map[string]string, r appconfig.Automation) (appconfig.Aut
 	m.Source = v["match_source"]
 	for _, x := range []struct {
 		k   string
-		max int
+		max byte
 		dst *byte
 	}{{"match_key", 4, &m.Key}, {"match_rf_bits", 32, &m.RFBits}, {"match_rf_protocol", 12, &m.RFProtocol}} {
-		n, e := nativeFormInteger(v, x.k, 0, x.max)
+		n, e := nativeFormUint8(v, x.k, 0, x.max)
 		if e != nil {
 			return r, e
 		}
-		*x.dst = byte(n)
+		*x.dst = n
 	}
 	m.RFID = nil
 	if v["match_rf_id"] != "" {
-		n, e := nativeFormInteger(v, "match_rf_id", 0, 255)
+		n, e := nativeFormUint8(v, "match_rf_id", 0, 255)
 		if e != nil {
 			return r, e
 		}
-		b := byte(n)
-		m.RFID = &b
+		m.RFID = &n
 	}
 	m.RFCode = nil
 	if v["match_rf_code"] != "" {

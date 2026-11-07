@@ -302,39 +302,39 @@ func (p nativePages) saveBoardPreferences(ctx context.Context, values map[string
 	for _, item := range []struct {
 		key      string
 		target   *byte
-		min, max int
+		min, max byte
 	}{
-		{"light_mode", &s.LightMode, 0, 2}, {"on_brightness", &s.OnBrightness, 0, 255}, {"off_brightness", &s.OffBrightness, 0, 255}, {"display_brightness", &s.DisplayBrightness, 0, 7}, {"display_closed", &s.DisplayClosedBrightness, 0, 7}, {"status_brightness", &s.StatusBrightness, 0, 255}, {"output_persistence", &s.OutputPersistence, 0, int(native.OutputPersistenceMask)}, {"relay_restore", &s.RelayRestoreMask, 0, 255}, {"default_page", &s.DefaultPage, 0, 255}, {"motion_hold", &s.MotionExitHoldSeconds, 1, 31},
+		{"light_mode", &s.LightMode, 0, 2}, {"on_brightness", &s.OnBrightness, 0, 255}, {"off_brightness", &s.OffBrightness, 0, 255}, {"display_brightness", &s.DisplayBrightness, 0, 7}, {"display_closed", &s.DisplayClosedBrightness, 0, 7}, {"status_brightness", &s.StatusBrightness, 0, 255}, {"output_persistence", &s.OutputPersistence, 0, native.OutputPersistenceMask}, {"relay_restore", &s.RelayRestoreMask, 0, 255}, {"default_page", &s.DefaultPage, 0, 255}, {"motion_hold", &s.MotionExitHoldSeconds, 1, 31},
 	} {
-		value, err := nativeFormInteger(values, item.key, item.min, item.max)
+		value, err := nativeFormUint8(values, item.key, item.min, item.max)
 		if err != nil {
 			return err
 		}
-		*item.target = byte(value)
+		*item.target = value
 	}
-	period, err := nativeFormInteger(values, "stream_period", 0, 65535)
+	period, err := nativeFormUint16(values, "stream_period", 0, 65535)
 	if err != nil {
 		return err
 	}
-	s.StreamPeriodMS = uint16(period)
+	s.StreamPeriodMS = period
 	for _, item := range []struct {
 		key string
-		max int
+		max byte
 		set func(byte) error
 	}{{"status_color", 4, s.SetStatusColor}, {"voltage_decimals", 3, s.SetVoltageDecimals}, {"current_decimals", 3, s.SetCurrentDecimals}, {"motion_door", 3, s.SetMotionDoorPolicy}} {
-		value, err := nativeFormInteger(values, item.key, 0, item.max)
+		value, err := nativeFormUint8(values, item.key, 0, item.max)
 		if err != nil {
 			return err
 		}
-		if err := item.set(byte(value)); err != nil {
+		if err := item.set(value); err != nil {
 			return err
 		}
 	}
-	deadtime, err := nativeFormInteger(values, "motion_break", 1, 255)
+	deadtime, err := nativeFormUint16(values, "motion_break", 1, 255)
 	if err != nil {
 		return err
 	}
-	if err := s.SetMotionBreakMS(uint16(deadtime)); err != nil {
+	if err := s.SetMotionBreakMS(deadtime); err != nil {
 		return err
 	}
 	s.SetSaveLastPage(values["save_last"] == "true")
@@ -350,4 +350,22 @@ func nativeFormInteger(values map[string]string, key string, minimum, maximum in
 		return 0, fmt.Errorf("%s must be %d–%d", key, minimum, maximum)
 	}
 	return value, nil
+}
+
+// Parse at the destination width before applying the field's tighter limits.
+// Never route fixed-width board values through an architecture-sized int.
+func nativeFormUint8(values map[string]string, key string, minimum, maximum byte) (byte, error) {
+	value, err := strconv.ParseUint(strings.TrimPrefix(strings.TrimSpace(values[key]), "+"), 10, 8)
+	if err != nil || value < uint64(minimum) || value > uint64(maximum) {
+		return 0, fmt.Errorf("%s must be %d–%d", key, minimum, maximum)
+	}
+	return byte(value), nil
+}
+
+func nativeFormUint16(values map[string]string, key string, minimum, maximum uint16) (uint16, error) {
+	value, err := strconv.ParseUint(strings.TrimPrefix(strings.TrimSpace(values[key]), "+"), 10, 16)
+	if err != nil || value < uint64(minimum) || value > uint64(maximum) {
+		return 0, fmt.Errorf("%s must be %d–%d", key, minimum, maximum)
+	}
+	return uint16(value), nil
 }

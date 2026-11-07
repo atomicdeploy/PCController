@@ -121,14 +121,14 @@ func (p nativePages) submitNativeMelodies(ctx context.Context, action string, v 
 		n := appconfig.MelodyNote{}
 		for _, x := range []struct {
 			k        string
-			min, max int
+			min, max uint16
 			dst      *uint16
 		}{{"note_hz", 0, 20000, &n.FrequencyHz}, {"note_ms", 1, 5000, &n.DurationMS}, {"note_gap", 0, 5000, &n.GapMS}} {
-			value, e := nativeFormInteger(v, x.k, x.min, x.max)
+			value, e := nativeFormUint16(v, x.k, x.min, x.max)
 			if e != nil {
 				return desktop.Page{}, e
 			}
-			*x.dst = uint16(value)
+			*x.dst = value
 		}
 		if action == "note-add" {
 			m.Notes = append(m.Notes, n)
