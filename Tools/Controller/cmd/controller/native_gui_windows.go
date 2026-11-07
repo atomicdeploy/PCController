@@ -43,6 +43,7 @@ func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Stor
 			return errors.New("--preview-page requires --preview")
 		}
 		switch *previewPage {
+		case "sequence", "effect-library", "peripherals", "folders", "lcd", "melodies":
 		case "outputs", "preferences", "menu", "motion", "rf", "programs", "buzzer", "strip", "display", "settings", "connection", "firmware", "events", "board", "menus", "terminal", "diagnostics", "host", "updates", "safety", "i2c", "network", "history", "host-tools", "local-device", "firmware-tools", "status-lighting", "integration-settings", "discovery-settings", "udp-settings", "os-policy", "pwm-settings", "data", "board-automations", "rf-bindings", "releases", "profiles", "status-policy", "peers", "hotkeys", "host-automations", "rf-transmit":
 		default:
 			return errors.New("unknown preview page")

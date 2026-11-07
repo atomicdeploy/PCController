@@ -13,8 +13,13 @@ type controllerActivity struct{ key, group, title string }
 
 var controllerActivities = []controllerActivity{
 	{"connection", "Board", "Connection"}, {"board", "Board", "EEPROM settings"}, {"menus", "Board", "Menu editor"},
+	{"peripherals", "Board", "Peripheral presentation"}, {"lcd", "Board", "LCD presentation"},
+	{"folders", "Board", "Channel folders"},
 	{"rf", "Board", "RF reception & assignments"}, {"display", "Board", "Display presentation"}, {"buzzer", "Board", "Buzzer & melodies"}, {"strip", "Board", "LED strip"},
 	{"programs", "Authoring", "Programs & effects"},
+	{"sequence", "Authoring", "Sequence editor"},
+	{"melodies", "Authoring", "Melody library"},
+	{"effect-library", "Authoring", "Effect library files & folders"},
 	{"firmware", "Maintenance", "Firmware & backups"}, {"updates", "Maintenance", "Artifact transfers & updates"}, {"diagnostics", "Maintenance", "Diagnostics"}, {"events", "Maintenance", "Event history"},
 	{"terminal", "Tools", "Command workbench"}, {"host", "Preferences", "Host preferences"}, {"settings", "Preferences", "Application identity"},
 	{"safety", "Board", "Safety & recovery"}, {"status-lighting", "Board", "Status lighting"}, {"i2c", "Tools", "I²C workbench"},
@@ -44,7 +49,7 @@ func (s *Shell) openControllerActivities() {
 	labels := func() []string {
 		values := make([]string, len(visible))
 		for i, item := range visible {
-			values[i] = item.group + "  ·  " + item.title
+			values[i] = s.nativeText(item.group) + "  ·  " + s.nativeText(item.title)
 		}
 		return values
 	}
@@ -65,7 +70,7 @@ func (s *Shell) openControllerActivities() {
 			query := strings.ToLower(strings.TrimSpace(filter.Text()))
 			visible = nil
 			for _, item := range controllerActivities {
-				if strings.Contains(strings.ToLower(item.group+" "+item.title), query) {
+				if strings.Contains(strings.ToLower(item.group+" "+item.title+" "+s.nativeText(item.group)+" "+s.nativeText(item.title)), query) {
 					visible = append(visible, item)
 				}
 			}
@@ -80,6 +85,12 @@ func (s *Shell) openControllerActivities() {
 		s.showError("Activities", err)
 		return
 	}
+	_ = dialog.SetTitle(s.nativeText("Activities") + " — PCController")
+	_ = dialog.SetRightToLeftLayout(s.isRTL())
+	_ = dialog.SetRightToLeftReading(s.isRTL())
+	_ = open.SetText(s.nativeText("Open"))
+	_ = closeButton.SetText(s.nativeText("Close"))
+	_ = filter.SetCueBanner(s.nativeText("Find an activity…"))
 	theme := dialogs.NewThemeSession(dialog)
 	theme.Apply(s.Config().UI.Theme, s.motionEnabled)
 	_ = theme.WatchSystemChanges(nil)

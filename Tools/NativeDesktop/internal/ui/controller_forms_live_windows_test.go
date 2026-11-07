@@ -129,6 +129,13 @@ func controllerFixtureButton(root walk.Container, text string) *walk.PushButton 
 		if button, ok := child.(*walk.PushButton); ok && button.Text() == text {
 			return button
 		}
+		if tabs, ok := child.(*walk.TabWidget); ok {
+			for i := 0; i < tabs.Pages().Len(); i++ {
+				if button := controllerFixtureButton(tabs.Pages().At(i), text); button != nil {
+					return button
+				}
+			}
+		}
 		if container, ok := child.(walk.Container); ok {
 			if button := controllerFixtureButton(container, text); button != nil {
 				return button

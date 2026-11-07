@@ -46,6 +46,13 @@ if (!args.has('--tui-only')) {
   run(process.execPath, ['Tools/Build/go-tests.mjs', '--module', 'Tools/NativeDesktop', '--package', 'internal/ui', '--run', '^TestControllerActivityFormNativeLayout$', '--retest'], root, false, {
     GOFLAGS: '-mod=vendor', PCCONTROLLER_DESKTOP_WINDOW_TESTS: '1', PCCONTROLLER_DESKTOP_CAPTURE_TOOL: capture, PCCONTROLLER_DESKTOP_SCREENSHOTS: staging
   })
+  const fixtures = join(staging, 'control-fixtures')
+  run(process.execPath, ['Tools/Build/go-tests.mjs', '--package', 'cmd/controller', '--run', '^TestNativeControlFixtureDocuments$', '--retest'], root, false, {
+    PCCONTROLLER_NATIVE_PAGE_FIXTURES: fixtures
+  })
+  run(process.execPath, ['Tools/Build/go-tests.mjs', '--module', 'Tools/NativeDesktop', '--package', 'internal/ui', '--run', '^TestController(AutomationTriggerLayout|AutomationActionsLayout|MelodyEditorLayout|PeripheralEditorLayout|LCDPresentationLayout)$', '--retest'], root, false, {
+    GOFLAGS: '-mod=vendor', PCCONTROLLER_DESKTOP_WINDOW_TESTS: '1', PCCONTROLLER_DESKTOP_CAPTURE_TOOL: capture, PCCONTROLLER_DESKTOP_SCREENSHOTS: staging, PCCONTROLLER_NATIVE_PAGE_FIXTURES: fixtures
+  })
 }
 const start = '<!-- controller-preview-gallery:start -->', end = '<!-- controller-preview-gallery:end -->'
 const gallery = `${start}
@@ -73,6 +80,16 @@ These are reproducible **offline previews**, rendered by the actual application 
 
 ![Native RF activity with tabbed editors and fixed actions](docs/assets/screenshots/gui-rf-activity.png)
 
+| Automation triggers | Ordered automation actions |
+| --- | --- |
+| ![Native trigger editor](docs/assets/screenshots/gui-automation-0-en.png) | ![Native action editor](docs/assets/screenshots/gui-automation-1-en.png) |
+
+| Melody notes | Peripheral presentation |
+| --- | --- |
+| ![Native melody editor](docs/assets/screenshots/gui-melody-0-en.png) | ![Native peripheral editor](docs/assets/screenshots/gui-peripheral-0-en.png) |
+
+![Native LCD presentation](docs/assets/screenshots/gui-lcd-0-en.png)
+
 | TUI dashboard | TUI Control page |
 | --- | --- |
 | ![PCController TUI dashboard](docs/assets/screenshots/tui-dashboard.svg) | ![PCController TUI Control page](docs/assets/screenshots/tui-controls.svg) |
@@ -86,7 +103,7 @@ if ((a < 0) !== (b < 0) || (a >= 0 && b < a)) throw new Error('Malformed README 
 if (a !== readme.lastIndexOf(start) || b !== readme.lastIndexOf(end)) throw new Error('Duplicate README gallery markers; refusing to rewrite')
 const files = ['tui-dashboard.svg', 'tui-controls.svg']
 if (!args.has('--tui-only')) {
-  for (const name of ['dashboard', 'channels', 'inline-rename', 'windows-titlebar', 'compact', 'widgets', 'settings', 'rf-activity']) {
+  for (const name of ['dashboard', 'channels', 'inline-rename', 'windows-titlebar', 'compact', 'widgets', 'settings', 'rf-activity', 'automation-0-en', 'automation-1-en', 'melody-0-en', 'peripheral-0-en', 'lcd-0-en']) {
     const file = `gui-${name}.png`
     const png = readFileSync(join(staging, file))
     if (png.length < 100 || png.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a') throw new Error(`Invalid ${file}`)

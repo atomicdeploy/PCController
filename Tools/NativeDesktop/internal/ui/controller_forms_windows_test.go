@@ -48,6 +48,22 @@ func TestControllerFormActionDoesNotValidateUnrelatedTabs(t *testing.T) {
 	}
 }
 
+func TestControllerConditionalFieldsRetainHiddenDrafts(t *testing.T) {
+	fields := []presentation.Field{{Key: "rf_code", Numeric: true, Min: 1, Max: 4294967295, WhenKey: "kind", WhenValues: []string{"rf"}}, {Key: "end", Numeric: true, Min: 0, Max: 4095, OptionalNumeric: true}}
+	v := map[string]string{"kind": "pwm", "rf_code": "invalid", "end": ""}
+	if err := validateControllerFormFields(fields, v); err != nil {
+		t.Fatal("irrelevant hidden draft blocked another type", err)
+	}
+	v["kind"] = "rf"
+	if err := validateControllerFormFields(fields, v); err == nil {
+		t.Fatal("visible invalid RF draft accepted")
+	}
+	v["rf_code"] = "123"
+	if err := validateControllerFormFields(fields, v); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestControllerActivitiesHaveUniqueCompleteIdentities(t *testing.T) {
 	seen := map[string]bool{}
 	for _, activity := range controllerActivities {

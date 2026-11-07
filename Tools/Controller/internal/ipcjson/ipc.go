@@ -831,6 +831,10 @@ func (service *Service) dispatch(
 		result = fullUIPreferencesFor(service.persistentHostConfig().UI)
 	case "controller.ui.preferences.set":
 		result, err = service.updateFullUIPreferences(request.Params)
+	case "controller.effects.library.get":
+		result = effectLibraryFor(service.persistentHostConfig())
+	case "controller.effects.library.set":
+		result, err = service.updateEffectLibrary(request.Params)
 	case "controller.ui.config.open":
 		var params struct {
 			Target string `json:"target"`
@@ -1057,6 +1061,14 @@ func (service *Service) dispatch(
 		// cache intentionally owns no configuration. Read the watched host
 		// configuration so every RPC response reflects the current catalog.
 		result = appconfig.EffectiveMelodies(service.hostConfig())
+	case "controller.melodies.get":
+		result = authoringDocument(service.persistentHostConfig().Melodies)
+	case "controller.melodies.set":
+		result, err = service.updateMelodies(request.Params)
+	case "controller.automations.get":
+		result = authoringDocument(service.persistentHostConfig().Automations)
+	case "controller.automations.set":
+		result, err = service.updateAutomations(request.Params)
 	case "controller.program_state.get", "controller.program-state.get":
 		result = service.Client.ProgramState()
 	case "controller.program_state.set", "controller.program-state.set":
@@ -2507,7 +2519,7 @@ func bridgeIngressCanPivot(method string, params json.RawMessage) bool {
 		return true
 	case "controller.bridge.call", "controller.peer.update.host", "controller.discovery.connect":
 		return true
-	case "controller.network.peers.set", "controller.integrations.local.set", "controller.hotkeys.set",
+	case "controller.network.peers.set", "controller.integrations.local.set", "controller.hotkeys.set", "controller.automations.set",
 		"controller.host_menu.configure", "controller.host_menu.config.set", "controller.host_menu.directory.replace", "controller.host_menu.content.push":
 		return true
 	case "controller.command.execute":
@@ -2789,13 +2801,13 @@ func requestCapability(method string, params json.RawMessage) string {
 		return capabilityIntegrations
 	case "controller.pwm.channel.configure":
 		return capabilityHostConfig
-	case "controller.ui.preferences.set":
+	case "controller.ui.preferences.set", "controller.effects.library.set", "controller.automations.set", "controller.melodies.set":
 		return capabilityHostConfig
 	case "controller.status_led.policy.set":
 		return capabilityHostConfig
 	case "controller.status_led.policy.get":
 		return capabilityRead
-	case "controller.ui.preferences.get":
+	case "controller.ui.preferences.get", "controller.effects.library.get", "controller.automations.get", "controller.melodies.get":
 		return capabilityRead
 	case "controller.program_state.set", "controller.program-state.set":
 		return capabilityBoard

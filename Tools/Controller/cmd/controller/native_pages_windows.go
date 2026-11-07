@@ -86,6 +86,9 @@ func (b *nativeEventBuffer) append(event control.Event) {
 		b.versions["firmware"]++
 		b.versions["updates"]++
 	}
+	if (event.Kind == "output" || event.Kind == "error") && strings.HasPrefix(event.Text, "melody ") || event.Kind == "melodies.changed" || event.Kind == "connect" || event.Kind == "disconnect" {
+		b.versions["buzzer"]++
+	}
 }
 
 func (b *nativeEventBuffer) version(key string) uint64 {
@@ -261,6 +264,14 @@ func (p nativePages) load(ctx context.Context, key string) (desktop.Page, error)
 		return p.loadEffectsPage(state), nil
 	case "buzzer":
 		page.Title = "Buzzer & melodies"
+		var routing struct {
+			Runtime appconfig.BuzzerRuntimeStatus `json:"buzzer_runtime"`
+		}
+		if !p.preview {
+			if err := p.call(ctx, "controller.integrations.local.get", map[string]any{}, &routing); err != nil {
+				return page, err
+			}
+		}
 		var melodies []appconfig.Melody
 		if !p.preview {
 			if err := p.call(ctx, "controller.melodies.list", map[string]any{}, &melodies); err != nil {
@@ -278,9 +289,29 @@ func (p nativePages) load(ctx context.Context, key string) (desktop.Page, error)
 			page.Actions = append(page.Actions, pageAction("melody", "Play melody", enabled))
 		}
 		busy, known := native.BuzzerBusy(state.Hello, state.Status)
-		if known && busy {
+		hostBusy := false
+		if !p.preview {
+			status, err := p.command(ctx, "melody status")
+			if err != nil {
+				return page, err
+			}
+			hostBusy = strings.HasPrefix(status, "melody playing ")
+			if !hostBusy && status != "melody idle" {
+				return page, errors.New("unrecognized melody playback state")
+			}
+		}
+		if known && busy || hostBusy {
 			page.Actions = append(page.Actions, pageAction("stop", "Stop buzzer", state.Connected))
 		}
+		path := routing.Runtime.RequestedPath
+		if path == "" {
+			path = routing.Runtime.EffectivePath
+		}
+		if path == "" {
+			path = "board"
+		}
+		page.Fields = append(page.Fields, choice("buzzer_path", "Playback destination", path, "board", "host", "both", "none"))
+		page.Actions = append(page.Actions, desktop.PageAction{ID: "routing", Label: "Apply playback destination", Enabled: enabled, Confirm: true})
 	case "strip":
 		page.Title = "LED strip"
 		enabled = enabled && state.Hello.Capabilities&native.CapabilityAddressableLED != 0
@@ -321,6 +352,24 @@ func (p nativePages) load(ctx context.Context, key string) (desktop.Page, error)
 		page.Title = "Front-panel display"
 		page.Fields = []desktop.Field{choice("target", "Display", "segments", "segments", "lcd", "both"), field("text", "Text", ""), nativeNumber("duration_ms", "Visible duration (ms)", 5000, 80, 65535), nativeNumber("speed_ms", "Marquee step (ms)", 220, 80, 5000), choice("repeat", "Repeat", "once", "once", "loop", "interval"), nativeNumber("interval_ms", "Repeat interval (ms)", 30000, 1000, 255000), nativeBool("scroll", "Force marquee", false)}
 		page.Actions = []desktop.PageAction{pageAction("show", "Show text", enabled), pageAction("clear", "Clear display", enabled)}
+		targets := []string{}
+		if p.preview || state.Hello.Capabilities&native.CapabilitySegments != 0 {
+			targets = append(targets, "segments")
+		}
+		if p.preview || state.Hello.Capabilities&native.CapabilityLCD != 0 {
+			targets = append(targets, "lcd")
+		}
+		if len(targets) == 2 {
+			targets = append(targets, "both")
+		}
+		if len(targets) > 0 {
+			page.Fields[0].Choices = targets
+			page.Fields[0].Value = targets[0]
+		} else {
+			for i := range page.Actions {
+				page.Actions[i].Enabled = false
+			}
+		}
 	default:
 		return p.loadWorkspacePage(ctx, key, state)
 	}
@@ -345,6 +394,9 @@ func styleNativeFields(key string, page *desktop.Page) {
 			}
 		case "buzzer":
 			f.Section = "Tone test"
+			if f.Key == "buzzer_path" {
+				f.Section = "Audio routing"
+			}
 			if f.Key == "melody" || f.Key == "repeats" || f.Key == "loop" {
 				f.Section = "Melody playback"
 			}
@@ -388,6 +440,8 @@ func styleNativeFields(key string, page *desktop.Page) {
 			}
 		case "buzzer":
 			switch a.ID {
+			case "routing":
+				a.Section = "Audio routing"
 			case "tone":
 				a.Section = "Tone test"
 			case "melody":
@@ -555,6 +609,12 @@ func (p nativePages) submit(ctx context.Context, key, action string, values map[
 		return p.submitEffectsPage(ctx, action, values)
 	case "buzzer":
 		switch action {
+		case "routing":
+			path := values["buzzer_path"]
+			if path != "board" && path != "host" && path != "both" && path != "none" {
+				return desktop.Page{}, errors.New("select a playback destination")
+			}
+			err = execute(shell.Join([]string{"buzzer", "path", path}))
 		case "tone":
 			var hz, ms int
 			hz, err = number("frequency", 20, 20000)

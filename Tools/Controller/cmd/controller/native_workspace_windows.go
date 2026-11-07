@@ -154,11 +154,25 @@ func (p nativePages) loadWorkspacePage(ctx context.Context, key string, state co
 	case "board-automations":
 		return p.loadNativeBoardAutomations(ctx, state)
 	case "rf-bindings":
-		return p.loadNativeRFBindings(ctx)
+		return p.loadNativeRules(ctx, true)
+	case "host-automations":
+		return p.loadNativeRules(ctx, false)
+	case "melodies":
+		return p.loadNativeMelodies(ctx)
+	case "lcd":
+		return p.loadNativeLCD(ctx, state)
+	case "peripherals":
+		return p.loadNativePeripherals(ctx)
+	case "folders":
+		return p.loadNativeFolders(ctx)
 	case "releases":
 		return p.loadNativeReleases(), nil
 	case "profiles":
 		return p.loadNativeProfiles(ctx)
+	case "sequence":
+		return p.loadNativeSequence(ctx)
+	case "effect-library":
+		return p.loadNativeEffectLibrary(ctx)
 	case "peers":
 		return p.loadNativePeers(ctx)
 	case "hotkeys":
@@ -227,11 +241,25 @@ func (p nativePages) submitWorkspacePage(ctx context.Context, key, action string
 	case "board-automations":
 		return p.submitNativeBoardAutomations(ctx, action, values)
 	case "rf-bindings":
-		return p.submitNativeRFBindings(ctx, action, values)
+		return p.submitNativeRules(ctx, action, values, true)
+	case "host-automations":
+		return p.submitNativeRules(ctx, action, values, false)
+	case "melodies":
+		return p.submitNativeMelodies(ctx, action, values)
+	case "lcd":
+		return p.submitNativeLCD(ctx, action, values)
+	case "peripherals":
+		return p.submitNativePeripherals(ctx, action, values)
+	case "folders":
+		return p.submitNativeFolders(ctx, action, values)
 	case "releases":
 		return p.submitNativeReleases(ctx, action, values)
 	case "profiles":
 		return p.submitNativeProfiles(ctx, action, values)
+	case "sequence":
+		return p.submitNativeSequence(ctx, action, values)
+	case "effect-library":
+		return p.submitNativeEffectLibrary(ctx, action, values)
 	case "peers":
 		return p.submitNativePeers(ctx, action, values)
 	case "hotkeys":

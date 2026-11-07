@@ -18,3 +18,4 @@ type Seat = presentation.Seat
 type Preferences = presentation.Preferences
 type MotionHoldLease = presentation.MotionHoldLease
 type ControlOwner = presentation.ControlOwner
+type TimelineCue = presentation.TimelineCue

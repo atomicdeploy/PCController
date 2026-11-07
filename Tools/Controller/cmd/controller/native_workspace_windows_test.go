@@ -48,7 +48,7 @@ func TestNativeHostPreferencesRoundTripRetainsUnrelatedMaps(t *testing.T) {
 
 func TestNativeWorkspaceBoardAndMenuPreviewNeverMutates(t *testing.T) {
 	p := nativePages{preview: true}
-	for _, key := range []string{"board", "menus", "terminal", "diagnostics", "host", "updates", "safety", "i2c", "network", "history", "host-tools", "local-device", "firmware-tools", "status-lighting", "integration-settings", "discovery-settings", "udp-settings", "os-policy", "pwm-settings", "data", "board-automations", "rf-bindings", "releases", "profiles", "status-policy", "peers", "hotkeys", "host-automations", "rf-transmit"} {
+	for _, key := range []string{"board", "menus", "terminal", "diagnostics", "host", "updates", "safety", "i2c", "network", "history", "host-tools", "local-device", "firmware-tools", "status-lighting", "integration-settings", "discovery-settings", "udp-settings", "os-policy", "pwm-settings", "data", "board-automations", "rf-bindings", "releases", "profiles", "status-policy", "peers", "hotkeys", "host-automations", "rf-transmit", "lcd", "peripherals", "melodies"} {
 		page, err := p.loadWorkspacePage(context.Background(), key, control.Snapshot{})
 		if err != nil || page.Title == "" {
 			t.Fatalf("%s: %v", key, err)

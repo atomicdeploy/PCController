@@ -107,7 +107,7 @@ const capabilityGroups = {
     "controller.udp.config.set", "controller.udp.subscribe", "controller.udp.unsubscribe",
 		"controller.mirror.configure",
     "controller.host_menu.configure", "controller.host_menu.config.set", "controller.ui.config.set", "controller.ui.config.open",
-		"controller.ui.preferences.set", "controller.status_led.policy.set",
+		"controller.ui.preferences.set", "controller.status_led.policy.set", "controller.effects.library.set", "controller.automations.set", "controller.melodies.set",
     "controller.peripherals.set", "controller.board_profile.update", "controller.peripheral.presentation.update",
     "controller.peripheral.folder.update", "controller.channel_routing.update",
     "controller.hotkeys.set", "controller.os.configure",
@@ -138,7 +138,7 @@ const capabilityGroups = {
     "controller.discovery.manifest", "controller.discovery.local_manifest", "controller.discovery.check",
     "controller.discovery.status", "controller.host_menu.config", "controller.host_menu.config.get",
     "controller.ui.config", "controller.ui.config.get", "controller.peripherals", "controller.peripherals.get",
-		"controller.ui.preferences.get", "controller.status_led.policy.get",
+		"controller.ui.preferences.get", "controller.status_led.policy.get", "controller.effects.library.get", "controller.automations.get", "controller.melodies.get",
     "controller.board_profile.get", "controller.channel_routing.get",
     "controller.os.policy", "controller.os.facts.catalog", "controller.host.facts.catalog",
     "controller.hotkeys.get", "controller.bridge.list", "controller.webhooks.status",
@@ -179,6 +179,12 @@ const capabilityGroups = {
 };
 
 const methodOverrides = {
+	"controller.effects.library.get": "Return the portable effect library and its canonical ETag.",
+	"controller.effects.library.set": "Import or replace an effect library using mandatory if_match, canonical validation and serialized compare-and-swap; does not execute effects.",
+	"controller.automations.get": "Return configured host event/RF rules and their canonical ETag.",
+	"controller.automations.set": "Replace configured host event/RF rules with mandatory if_match, policy and RF collision validation; does not explicitly run a rule or enable OS permissions.",
+	"controller.melodies.get": "Return stored melody overrides and their canonical ETag; melodies.list includes built-in fallback melodies.",
+	"controller.melodies.set": "Replace stored melody overrides with mandatory if_match and full note validation; does not play audio.",
 	"controller.ui.preferences.get": "Return full typed host UI preferences and their ETag; no credentials or transport configuration.",
 	"controller.ui.preferences.set": "Replace only UI preferences with mandatory if_match ETag, serialized compare-and-swap, validation and no-op suppression.",
 	"controller.status_led.policy.get": "Return the host-owned reactive status-lighting policy.",

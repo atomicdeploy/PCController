@@ -840,6 +840,8 @@
             "controller.artifact.upload.finish",
             "controller.audio.cues",
             "controller.audio.play",
+            "controller.automations.get",
+            "controller.automations.set",
             "controller.board_automation.clear",
             "controller.board_automation.list",
             "controller.board_automation.put",
@@ -873,6 +875,8 @@
             "controller.discovery.stage",
             "controller.discovery.status",
             "controller.display.send",
+            "controller.effects.library.get",
+            "controller.effects.library.set",
             "controller.estop.get",
             "controller.estop.set",
             "controller.event.latest",
@@ -910,7 +914,9 @@
             "controller.media.playback.update",
             "controller.media.timeline.get",
             "controller.media.timeline.prepare",
+            "controller.melodies.get",
             "controller.melodies.list",
+            "controller.melodies.set",
             "controller.menu.current",
             "controller.menu.jump",
             "controller.menu.layout.get",
@@ -1425,6 +1431,16 @@
       "summary": "Play one validated sound-effect intent on the receiving host while honoring its mute and volume policy.",
       "idempotency": "non-idempotent"
     },
+    "controller.automations.get": {
+      "capability": "read",
+      "summary": "Return configured host event/RF rules and their canonical ETag.",
+      "idempotency": "safe"
+    },
+    "controller.automations.set": {
+      "capability": "host_configuration",
+      "summary": "Replace configured host event/RF rules with mandatory if_match, policy and RF collision validation; does not explicitly run a rule or enable OS permissions.",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
     "controller.board_automation.clear": {
       "capability": "board_commands",
       "summary": "Clear the board automation table and verify the empty snapshot.",
@@ -1607,6 +1623,16 @@
       "capability": "board_commands",
       "summary": "display send",
       "idempotency": "non-idempotent"
+    },
+    "controller.effects.library.get": {
+      "capability": "read",
+      "summary": "Return the portable effect library and its canonical ETag.",
+      "idempotency": "safe"
+    },
+    "controller.effects.library.set": {
+      "capability": "host_configuration",
+      "summary": "Import or replace an effect library using mandatory if_match, canonical validation and serialized compare-and-swap; does not execute effects.",
+      "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.estop.get": {
       "capability": "read",
@@ -1793,10 +1819,20 @@
       "summary": "Validate and arm a revisioned host-executed hardware timeline for a registered paused consumer.",
       "idempotency": "idempotent-with-authoritative-readback"
     },
+    "controller.melodies.get": {
+      "capability": "read",
+      "summary": "Return stored melody overrides and their canonical ETag; melodies.list includes built-in fallback melodies.",
+      "idempotency": "safe"
+    },
     "controller.melodies.list": {
       "capability": "read",
       "summary": "Return the effective configured host melody catalog.",
       "idempotency": "safe"
+    },
+    "controller.melodies.set": {
+      "capability": "host_configuration",
+      "summary": "Replace stored melody overrides with mandatory if_match and full note validation; does not play audio.",
+      "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.menu.current": {
       "capability": "read",

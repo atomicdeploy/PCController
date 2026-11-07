@@ -7,6 +7,12 @@ policy. They do not create a second board owner or an unrestricted transport.
 | --- | --- | --- |
 | `controller.ui.preferences.get` | `{}` → `{settings: UI, etag: string}` | Read |
 | `controller.ui.preferences.set` | `{settings: UI, if_match: etag}` → same result | Host configuration |
+| `controller.automations.get` | `{}` → `{items: Automation[], etag}` | Read |
+| `controller.automations.set` | `{items: Automation[], if_match: etag}` → same result | Host configuration; bridge pivot forbidden |
+| `controller.melodies.get` | `{}` → `{items: Melody[], etag}` (stored overrides) | Read |
+| `controller.melodies.set` | `{items: Melody[], if_match: etag}` → same result | Host configuration |
+| `controller.effects.library.get` | `{}` → `{library: {effects, groups}, etag}` | Read |
+| `controller.effects.library.set` | `{library, mode: merge/replace, if_match: etag}` → same result | Host configuration |
 | `controller.status_led.policy.get` | `{}` → `StatusLEDPolicy` | Read |
 | `controller.status_led.policy.set` | Policy fields plus mandatory `if_match` | Host configuration |
 | `controller.motion.hold.start` | `{id, side, generation, direction, expires_at}` → lease | Board commands |
@@ -17,6 +23,16 @@ UI preferences replace only the typed `appconfig.UI` object, validate the full
 candidate, suppress no-ops and recheck the ETag inside the store writer callback.
 They do not include credentials, scripts or transport configuration. Successful
 saves emit `ui.preferences.changed`.
+
+The authoring collections also use strict bounded requests, full configuration
+validation, no-op suppression and a second revision check inside the serialized
+store writer. Automation writes do not implicitly enable virtual keys or power
+permissions; new/changed RF bindings require a complete waveform identity and an
+advertised control action. Enabled duplicate RF gestures are rejected. Unchanged
+disabled assignments outside the current profile are preserved. These endpoints
+do not explicitly run rules, play audio, learn RF or flash a board. Existing
+configured event automations remain active according to their saved enabled state.
+Removing a melody override does not remove built-in recovery fallbacks.
 
 Status-policy revisions are SHA-256 of canonical JSON (object keys sorted,
 values unchanged). The revision is computed from the policy itself, without

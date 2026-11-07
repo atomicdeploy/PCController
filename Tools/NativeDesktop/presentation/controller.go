@@ -68,6 +68,10 @@ type Field struct {
 	Decimals          int
 	FileFilter        string
 	SaveFile          bool
+	IconPicker        bool
+	OptionalNumeric   bool
+	WhenKey           string
+	WhenValues        []string
 }
 type PageAction struct {
 	ID, Label         string
@@ -75,6 +79,9 @@ type PageAction struct {
 	TimeoutSeconds    int
 	Enabled, Confirm  bool
 	SelectionRequired bool
+	DiscardChanges    bool
+	RequiresChanges   bool
+	SelectionOffset   int // Non-zero requires an adjacent selected row (reorder).
 }
 type Page struct {
 	Title   string
@@ -91,6 +98,14 @@ type Page struct {
 	Owner          string
 	Receipts       map[string]RFReceipt
 	ClearSelection bool
+	SelectedRow    string
+	Timeline       []TimelineCue
+}
+
+type TimelineCue struct {
+	Key, Label, Lane string
+	AtUS             uint32
+	DurationMS       uint16
 }
 
 type RFReceipt struct {
