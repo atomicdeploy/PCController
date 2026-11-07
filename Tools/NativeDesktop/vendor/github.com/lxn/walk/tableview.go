@@ -109,6 +109,7 @@ type TableView struct {
 	alternatingRowBGColor              Color
 	alternatingRowTextColor            Color
 	alternatingRowBG                   bool
+	presentationColors                 *TableViewColors
 	delayedCurrentIndexChangedCanceled bool
 	sortedColumnIndex                  int
 	sortOrder                          SortOrder
@@ -414,6 +415,23 @@ func (tv *TableView) ApplyDPI(dpi int) {
 	}
 }
 
+// TableViewColors supplies an app palette without replacing native selection,
+// keyboard, accessibility or owner-data behavior. Nil restores system colors.
+type TableViewColors struct {
+	Background, Text, SelectedBackground, SelectedText Color
+}
+
+func (tv *TableView) SetPresentationColors(colors *TableViewColors) {
+	if colors == nil {
+		tv.presentationColors = nil
+	} else {
+		copy := *colors
+		tv.presentationColors = &copy
+	}
+	tv.ApplySysColors()
+	tv.Invalidate()
+}
+
 func (tv *TableView) ApplySysColors() {
 	tv.WidgetBase.ApplySysColors()
 
@@ -468,6 +486,12 @@ func (tv *TableView) ApplySysColors() {
 		})
 	}
 
+	if colors := tv.presentationColors; colors != nil {
+		tv.themeNormalBGColor, tv.themeNormalTextColor = colors.Background, colors.Text
+		tv.themeSelectedBGColor, tv.themeSelectedTextColor = colors.SelectedBackground, colors.SelectedText
+		tv.themeSelectedNotFocusedBGColor = colors.SelectedBackground
+		tv.alternatingRowBGColor, tv.alternatingRowTextColor = colors.Background, colors.Text
+	}
 	win.SendMessage(tv.hwndNormalLV, win.LVM_SETBKCOLOR, 0, uintptr(tv.themeNormalBGColor))
 	win.SendMessage(tv.hwndFrozenLV, win.LVM_SETBKCOLOR, 0, uintptr(tv.themeNormalBGColor))
 }
@@ -2501,7 +2525,7 @@ func tableViewHdrWndProc(hwnd win.HWND, msg uint32, wp, lp uintptr) uintptr {
 	case win.WM_NOTIFY:
 		switch ((*win.NMHDR)(unsafe.Pointer(lp))).Code {
 		case win.NM_CUSTOMDRAW:
-			if tv.customHeaderHeight == 0 {
+			if tv.customHeaderHeight == 0 && tv.presentationColors == nil {
 				break
 			}
 
@@ -2512,6 +2536,42 @@ func tableViewHdrWndProc(hwnd win.HWND, msg uint32, wp, lp uintptr) uintptr {
 				return win.CDRF_NOTIFYITEMDRAW
 
 			case win.CDDS_ITEMPREPAINT:
+				if colors := tv.presentationColors; colors != nil {
+					col := tv.fromLVColIdx(hwnd == tv.hwndFrozenHdr, int32(nmcd.DwItemSpec))
+					if col >= 0 && col < tv.columns.Len() {
+						canvas, err := newCanvasFromHDC(nmcd.Hdc)
+						if err == nil {
+							defer canvas.Dispose()
+							canvas.dpi = tv.DPI()
+							bounds := rectangleFromRECT(nmcd.Rc)
+							brush, err := NewSolidColorBrush(colors.SelectedBackground)
+							if err == nil {
+								canvas.FillRectanglePixels(brush, bounds)
+								brush.Dispose()
+							}
+							text := tv.columns.At(col).TitleEffective()
+							if sorter, ok := tv.model.(Sorter); ok && sorter.ColumnSortable(col) && tv.sortedColumnIndex == col {
+								if tv.sortOrder == SortAscending {
+									text += " ↑"
+								} else {
+									text += " ↓"
+								}
+							}
+							format := TextVCenter | TextSingleLine | TextEndEllipsis | TextNoPrefix
+							switch tv.columns.At(col).Alignment() {
+							case AlignCenter:
+								format |= TextCenter
+							case AlignFar:
+								format |= TextRight
+							}
+							inset := IntFrom96DPI(6, tv.DPI())
+							bounds.X += inset
+							bounds.Width -= 2 * inset
+							canvas.DrawTextPixels(text, tv.Font(), colors.Text, bounds, format)
+							return win.CDRF_SKIPDEFAULT
+						}
+					}
+				}
 				return win.CDRF_NOTIFYPOSTPAINT
 
 			case win.CDDS_ITEMPOSTPAINT:

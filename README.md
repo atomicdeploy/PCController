@@ -96,6 +96,20 @@ These are reproducible **offline previews**, rendered by the actual application 
 
 ![PCController desktop preferences](docs/assets/screenshots/gui-settings.png)
 
+### Native activities
+
+![Native RF activity with tabbed editors and fixed actions](docs/assets/screenshots/gui-rf-activity.png)
+
+| Automation triggers | Ordered automation actions |
+| --- | --- |
+| ![Native trigger editor](docs/assets/screenshots/gui-automation-0-en.png) | ![Native action editor](docs/assets/screenshots/gui-automation-1-en.png) |
+
+| Melody notes | Peripheral presentation |
+| --- | --- |
+| ![Native melody editor](docs/assets/screenshots/gui-melody-0-en.png) | ![Native peripheral editor](docs/assets/screenshots/gui-peripheral-0-en.png) |
+
+![Native LCD presentation](docs/assets/screenshots/gui-lcd-0-en.png)
+
 | TUI dashboard | TUI Control page |
 | --- | --- |
 | ![PCController TUI dashboard](docs/assets/screenshots/tui-dashboard.svg) | ![PCController TUI Control page](docs/assets/screenshots/tui-controls.svg) |

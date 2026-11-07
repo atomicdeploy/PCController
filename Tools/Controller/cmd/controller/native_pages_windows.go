@@ -12,6 +12,7 @@ import (
 	"pccontroller.local/controller/internal/artifacts"
 	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/native"
+	controllerports "pccontroller.local/controller/internal/ports"
 	"pccontroller.local/controller/internal/shell"
 	"pccontroller.local/desktop/desktop"
 	"strconv"
@@ -23,13 +24,44 @@ type nativePages struct {
 	client  *remoteTUIIPC
 	preview bool
 	events  *nativeEventBuffer
+	rpc     func(context.Context, string, any, any) error
+	rest    func(context.Context, string, string, []byte) ([]byte, error)
+	rfCache *nativeRFCache
+}
+
+func (p nativePages) call(ctx context.Context, method string, params, result any) error {
+	if p.rpc != nil {
+		return p.rpc(ctx, method, params, result)
+	}
+	if p.client == nil {
+		return errors.New("controller connection unavailable")
+	}
+	if method == "controller.snapshot" {
+		if target, ok := result.(*control.Snapshot); ok {
+			state, err := p.client.Snapshot(ctx)
+			if err == nil {
+				*target = state
+			}
+			return err
+		}
+	}
+	return p.client.call(ctx, method, params, result)
+}
+
+func (p nativePages) command(ctx context.Context, command string) (string, error) {
+	var result struct {
+		Output string `json:"output"`
+	}
+	err := p.call(ctx, "controller.command.execute", map[string]string{"command": command}, &result)
+	return result.Output, err
 }
 
 // The desktop consumes the existing owner event stream; opening a page never
 // starts another serial reader or unbounded history allocation.
 type nativeEventBuffer struct {
-	mu   sync.Mutex
-	rows [][]string
+	mu       sync.Mutex
+	rows     [][]string
+	versions map[string]uint64
 }
 
 func (b *nativeEventBuffer) append(event control.Event) {
@@ -40,6 +72,32 @@ func (b *nativeEventBuffer) append(event control.Event) {
 		b.rows = b.rows[:199]
 	}
 	b.rows = append(b.rows, []string{strconv.FormatUint(event.ID, 10), event.Time.Local().Format("15:04:05.000"), event.Kind, event.Text})
+	if b.versions == nil {
+		b.versions = map[string]uint64{}
+	}
+	b.versions["events"]++
+	if strings.HasPrefix(event.Kind, "rf.") {
+		b.versions["rf"]++
+		if event.Kind != "rf.receive" {
+			b.versions["rf-table"]++
+		}
+	}
+	if strings.HasPrefix(event.Kind, "update.") || strings.HasPrefix(event.Kind, "artifact.") {
+		b.versions["firmware"]++
+		b.versions["updates"]++
+	}
+	if (event.Kind == "output" || event.Kind == "error") && strings.HasPrefix(event.Text, "melody ") || event.Kind == "melodies.changed" || event.Kind == "connect" || event.Kind == "disconnect" {
+		b.versions["buzzer"]++
+	}
+}
+
+func (b *nativeEventBuffer) version(key string) uint64 {
+	if b == nil {
+		return 0
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.versions[key]
 }
 func (b *nativeEventBuffer) snapshot() [][]string {
 	if b == nil {
@@ -63,7 +121,7 @@ func (p nativePages) load(ctx context.Context, key string) (desktop.Page, error)
 	state := control.Snapshot{}
 	if !p.preview {
 		var err error
-		state, err = p.client.Snapshot(ctx)
+		err = p.call(ctx, "controller.snapshot", map[string]any{}, &state)
 		if err != nil {
 			return desktop.Page{}, err
 		}
@@ -91,7 +149,8 @@ func (p nativePages) load(ctx context.Context, key string) (desktop.Page, error)
 		} else {
 			ports := []string{"Automatic"}
 			if !p.preview {
-				available, err := p.client.Ports(ctx)
+				var available []controllerports.Info
+				err := p.call(ctx, "controller.ports", map[string]any{}, &available)
 				if err != nil {
 					return page, err
 				}
@@ -108,10 +167,10 @@ func (p nativePages) load(ctx context.Context, key string) (desktop.Page, error)
 		var manifest artifacts.Manifest
 		var inventory artifacts.List
 		if !p.preview {
-			if err := p.client.call(ctx, "controller.artifact.manifest", map[string]any{}, &manifest); err != nil {
+			if err := p.call(ctx, "controller.artifact.manifest", map[string]any{}, &manifest); err != nil {
 				return page, err
 			}
-			if err := p.client.call(ctx, "controller.artifact.list", map[string]any{}, &inventory); err != nil {
+			if err := p.call(ctx, "controller.artifact.list", map[string]any{}, &inventory); err != nil {
 				return page, err
 			}
 		}
@@ -149,7 +208,7 @@ func (p nativePages) load(ctx context.Context, key string) (desktop.Page, error)
 		cfg.AppTitle = "PCController"
 		cfg.IntroMode = "auto"
 		if !p.preview {
-			if err := p.client.call(ctx, "controller.ui.config", map[string]any{}, &cfg); err != nil {
+			if err := p.call(ctx, "controller.ui.config", map[string]any{}, &cfg); err != nil {
 				return page, err
 			}
 		}
@@ -160,33 +219,18 @@ func (p nativePages) load(ctx context.Context, key string) (desktop.Page, error)
 		}
 	case "rf":
 		page.Title = "RF reception & learning"
-		page.Columns = []string{"ID", "Name / code", "Bits / protocol", "Assignment"}
-		var catalog struct {
-			Entries []struct {
-				controllerapi.RFEntryView
-				BoardAssignment struct {
-					Label string `json:"label"`
-				} `json:"board_assignment"`
-			} `json:"entries"`
-			Preferences appconfig.RFLearningPreferences `json:"preferences"`
-			Learning    control.RFLearnState            `json:"learning"`
-			Peripherals struct {
-				Controls []appconfig.ControlDescriptor `json:"controls"`
-			} `json:"peripherals"`
-			BoardError string `json:"board_error"`
+		page.Columns = []string{"ID", "Name / code", "Bits / protocol", "Assignment", "Receiving", "Since opened"}
+		catalog, err := p.loadNativeRFCatalog(ctx, state)
+		if err != nil {
+			return page, err
 		}
-		catalog.Preferences.TimeoutSeconds = 60
-		if !p.preview {
-			if err := p.client.call(ctx, "controller.rf.catalog", map[string]bool{"read_board": true}, &catalog); err != nil {
-				return page, err
-			}
-		}
+		p.nativeRFReceiptRows(&page, catalog, state)
 		for _, entry := range catalog.Entries {
 			name := entry.Name
 			if name == "" {
 				name = entry.CodeDisplay
 			}
-			page.Rows = append(page.Rows, []string{strconv.Itoa(int(entry.ID)), name, fmt.Sprintf("%d / %d", entry.Bits, entry.Protocol), entry.BoardAssignment.Label})
+			page.Rows = append(page.Rows, []string{strconv.Itoa(int(entry.ID)), name, fmt.Sprintf("%d / %d", entry.Bits, entry.Protocol), entry.BoardAssignment.Label, "○", "0"})
 		}
 		page.Fields = []desktop.Field{
 			choice("timed", "Timed learning", strconv.FormatBool(catalog.Preferences.Timed), "false", "true"),
@@ -194,7 +238,9 @@ func (p nativePages) load(ctx context.Context, key string) (desktop.Page, error)
 			choice("continuous", "Continue after learning", strconv.FormatBool(catalog.Preferences.Continuous), "false", "true"),
 		}
 		page.Actions = []desktop.PageAction{pageAction("save", "Save preferences", !p.preview)}
-		if len(catalog.Entries) > 0 {
+		page.Fields = append(page.Fields, choice("board_action", "Board action", "none", "none", "key", "menu", "relay", "side", "pwm"), field("board_target", "Board target", ""), choice("board_behavior", "Board behavior", "press", "press", "toggle", "momentary", "up", "down", "stop"))
+		page.Actions = append(page.Actions, nativeSelectionAction("add-observed", "Save observed code", enabled), nativeSelectionAction("map-board", "Map on board", enabled), desktop.PageAction{ID: "remove", Label: "Remove learned code", Enabled: enabled, SelectionRequired: true, Confirm: true}, pageAction("refresh-codes", "Read board codes", enabled))
+		if !p.preview {
 			actions := []string{}
 			for _, channel := range catalog.Peripherals.Controls {
 				if channel.Hidden || channel.Locked {
@@ -206,7 +252,7 @@ func (p nativePages) load(ctx context.Context, key string) (desktop.Page, error)
 			}
 			if len(actions) > 0 {
 				page.Fields = append(page.Fields, field("binding_name", "New assignment name", ""), choice("gesture", "Gesture", "tap", "tap", "hold", "repeat", "hold-end"), choice("control_action", "Channel action", actions[0], actions...))
-				page.Actions = append(page.Actions, pageAction("assign", "Assign selected", enabled))
+				page.Actions = append(page.Actions, nativeSelectionAction("assign", "Assign selected", enabled))
 			}
 		}
 		if catalog.Learning.Active {
@@ -215,22 +261,20 @@ func (p nativePages) load(ctx context.Context, key string) (desktop.Page, error)
 			page.Actions = append(page.Actions, pageAction("learn", "Start learning", enabled && state.Hello.Capabilities&native.CapabilityRF != 0))
 		}
 	case "programs":
-		page.Title = "Programs & effects"
-		page.Columns = []string{"Reference", "Name", "Group", "Duration"}
-		for _, effect := range state.Effects {
-			page.Rows = append(page.Rows, []string{effect.Reference, effect.Name, effect.Category, fmt.Sprintf("%.2f s", float64(effect.DurationMS)/1000)})
-		}
-		mode := string(state.ProgramState.Mode)
-		if mode == "" {
-			mode = "Idle"
-		}
-		page.Fields = []desktop.Field{choice("mode", "Application mode", strings.ToLower(mode), "idle", "running")}
-		page.Actions = []desktop.PageAction{pageAction("mode", "Apply mode", !p.preview), pageAction("play", "Play selected", enabled && len(page.Rows) > 0)}
+		return p.loadEffectsPage(state), nil
 	case "buzzer":
 		page.Title = "Buzzer & melodies"
+		var routing struct {
+			Runtime appconfig.BuzzerRuntimeStatus `json:"buzzer_runtime"`
+		}
+		if !p.preview {
+			if err := p.call(ctx, "controller.integrations.local.get", map[string]any{}, &routing); err != nil {
+				return page, err
+			}
+		}
 		var melodies []appconfig.Melody
 		if !p.preview {
-			if err := p.client.call(ctx, "controller.melodies.list", map[string]any{}, &melodies); err != nil {
+			if err := p.call(ctx, "controller.melodies.list", map[string]any{}, &melodies); err != nil {
 				return page, err
 			}
 		}
@@ -241,30 +285,64 @@ func (p nativePages) load(ctx context.Context, key string) (desktop.Page, error)
 		page.Fields = []desktop.Field{field("frequency", "Tone frequency (Hz)", "880"), field("duration", "Tone duration (ms)", "115")}
 		page.Actions = []desktop.PageAction{pageAction("tone", "Play tone", enabled)}
 		if len(names) > 0 {
-			page.Fields = append(page.Fields, choice("melody", "Melody", names[0], names...), field("repeats", "Repeats", "1"))
+			page.Fields = append(page.Fields, choice("melody", "Melody", names[0], names...), nativeBool("loop", "Loop until stopped", false), field("repeats", "Repeats", "1"))
 			page.Actions = append(page.Actions, pageAction("melody", "Play melody", enabled))
 		}
 		busy, known := native.BuzzerBusy(state.Hello, state.Status)
-		if known && busy {
+		hostBusy := false
+		if !p.preview {
+			status, err := p.command(ctx, "melody status")
+			if err != nil {
+				return page, err
+			}
+			hostBusy = strings.HasPrefix(status, "melody playing ")
+			if !hostBusy && status != "melody idle" {
+				return page, errors.New("unrecognized melody playback state")
+			}
+		}
+		if known && busy || hostBusy {
 			page.Actions = append(page.Actions, pageAction("stop", "Stop buzzer", state.Connected))
 		}
+		path := routing.Runtime.RequestedPath
+		if path == "" {
+			path = routing.Runtime.EffectivePath
+		}
+		if path == "" {
+			path = "board"
+		}
+		page.Fields = append(page.Fields, choice("buzzer_path", "Playback destination", path, "board", "host", "both", "none"))
+		page.Actions = append(page.Actions, desktop.PageAction{ID: "routing", Label: "Apply playback destination", Enabled: enabled, Confirm: true})
 	case "strip":
 		page.Title = "LED strip"
 		enabled = enabled && state.Hello.Capabilities&native.CapabilityAddressableLED != 0
 		var stream struct {
-			Running bool `json:"running"`
+			Running bool                     `json:"running"`
+			Stats   control.StripStreamStats `json:"stats"`
 		}
+		order := "GRB"
 		if !p.preview {
-			status, err := p.client.Execute(ctx, "strip status")
+			status, err := p.command(ctx, "strip status")
 			if err != nil {
 				return page, err
 			}
 			if err := json.Unmarshal([]byte(status), &stream); err != nil {
 				return page, fmt.Errorf("read strip state: %w", err)
 			}
+			var ui struct {
+				StripColorOrder string `json:"strip_color_order"`
+			}
+			if err := p.call(ctx, "controller.ui.config", map[string]any{}, &ui); err != nil {
+				return page, err
+			}
+			if ui.StripColorOrder != "" {
+				order = ui.StripColorOrder
+			}
 		}
-		page.Fields = []desktop.Field{choice("order", "Pixel order", "GRB", "GRB", "RGB", "BRG", "BGR", "RBG", "GBR"), field("pixels", "Pixel count", strconv.Itoa(native.StripMaximumPixels)), field("fps", "Frame rate", "60"), field("red", "Red (0–255)", "255"), field("green", "Green (0–255)", "160"), field("blue", "Blue (0–255)", "40")}
-		page.Actions = []desktop.PageAction{pageAction("order", "Apply pixel order", enabled), pageAction("fill", "Fill color", enabled)}
+		page.Fields = []desktop.Field{choice("order", "Pixel order", order, "GRB", "RGB", "BRG", "BGR", "RBG", "GBR"), field("pixels", "Pixel count", strconv.Itoa(native.StripMaximumPixels)), field("fps", "Frame rate", "60"), field("red", "Red (0–255)", "255"), field("green", "Green (0–255)", "160"), field("blue", "Blue (0–255)", "40"), nativeNumber("brightness", "Brightness", 255, 0, 255)}
+		page.Actions = []desktop.PageAction{pageAction("order", "Apply pixel order", !p.preview), pageAction("fill", "Fill color", enabled), pageAction("configure", "Configure pixel count", enabled), pageAction("clear", "Clear strip", enabled)}
+		if stream.Running {
+			page.Output = fmt.Sprintf("%d pixels · %d FPS target · %d acknowledged frames · %d failed frames", stream.Stats.Pixels, stream.Stats.RequestedFPS, stream.Stats.FramesAcked, stream.Stats.FramesFailed)
+		}
 		if stream.Running {
 			page.Actions = append(page.Actions, pageAction("stop", "Stop stream", state.Connected))
 		} else {
@@ -272,10 +350,28 @@ func (p nativePages) load(ctx context.Context, key string) (desktop.Page, error)
 		}
 	case "display":
 		page.Title = "Front-panel display"
-		page.Fields = []desktop.Field{choice("target", "Display", "segments", "segments", "lcd", "both"), field("text", "Text", ""), field("duration", "Duration (seconds)", "5"), choice("repeat", "Repeat", "once", "once", "loop")}
-		page.Actions = []desktop.PageAction{pageAction("show", "Show text", enabled)}
+		page.Fields = []desktop.Field{choice("target", "Display", "segments", "segments", "lcd", "both"), field("text", "Text", ""), nativeNumber("duration_ms", "Visible duration (ms)", 5000, 80, 65535), nativeNumber("speed_ms", "Marquee step (ms)", 220, 80, 5000), choice("repeat", "Repeat", "once", "once", "loop", "interval"), nativeNumber("interval_ms", "Repeat interval (ms)", 30000, 1000, 255000), nativeBool("scroll", "Force marquee", false)}
+		page.Actions = []desktop.PageAction{pageAction("show", "Show text", enabled), pageAction("clear", "Clear display", enabled)}
+		targets := []string{}
+		if p.preview || state.Hello.Capabilities&native.CapabilitySegments != 0 {
+			targets = append(targets, "segments")
+		}
+		if p.preview || state.Hello.Capabilities&native.CapabilityLCD != 0 {
+			targets = append(targets, "lcd")
+		}
+		if len(targets) == 2 {
+			targets = append(targets, "both")
+		}
+		if len(targets) > 0 {
+			page.Fields[0].Choices = targets
+			page.Fields[0].Value = targets[0]
+		} else {
+			for i := range page.Actions {
+				page.Actions[i].Enabled = false
+			}
+		}
 	default:
-		return page, fmt.Errorf("unknown native page %q", key)
+		return p.loadWorkspacePage(ctx, key, state)
 	}
 	styleNativeFields(key, &page)
 	return page, nil
@@ -290,12 +386,18 @@ func styleNativeFields(key string, page *desktop.Page) {
 		switch key {
 		case "rf":
 			f.Section = "Learning preferences"
+			if strings.HasPrefix(f.Key, "board_") {
+				f.Section = "Board mapping"
+			}
 			if f.Key == "binding_name" || f.Key == "gesture" || f.Key == "control_action" {
 				f.Section = "Selected code assignment"
 			}
 		case "buzzer":
 			f.Section = "Tone test"
-			if f.Key == "melody" || f.Key == "repeats" {
+			if f.Key == "buzzer_path" {
+				f.Section = "Audio routing"
+			}
+			if f.Key == "melody" || f.Key == "repeats" || f.Key == "loop" {
 				f.Section = "Melody playback"
 			}
 		case "strip":
@@ -324,6 +426,36 @@ func styleNativeFields(key string, page *desktop.Page) {
 			f.Numeric, f.Min, f.Max = true, 0, 255
 		}
 	}
+	for i := range page.Actions {
+		a := &page.Actions[i]
+		switch key {
+		case "rf":
+			switch a.ID {
+			case "save", "learn", "cancel":
+				a.Section = "Learning preferences"
+			case "assign":
+				a.Section = "Selected code assignment"
+			default:
+				a.Section = "Board mapping"
+			}
+		case "buzzer":
+			switch a.ID {
+			case "routing":
+				a.Section = "Audio routing"
+			case "tone":
+				a.Section = "Tone test"
+			case "melody":
+				a.Section = "Melody playback"
+			}
+		case "strip":
+			switch a.ID {
+			case "order", "configure", "rainbow":
+				a.Section = "Pixel configuration"
+			case "fill":
+				a.Section = "Solid color"
+			}
+		}
+	}
 }
 
 func (p nativePages) submit(ctx context.Context, key, action string, values map[string]string) (desktop.Page, error) {
@@ -332,9 +464,9 @@ func (p nativePages) submit(ctx context.Context, key, action string, values map[
 	}
 	call := func(method string, params any) error {
 		var result any
-		return p.client.call(ctx, method, params, &result)
+		return p.call(ctx, method, params, &result)
 	}
-	execute := func(command string) error { _, err := p.client.Execute(ctx, command); return err }
+	execute := func(command string) error { _, err := p.command(ctx, command); return err }
 	number := func(key string, min, max int) (int, error) {
 		value, err := strconv.Atoi(strings.TrimSpace(values[key]))
 		if err != nil || value < min || value > max {
@@ -368,7 +500,7 @@ func (p nativePages) submit(ctx context.Context, key, action string, values map[
 		case "upload":
 			digest := values["selected"]
 			var inventory artifacts.List
-			if err = p.client.call(ctx, "controller.artifact.list", map[string]string{"kind": "firmware"}, &inventory); err != nil {
+			if err = p.call(ctx, "controller.artifact.list", map[string]string{"kind": "firmware"}, &inventory); err != nil {
 				return desktop.Page{}, err
 			}
 			found := false
@@ -397,10 +529,14 @@ func (p nativePages) submit(ctx context.Context, key, action string, values map[
 			err = errors.New("unknown preferences action")
 		}
 	case "rf":
+		if action == "map-board" || action == "remove" || action == "add-observed" || action == "refresh-codes" {
+			return p.submitNativeRFExtra(ctx, action, values)
+		}
 		switch action {
 		case "assign":
 			id, parseErr := strconv.Atoi(values["selected"])
-			if parseErr != nil || id < 0 || id > 19 {
+			observed := strings.HasPrefix(values["selected"], "observed:")
+			if !observed && (parseErr != nil || id < 0 || id > 19) {
 				return desktop.Page{}, errors.New("select a learned code first")
 			}
 			name := strings.TrimSpace(values["binding_name"])
@@ -408,7 +544,19 @@ func (p nativePages) submit(ctx context.Context, key, action string, values map[
 				return desktop.Page{}, errors.New("enter a new assignment name")
 			}
 			var entries []controllerapi.RFEntryView
-			if err = p.client.call(ctx, "controller.rf.list", map[string]any{}, &entries); err != nil {
+			if observed {
+				var catalog nativeRFCatalog
+				if err = p.call(ctx, "controller.rf.catalog", map[string]any{}, &catalog); err != nil {
+					return desktop.Page{}, err
+				}
+				for _, receipt := range catalog.Receptions {
+					if "observed:"+nativeRFIdentity(receipt.Code, receipt.Bits, receipt.Protocol) == values["selected"] {
+						entries = append(entries, controllerapi.RFEntryView{ID: 0, Code: receipt.Code, Bits: receipt.Bits, Protocol: receipt.Protocol})
+						id = 0
+						break
+					}
+				}
+			} else if err = p.call(ctx, "controller.rf.list", map[string]any{}, &entries); err != nil {
 				return desktop.Page{}, err
 			}
 			var selected *controllerapi.RFEntryView
@@ -433,7 +581,7 @@ func (p nativePages) submit(ctx context.Context, key, action string, values map[
 			var catalog struct {
 				Bindings []appconfig.Automation `json:"bindings"`
 			}
-			if err = p.client.call(ctx, "controller.rf.catalog", map[string]any{}, &catalog); err != nil {
+			if err = p.call(ctx, "controller.rf.catalog", map[string]any{}, &catalog); err != nil {
 				return desktop.Page{}, err
 			}
 			for _, binding := range catalog.Bindings {
@@ -458,19 +606,15 @@ func (p nativePages) submit(ctx context.Context, key, action string, values map[
 			err = errors.New("unknown RF action")
 		}
 	case "programs":
-		switch action {
-		case "mode":
-			err = call("controller.program_state.set", map[string]string{"owner": "native-desktop", "mode": values["mode"]})
-		case "play":
-			if values["selected"] == "" {
-				return desktop.Page{}, errors.New("select an effect first")
-			}
-			err = execute(shell.Join([]string{"effect", "play", values["selected"]}))
-		default:
-			err = errors.New("unknown program action")
-		}
+		return p.submitEffectsPage(ctx, action, values)
 	case "buzzer":
 		switch action {
+		case "routing":
+			path := values["buzzer_path"]
+			if path != "board" && path != "host" && path != "both" && path != "none" {
+				return desktop.Page{}, errors.New("select a playback destination")
+			}
+			err = execute(shell.Join([]string{"buzzer", "path", path}))
 		case "tone":
 			var hz, ms int
 			hz, err = number("frequency", 20, 20000)
@@ -483,6 +627,9 @@ func (p nativePages) submit(ctx context.Context, key, action string, values map[
 		case "melody":
 			var repeats int
 			repeats, err = number("repeats", 1, 255)
+			if values["loop"] == "true" {
+				repeats, err = 0, nil
+			}
 			if err == nil {
 				err = execute(shell.Join([]string{"melody", "play", values["melody"], strconv.Itoa(repeats)}))
 			}
@@ -493,6 +640,14 @@ func (p nativePages) submit(ctx context.Context, key, action string, values map[
 		}
 	case "strip":
 		switch action {
+		case "configure":
+			var pixels int
+			pixels, err = number("pixels", 1, native.StripMaximumPixels)
+			if err == nil {
+				err = execute(fmt.Sprintf("strip config %d", pixels))
+			}
+		case "clear":
+			err = execute("strip clear")
 		case "order":
 			err = execute(shell.Join([]string{"strip", "order", values["order"]}))
 		case "stop":
@@ -506,7 +661,11 @@ func (p nativePages) submit(ctx context.Context, key, action string, values map[
 				}
 			}
 			if err == nil {
-				err = execute(fmt.Sprintf("strip fill %d %d %d", rgb[0], rgb[1], rgb[2]))
+				var brightness int
+				brightness, err = number("brightness", 0, 255)
+				if err == nil {
+					err = execute(fmt.Sprintf("strip fill %d %d %d %d", rgb[0], rgb[1], rgb[2], brightness))
+				}
 			}
 		case "rainbow":
 			var pixels, fps int
@@ -521,13 +680,28 @@ func (p nativePages) submit(ctx context.Context, key, action string, values map[
 			err = errors.New("unknown strip action")
 		}
 	case "display":
-		var seconds int
-		seconds, err = number("duration", 1, 3600)
-		if err == nil {
-			err = execute(shell.Join([]string{"display", values["target"], "--duration", strconv.Itoa(seconds) + "s", "--repeat", values["repeat"], "--", values["text"]}))
+		if action != "show" && action != "clear" {
+			return desktop.Page{}, errors.New("unknown display action")
 		}
+		duration, parseErr := number("duration_ms", 80, 65535)
+		if parseErr != nil {
+			return desktop.Page{}, parseErr
+		}
+		speed, parseErr := number("speed_ms", 80, 5000)
+		if parseErr != nil {
+			return desktop.Page{}, parseErr
+		}
+		interval, parseErr := number("interval_ms", 1000, 255000)
+		if parseErr != nil {
+			return desktop.Page{}, parseErr
+		}
+		text := values["text"]
+		if action == "clear" {
+			text = ""
+		}
+		err = call("controller.display.send", control.DisplayRequest{Target: values["target"], Text: text, DurationMS: duration, SpeedMS: speed, Repeat: control.DisplayRepeat(values["repeat"]), IntervalMS: interval, Scroll: values["scroll"] == "true"})
 	default:
-		err = errors.New("unknown page")
+		return p.submitWorkspacePage(ctx, key, action, values)
 	}
 	if err != nil {
 		return desktop.Page{}, err

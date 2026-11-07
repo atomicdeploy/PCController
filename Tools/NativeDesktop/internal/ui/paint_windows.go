@@ -52,6 +52,9 @@ const (
 	actionFirmware
 	actionEvents
 	actionCompact
+	actionActivities
+	actionProfiles
+	actionMotion
 	actionChannelFirst actionID = 32
 )
 

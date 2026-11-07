@@ -429,6 +429,26 @@ func (session *dialogThemeSession) applyPalette(
 	}
 	session.dialog.SetBackground(material)
 	walkDialogWidgets(session.dialog, func(widget walk.Widget) {
+		if table, ok := widget.(*walk.TableView); ok {
+			if materialContinuity {
+				tokens := design.Default.Colors.Light
+				if session.requestedTheme == "dark" || session.dark {
+					tokens = design.Default.Colors.Dark
+				}
+				// Use the resolved brushes/text, including system-theme changes.
+				background := dialogWalkColor(tokens.Surface)
+				if solid, ok := surface.(*walk.SolidColorBrush); ok {
+					background = solid.Color()
+				}
+				selected := dialogWalkColor(tokens.SurfaceHigh)
+				if solid, ok := input.(*walk.SolidColorBrush); ok {
+					selected = solid.Color()
+				}
+				table.SetPresentationColors(&walk.TableViewColors{Background: background, Text: text, SelectedBackground: selected, SelectedText: text})
+			} else {
+				table.SetPresentationColors(nil)
+			}
+		}
 		switch widget.(type) {
 		case *walk.Composite, *walk.TabWidget:
 			if materialContinuity {

@@ -46,9 +46,27 @@ type EffectDescriptor struct {
 // It deliberately has no protocol/schema version: alpha installations use the
 // living contract and import validates every definition before changing the
 // active library.
-type effectDocument struct {
+type EffectLibrary struct {
 	Effects []EffectDescriptor               `json:"effects"`
 	Groups  map[string]appconfig.EffectGroup `json:"groups,omitempty"`
+}
+
+type effectDocument = EffectLibrary
+
+// ExportEffectLibrary is the same portable document used by the effect command
+// and file watcher. No output, recorder or playback operation is started.
+func ExportEffectLibrary(config appconfig.Config) EffectLibrary {
+	groups := make(map[string]appconfig.EffectGroup, len(config.EffectGroups))
+	for name, group := range config.EffectGroups {
+		groups[name] = group
+	}
+	return EffectLibrary{Effects: EffectCatalogWithGroups(config.Macros, config.StripEffects, groups), Groups: groups}
+}
+
+// ImportEffectLibrary retains the canonical identity/conversion/validation path.
+// The caller owns authorization and serialized configuration revision checks.
+func ImportEffectLibrary(document EffectLibrary, replace bool, update func(func(*appconfig.Config) error) error) error {
+	return importEffectDocument(document, replace, update)
 }
 
 type EffectGroupDescriptor struct {
@@ -426,8 +444,12 @@ func importEffectDocument(document effectDocument, replace bool, updateHostConfi
 		if replace {
 			config.EffectGroups = groups
 		} else {
-			if config.EffectGroups == nil {
-				config.EffectGroups = make(map[string]appconfig.EffectGroup)
+			// Candidate validation may still fail. Never mutate the previous
+			// configuration snapshot's map before the store commits it.
+			previous := config.EffectGroups
+			config.EffectGroups = make(map[string]appconfig.EffectGroup, len(previous)+len(groups))
+			for category, group := range previous {
+				config.EffectGroups[category] = group
 			}
 			for category, group := range groups {
 				config.EffectGroups[category] = group

@@ -110,6 +110,8 @@ func (s *Shell) tr(id i18n.MessageID) string {
 	return s.localizerSnapshot().Text(id)
 }
 
+func (s *Shell) nativeText(text string) string { return s.localizerSnapshot().NativeText(text) }
+
 func (s *Shell) trHeadline(id i18n.MessageID) string {
 	text := s.tr(id)
 	if s.isRTL() {
