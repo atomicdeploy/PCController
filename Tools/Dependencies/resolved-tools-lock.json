@@ -157,6 +157,7 @@
           "codeql.yml",
           "deploy-avr.yml",
           "firmware.yml",
+          "host-sensors.yml",
           "host.yml",
           "mobile.yml",
           "release.yml",
@@ -193,6 +194,7 @@
           "codeql.yml",
           "deploy-avr.yml",
           "firmware.yml",
+          "host-sensors.yml",
           "host.yml",
           "repository-health.yml",
           "update-dependencies.yml"
