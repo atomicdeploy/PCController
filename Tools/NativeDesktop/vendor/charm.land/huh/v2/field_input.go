@@ -389,15 +389,6 @@ func (i *Input) View() string {
 	st.Focused.Prompt = styles.TextInput.Prompt
 	st.Focused.Text = styles.TextInput.Text
 	st.Focused.Placeholder = styles.TextInput.Placeholder
-	// The Huh field and the embedded Bubbles text input both track focus.
-	// When this field is blurred, activeStyles already selected the theme's
-	// Blurred FieldStyles, but only copying them into Bubbles' Focused slot
-	// made Bubbles fall back to its own ANSI-245 blurred defaults. Copy the
-	// selected Huh state into both slots so custom light/dark themes remain
-	// authoritative in either focus state.
-	st.Blurred.Prompt = styles.TextInput.Prompt
-	st.Blurred.Text = styles.TextInput.Text
-	st.Blurred.Placeholder = styles.TextInput.Placeholder
 	i.textinput.SetStyles(st)
 
 	// Adjust text input size to its char limit if it fit in its width

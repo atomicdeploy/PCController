@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build windows
 // +build windows
 
 package walk
@@ -80,8 +79,9 @@ type FormBase struct {
 	owner                       Form
 	stopwatch                   *stopwatch
 	inProgressEventCount        int
-	performLayout               chan layoutRequest
-	layoutResults               chan layoutWorkResult
+	performLayout               chan ContainerLayoutItem
+	layoutResults               chan []LayoutResult
+	inSizeLoop                  chan bool
 	updateStopwatch             chan *stopwatch
 	quitLayoutPerformer         chan struct{}
 	closingPublisher            CloseEventPublisher
@@ -100,7 +100,6 @@ type FormBase struct {
 	isInRestoreState            bool
 	started                     bool
 	layoutScheduled             bool
-	layoutGeneration            uint64
 }
 
 func (fb *FormBase) init(form Form) error {
@@ -148,7 +147,7 @@ func (fb *FormBase) init(form Form) error {
 		win.ChangeWindowMessageFilterEx(fb.hWnd, taskbarButtonCreatedMsgId, win.MSGFLT_ALLOW, nil)
 	}
 
-	fb.performLayout, fb.layoutResults, fb.updateStopwatch, fb.quitLayoutPerformer = startLayoutPerformer(fb)
+	fb.performLayout, fb.layoutResults, fb.inSizeLoop, fb.updateStopwatch, fb.quitLayoutPerformer = startLayoutPerformer(fb)
 
 	return nil
 }
@@ -680,13 +679,8 @@ func (fb *FormBase) setStopwatch(sw *stopwatch) {
 }
 
 func (fb *FormBase) startLayout() bool {
-	_, started := fb.startLayoutGeneration()
-	return started
-}
-
-func (fb *FormBase) startLayoutGeneration() (uint64, bool) {
 	if fb.performLayout == nil || fb.inSizingLoop && !fb.startingLayoutViaSizingLoop {
-		return 0, false
+		return false
 	}
 
 	cs := fb.clientSizeFromSizePixels(fb.proposedSize)
@@ -706,19 +700,9 @@ func (fb *FormBase) startLayoutGeneration() (uint64, bool) {
 	cli := CreateLayoutItemsForContainer(fb)
 	cli.Geometry().ClientSize = cs
 
-	fb.layoutGeneration++
-	if fb.layoutGeneration == 0 {
-		// Generation zero is reserved for untagged/invalid work.
-		fb.layoutGeneration = 1
-	}
-	generation := fb.layoutGeneration
-	offerLatestLayoutRequest(fb.performLayout, layoutRequest{
-		root:        cli,
-		generation:  generation,
-		synchronous: fb.inSizingLoop,
-	})
+	fb.performLayout <- cli
 
-	return generation, true
+	return true
 }
 
 func (fb *FormBase) WndProc(hwnd win.HWND, msg uint32, wParam, lParam uintptr) uintptr {
@@ -797,9 +781,11 @@ func (fb *FormBase) WndProc(hwnd win.HWND, msg uint32, wParam, lParam uintptr) u
 
 	case win.WM_ENTERSIZEMOVE:
 		fb.inSizingLoop = true
+		fb.inSizeLoop <- true
 
 	case win.WM_EXITSIZEMOVE:
 		fb.inSizingLoop = false
+		fb.inSizeLoop <- false
 
 	case win.WM_WINDOWPOSCHANGED:
 		wp := (*win.WINDOWPOS)(unsafe.Pointer(lParam))
@@ -824,17 +810,11 @@ func (fb *FormBase) WndProc(hwnd win.HWND, msg uint32, wParam, lParam uintptr) u
 			}
 		}
 
-		if generation, started := fb.startLayoutGeneration(); started {
+		if fb.startLayout() {
 			if fb.inSizingLoop {
 				fb.startingLayoutViaSizingLoop = false
 
-				for result := range fb.layoutResults {
-					if result.generation != generation {
-						continue
-					}
-					applyLayoutResults(result.results, result.stopwatch)
-					break
-				}
+				applyLayoutResults(<-fb.layoutResults, fb.stopwatch)
 
 				if fb.stopwatch != nil {
 					fb.stopwatch.Stop(performingLayoutSubject)

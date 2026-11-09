@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build windows
 // +build windows
 
 package win
@@ -1149,7 +1148,7 @@ type REPASTESPECIAL struct {
 	DwParam  uintptr
 }
 
-// UndoName info
+//	UndoName info
 type UNDONAMEID int32
 
 const (
