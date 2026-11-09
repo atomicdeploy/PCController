@@ -21,6 +21,7 @@ import (
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/nativeshell"
 	"pccontroller.local/controller/internal/productidentity"
+	"pccontroller.local/controller/internal/tui"
 	"pccontroller.local/desktop/desktop"
 )
 
@@ -110,7 +111,12 @@ func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Stor
 		}()
 		select {
 		case <-ready:
-			defer func() { cancel(); <-completed }()
+			coreStopped := make(chan struct{})
+			go func() {
+				defer close(coreStopped)
+				monitorNativeCore(completed, cancel, stderr)
+			}()
+			defer func() { cancel(); <-coreStopped }()
 		case err := <-completed:
 			if err != nil {
 				return err
@@ -297,7 +303,7 @@ func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Stor
 					state.PWMUpdated = update.PWMUpdated
 				}
 				if update.ConnectionChange {
-					state.Connected = update.Connected
+					state = desktopTransportState(state, update)
 					select {
 					case refreshCatalog <- struct{}{}:
 					default:
@@ -493,6 +499,24 @@ func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Stor
 		PageChanges: pageChanges,
 		PageVersion: eventHistory.version,
 	})
+}
+
+// RemoteLiveUpdate.Connected describes the IPC stream, not the physical board.
+// Only an authoritative snapshot may promote the board to connected. A lost
+// stream still revokes the GUI's live controls immediately.
+func desktopTransportState(state control.Snapshot, update tui.RemoteLiveUpdate) control.Snapshot {
+	if update.ConnectionChange && !update.Connected {
+		state.Connected = false
+	}
+	return state
+}
+
+func monitorNativeCore(completed <-chan error, cancel context.CancelFunc, stderr io.Writer) {
+	err := <-completed
+	if err != nil && !errors.Is(err, context.Canceled) {
+		fmt.Fprintln(stderr, "native desktop core:", err)
+	}
+	cancel()
 }
 
 func desktopSnapshot(state control.Snapshot, address, title string) desktop.Snapshot {

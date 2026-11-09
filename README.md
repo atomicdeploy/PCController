@@ -43,6 +43,12 @@ for the exact donor revision, repeatable file audit, font replacement, and
 remaining native integration gaps. Complete source preservation is verified;
 full native feature parity is still in progress.
 
+On Windows, launch the integrated GUI with `desktop.cmd` or `.\desktop.ps1`.
+It starts with automatic hardware connection paused; use `--preview` for a
+transport-free preview. See [Desktop development and recovery](docs/NATIVE-DESKTOP-DEVELOPMENT.md)
+for installed, staged-package and development launch paths. The original no-argument
+`controller.exe` shortcuts intentionally continue to open the TUI.
+
 <p align="center">
   <img alt="Real-time board control" src="https://img.shields.io/badge/Real--time-board_control-8b5cf6?style=flat-square">
   <img alt="Recoverable programming" src="https://img.shields.io/badge/Recoverable-programming-ec4899?style=flat-square">
