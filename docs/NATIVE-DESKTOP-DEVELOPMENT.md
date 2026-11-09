@@ -122,7 +122,10 @@ Minimize/maximize/restore use `WM_SYSCOMMAND`, preserving OS transitions and
 accessibility preferences rather than synthesizing application animations.
 Close retains the existing close-to-tray and authoring guards. Maximized client
 bounds are constrained to the monitor work area; restored windows keep their
-full custom client surface. Native caption dragging and magnetic widget snapping
+full custom client surface. Transparent hit pixels use the actual surface client
+origin, including while maximized. Maximization clears rounded clipping regions
+so the older-Windows HRGN fallback cannot clip the invisible sizing-frame inset;
+restoring reinstates the configured rounding. Native caption dragging and magnetic widget snapping
 coexist. No global Windows animation or Snap setting is changed.
 
 `TestControllerNativeWindowCommandsAndSnapContract` exercises real test-owned

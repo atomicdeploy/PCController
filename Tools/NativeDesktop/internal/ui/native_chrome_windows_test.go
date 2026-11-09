@@ -3,6 +3,7 @@
 package ui
 
 import (
+	"image"
 	"testing"
 	"time"
 	"unsafe"
@@ -130,6 +131,19 @@ func TestControllerNativeWindowCommandsAndSnapContract(t *testing.T) {
 			origin.X+client.Right > info.RcWork.Right || origin.Y+client.Bottom > info.RcWork.Bottom {
 			t.Fatalf("maximized client escapes monitor work area: origin=%+v client=%+v work=%+v", origin, client, info.RcWork)
 		}
+		// Transparent hit pixels must use the maximized client origin, not
+		// the invisible resize frame's outer origin. No cursor movement needed.
+		oldHit, oldBackdrop := s.hitSurface, s.cfg.UI.Backdrop
+		s.cfg.UI.Backdrop = config.BackdropTransparent
+		s.hitSurface = image.NewRGBA(image.Rect(0, 0, 128, 128))
+		s.hitSurface.Pix[s.hitSurface.PixOffset(123, 123)+3] = 255
+		pixel := win.POINT{X: 123, Y: 123}
+		win.ClientToScreen(s.surface.Handle(), &pixel)
+		if s.transparentPixelPassesThrough(chromeMessagePoint(pixel.X, pixel.Y)) ||
+			!s.transparentPixelPassesThrough(chromeMessagePoint(pixel.X+1, pixel.Y)) {
+			t.Fatal("maximized alpha hit test did not honor surface client coordinates")
+		}
+		s.hitSurface, s.cfg.UI.Backdrop = oldHit, oldBackdrop
 		s.activateSurfaceAction(actionTitleZoom)
 		pumpControllerFixture(s)
 		if win.IsZoomed(hwnd) {
