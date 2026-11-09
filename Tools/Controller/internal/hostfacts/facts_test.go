@@ -24,7 +24,7 @@ func (backend *fakeBackend) query(
 
 func TestCatalogIsStrictAndOmitsDeviceSecrets(t *testing.T) {
 	catalog := Catalog()
-	if len(catalog) != 5 {
+	if len(catalog) != 6 {
 		t.Fatalf("catalog=%#v", catalog)
 	}
 	for index, descriptor := range catalog {

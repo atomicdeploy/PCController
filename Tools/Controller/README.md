@@ -322,25 +322,29 @@ controller-target validation, and the required origin policy. `web export`
 fails if its destination already exists and prints file/byte counts plus the
 archive SHA-256.
 
-### Bounded Windows host facts
+### Bounded host facts and PC sensors
 
-The shared `os facts` command exposes five read-only diagnostic profiles:
-`system`, `computer`, `firmware`, `storage`, and `serial`. `os facts list`
+The shared `os facts` command exposes six read-only diagnostic profiles:
+`system`, `computer`, `firmware`, `storage`, `serial`, and `sensors`. `os facts list`
 returns their descriptions, selected class, columns, and maximum row counts.
 The same fixed catalog is available through JSON-RPC and REST:
 
 ```console
 bin\controller.exe exec os facts system
+bin\controller.exe exec os facts sensors
 bin\controller.exe ipc call --method controller.os.facts.catalog
 bin\controller.exe ipc call --method controller.os.facts --params "{\"profile\":\"serial\",\"timeout_ms\":2500}"
 ```
 
-The Windows adapter uses a bounded native management provider internally. It
+The Windows inventory adapter uses a bounded native management provider internally. It
 accepts only catalog profile names: no shell command, arbitrary query text,
 write, method invocation, or caller-selected class/column is exposed. Results
 have fixed row/byte/cell limits, a short private cache, and a deadline no longer
-than five seconds. Other platforms report this optional capability as
-unavailable.
+than five seconds. Linux inventory uses native host facts. The sensor profile
+reads Linux `lm-sensors` or Windows Libre Hardware Monitor's loopback JSON API,
+with explicit types/units, nullable unavailable readings and source identities.
+These PC readings never replace board INA219/DS18B20 telemetry. See
+[PC sensor setup, API and limits](../../docs/HOST-SENSORS.md).
 
 ## Terminal UI
 

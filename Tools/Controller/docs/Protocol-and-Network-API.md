@@ -707,8 +707,8 @@ request error.
 | `controller.app.action.outcome` | `operation_id` | read the bounded current operation with per-target `queued`, `applied`, `rejected`, or `timeout` state |
 | `controller.history.status` | optional ISO-8601 `since` | retained measurement samples, including samples restored from the bounded host data store after restart |
 | `controller.history.timeline` | optional `since`, `limit` | durable important-event timeline |
-| `controller.os.facts.catalog`, `controller.host.facts.catalog` | `{}` | fixed read-only Windows profile descriptors, columns, and row limits |
-| `controller.os.facts`, `controller.host.facts` | optional `profile` and `timeout_ms` (100–5000) | bounded read-only result for `system`, `computer`, `firmware`, `storage`, or `serial`; empty profile selects `system` |
+| `controller.os.facts.catalog`, `controller.host.facts.catalog` | `{}` | fixed read-only host profile descriptors, columns, and row limits |
+| `controller.os.facts`, `controller.host.facts` | optional `profile` and `timeout_ms` (100–5000) | bounded read-only result for `system`, `computer`, `firmware`, `storage`, `serial`, or `sensors`; empty profile selects `system` |
 | `controller.lcd.presentation.status` | `{}` | prompt/priority presentation state |
 | `controller.lcd.presentation.configure` | `enabled`, `debounce_ms`, `priority_hold_ms` | configure host LCD presentation |
 | `controller.lcd.prompt` | `line1`, `line2` | queue a debounced prompt mirror |
@@ -942,7 +942,7 @@ All JSON endpoints share the IPC listener:
 | `GET /api/host-menus` | current watched host-presented menu directory |
 | `PUT` or `POST /api/host-menus` | validate and persist the complete host-presented menu directory |
 | `GET /api/os/status` | bounded host status and OS-action policy state |
-| `GET /api/os/facts?profile=...` | bounded read-only Windows facts; `profile=list` or `catalog` returns the fixed catalog |
+| `GET /api/os/facts?profile=...` | bounded read-only host facts, including PC `sensors`; `profile=list` or `catalog` returns the fixed catalog |
 | `POST /api/os/key` | validated virtual-key request under the `virtual_keys` capability |
 | `POST /api/os/power` | confirmed lock, suspend, hibernate, restart, shutdown, or monitor-brightness request under `power_actions` |
 | `POST /api/command` | `{"command":"..."}` through the ordinary command engine |
@@ -1125,7 +1125,7 @@ their dedicated controls and semantics rather than another generic slider.
 `controller.pwm.off` and `DELETE /api/pwm` deliberately clear all sixteen
 channels, including the role-specific outputs.
 
-### Bounded Windows host facts
+### Bounded host facts and PC sensors
 
 Host facts are diagnostics, not a general management-query endpoint. The
 authenticated read surface exposes only these compiled profiles:
@@ -1137,17 +1137,22 @@ authenticated read surface exposes only these compiled profiles:
 | `firmware` | `Win32_BIOS` | 2 | manufacturer, firmware version/release date, SMBIOS level |
 | `storage` | `Win32_LogicalDisk` | 16 | fixed-volume ID, type, filesystem, size, free space |
 | `serial` | `Win32_SerialPort` | 32 | device ID, name, description, status, configuration error code |
+| `sensors` | `HostSensor` | 128 | source-qualified ID, hardware, name, type, unit, nullable reading, availability, optional extrema/thresholds/alarm |
 
 JSON-RPC rejects unknown fields and accepts only `profile` plus an optional
 `timeout_ms` from 100 through 5000. REST accepts one `profile` query parameter
 in addition to the normal authentication token; any caller-supplied query,
 class, column, or repeated parameter receives `400`. The provider caps each
-cell at 512 bytes, the whole result at 64 KiB, the combined row count at 32,
+cell at 512 bytes, the whole result at 64 KiB, the combined row count at 128,
 and reuses a five-second private cache across CLI, IPC, REST, and WebSocket RPC.
 Calls are serialized behind one bounded worker so a stuck native call cannot
 create unbounded OS threads. The surface is read-only and exposes no arbitrary
-WQL, write, process-control, or method-invocation path. Non-Windows hosts return
-an explicit unavailable error.
+WQL, write, process-control, or caller-selected method-invocation path. Windows
+inventory uses WMI; Linux inventory uses native OS facts. The sensor profile
+uses lm-sensors on Linux or Libre Hardware Monitor's loopback read-only JSON
+API on Windows. Other systems return an explicit unavailable error. See
+[host sensor semantics and setup](../../../docs/HOST-SENSORS.md); PC readings
+are never substituted for controller-board measurements.
 
 ### Embedded browser application and exact byte serving
 
