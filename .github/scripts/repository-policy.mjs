@@ -41,6 +41,7 @@ const repositoryIdentityPaths = new Set([
 // repository; private paths, stale-origin language and unrelated URLs remain
 // forbidden.
 const reviewedExternalRepositories = new Map([
+  ["docs/HOST-SENSORS.md", new Set(["librehardwaremonitor/librehardwaremonitor", "lm-sensors/lm-sensors"])],
   ["Tools/NativeDesktop/assets/fonts/OFL.txt", new Set(["rastikerdar/vazirmatn"])],
   ["Tools/NativeDesktop/CHANGELOG.md", new Set(["atomicdeploy/rayanlamp"])],
   ["Tools/NativeDesktop/docs/history/validation-2026-11-05.md", new Set(["atomicdeploy/rayanlamp"])],

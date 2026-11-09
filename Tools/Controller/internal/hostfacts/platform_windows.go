@@ -31,6 +31,9 @@ func (nativeBackend) query(
 	ctx context.Context,
 	spec querySpec,
 ) ([]map[string]any, bool, error) {
+	if spec.Profile == "sensors" {
+		return windowsSensorFacts(ctx)
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, false, err
 	}

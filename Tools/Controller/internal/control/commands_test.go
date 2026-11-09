@@ -955,4 +955,10 @@ func TestOSFactsUsesBoundedProviderAndCatalog(t *testing.T) {
 	if err != nil || !strings.Contains(catalog, `"profile": "serial"`) || strings.Contains(catalog, "SELECT ") {
 		t.Fatalf("catalog=%q err=%v", catalog, err)
 	}
+	if !strings.Contains(catalog, `"profile": "sensors"`) {
+		t.Fatal("sensors profile missing from command catalog")
+	}
+	if _, err := engine.Execute(context.Background(), "os facts sensors"); err != nil || provider.profile != "sensors" {
+		t.Fatalf("sensor command profile=%q err=%v", provider.profile, err)
+	}
 }

@@ -21,7 +21,7 @@ const (
 	CacheTTL            = 5 * time.Second
 	MaxResultBytes      = 64 * 1024
 	MaxCellBytes        = 512
-	maxGlobalRows       = 32
+	maxGlobalRows       = 128
 )
 
 // QueryDescriptor is safe to expose over IPC and documents the deliberately
@@ -58,6 +58,14 @@ type querySpec struct {
 }
 
 var queryCatalog = map[string]querySpec{
+	"sensors": {
+		QueryDescriptor: QueryDescriptor{
+			Profile: "sensors", Class: "HostSensor",
+			Description: "read-only PC hardware measurements from lm-sensors or Libre Hardware Monitor",
+			Columns:     []string{"ID", "Name", "Hardware", "Type", "Unit", "Value", "Available", "Statistic", "ObservedMin", "ObservedMax", "LowLimit", "HighLimit", "CriticalLow", "CriticalHigh", "Alarm", "Fault", "Source"},
+			MaxRows:     128,
+		},
+	},
 	"computer": {
 		QueryDescriptor: QueryDescriptor{
 			Profile: "computer", Class: "Win32_ComputerSystem",
@@ -250,6 +258,9 @@ func (provider *CachedProvider) run(ctx context.Context, spec querySpec) (Result
 				Truncated: backendTruncated || boundedTruncated,
 				Source:    platformHostFactsSource(), CollectedAt: provider.now().UTC(),
 				DurationMS: maxInt64(0, provider.now().Sub(started).Milliseconds()),
+			}
+			if spec.Profile == "sensors" {
+				value.result.Source = sensorSource()
 			}
 			value.result = boundResult(value.result)
 		}

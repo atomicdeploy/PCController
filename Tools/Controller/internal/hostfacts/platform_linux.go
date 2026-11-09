@@ -43,6 +43,8 @@ func (nativeBackend) query(
 		return nil, false, err
 	}
 	switch spec.Profile {
+	case "sensors":
+		return linuxSensorFacts(ctx)
 	case "computer":
 		row, err := linuxComputerFacts()
 		return oneLinuxFactRow(row, err)
