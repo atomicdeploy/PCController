@@ -1721,12 +1721,12 @@
     },
     "controller.host.facts": {
       "capability": "read",
-      "summary": "host facts",
+      "summary": "Read one bounded host-facts profile, including PC hardware sensors from lm-sensors or Libre Hardware Monitor; never board telemetry or arbitrary queries.",
       "idempotency": "safe"
     },
     "controller.host.facts.catalog": {
       "capability": "read",
-      "summary": "host facts catalog",
+      "summary": "List fixed read-only host-facts profiles, including sensors, with columns and row limits.",
       "idempotency": "safe"
     },
     "controller.hotkeys.get": {
@@ -1946,12 +1946,12 @@
     },
     "controller.os.facts": {
       "capability": "read",
-      "summary": "os facts",
+      "summary": "Read one bounded host-facts profile, including PC hardware sensors from lm-sensors or Libre Hardware Monitor; never board telemetry or arbitrary queries.",
       "idempotency": "safe"
     },
     "controller.os.facts.catalog": {
       "capability": "read",
-      "summary": "os facts catalog",
+      "summary": "List fixed read-only host-facts profiles, including sensors, with columns and row limits.",
       "idempotency": "safe"
     },
     "controller.os.key": {

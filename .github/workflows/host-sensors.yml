@@ -1,0 +1,38 @@
+name: "🌡️ Host sensors · Read-only adapters"
+
+on:
+  pull_request:
+    paths:
+      - Tools/Controller/internal/hostfacts/**
+      - Tools/Controller/go.mod
+      - Tools/Controller/go.sum
+      - Tools/Build/go-tests.mjs
+      - .github/workflows/host-sensors.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: host-sensors-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  adapters:
+    name: "🌡️ Sensor adapters · ${{ matrix.os }}"
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: Tools/Controller/go.mod
+          cache-dependency-path: Tools/Controller/go.sum
+      - name: Verify adapters, bounds, local transport and Linux command fixture
+        run: node Tools/Build/go-tests.mjs --package internal/hostfacts --retest

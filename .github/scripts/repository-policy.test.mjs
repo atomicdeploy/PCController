@@ -126,6 +126,16 @@ test("controller convergence permits only the two reviewed repositories", () => 
   assert.equal(privacyFindings(path, "C:\\Users\\Private\\secret", context)[0].kind, "private path");
 });
 
+test("host sensor guide permits only its reviewed upstream backends", () => {
+  const path = "docs/HOST-SENSORS.md";
+  const context = { repository: "atomicdeploy/PCController" };
+  for (const repository of ["LibreHardwareMonitor/LibreHardwareMonitor", "lm-sensors/lm-sensors"]) {
+    assert.deepEqual(privacyFindings(path, `https://github.com/${repository}`, context), []);
+  }
+  assert.equal(privacyFindings(path, "https://github.com/other/unreviewed", context)[0].kind, "unreviewed repository reference");
+  assert.equal(privacyFindings("docs/other.md", "https://github.com/LibreHardwareMonitor/LibreHardwareMonitor", context)[0].kind, "unreviewed repository reference");
+});
+
 test("shared firmware guide permits only product issues and the selected core", () => {
   const path = "docs/Shared-Production-Firmware.md";
   const context = { repository: "atomicdeploy/PCController" };

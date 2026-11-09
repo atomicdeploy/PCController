@@ -1861,7 +1861,7 @@ func osCommand(
 		return strings.Join(lines, "\n"), nil
 	case "facts":
 		if len(args) > 2 {
-			return "", errors.New("usage: os facts [system|computer|firmware|storage|serial|list]")
+			return "", errors.New("usage: os facts [system|computer|firmware|storage|serial|sensors|list]")
 		}
 		if len(args) == 2 && (strings.EqualFold(args[1], "list") || strings.EqualFold(args[1], "catalog")) {
 			encoded, err := json.MarshalIndent(hostfacts.Catalog(), "", "  ")
