@@ -61,6 +61,52 @@ native header and controls follow the authoritative board snapshot; a lost IPC
 stream revokes controls immediately. A locally owned core shutting down also
 closes its GUI, rather than leaving a live-looking orphan window.
 
+## Resize performance
+
+The resize renderer retains full-size, pixel-exact glass rather than switching
+to a flat theme, stretching text, or disabling acrylic. The selected optimization
+reuses bounded CPU staging storage, skips unused control-only lighting math on
+panels, computes shared lighting once per scanline, and uses exact straight-edge
+distance math. The DirectX presentation path resizes and uploads the completed
+frame together, without presenting an additional transparent intermediate frame.
+The standalone `Presenter.Resize` contract remains unchanged.
+
+An asynchronous Walk sizing experiment did not give a repeatable improvement in
+the same scene, so the established sizing/layout behavior was preserved. A paint
+suppression experiment was also excluded rather than risk stale final geometry.
+
+Measured on this Windows workstation (GTX 1080, DirectX/DirectComposition), using
+24 test-owned native resizes around a 900x700 window:
+
+| Metric | Original | Optimized |
+| --- | --- | --- |
+| Median complete resize redraw | 97.4 ms | approximately 61-66 ms |
+| Go allocation per step | 19.54 MiB | approximately 2.67 MiB |
+| Presentations for one completed resized frame | two | one |
+
+These timings are not a 60 FPS guarantee or human acceptance. The renderer still
+has a substantial CPU/GDI full-frame cost. No controller commands, event timing,
+telemetry throttles or safety policies are changed by this work. Storage grows
+with 25% spare capacity, releases a shrink beyond 2:1 and is disposed when hidden.
+
+The original material SHA-256 is retained in `TestGlassResizeMaterialDigest`;
+additional tests cover exact signed-distance results, dark/light hover pixels,
+clipped controls, CPU store independence, DPI bitmap replacement, large shrink,
+real DirectX presentation counts and final resize geometry in both backends.
+
+```powershell
+$env:GOFLAGS='-mod=vendor'
+$env:PCCONTROLLER_DESKTOP_WINDOW_TESTS='1'
+$env:PCCONTROLLER_DESKTOP_DIRECTX_SMOKE='1'
+node Tools/Build/go-tests.mjs --module Tools/NativeDesktop --package internal/ui --package internal/windx --run 'TestGlass|TestRoundedRectDistance|TestControllerResize|TestResizeRGBA|TestForeground|TestPresenter|TestResizeFrameBuffer' --retest
+```
+
+`TestControllerResizeTiming` reports end-to-end timing and allocations when the
+compiled test at the runner's stable product-owned path is invoked with
+`-test.run=^TestControllerResizeTiming$ -test.v`. Never move that executable to a
+new per-task path. Screenshots from the resize fixture can be requested with the
+same capture-tool/output-directory environment used by the gallery.
+
 ## Preserve and resume
 
 - Host settings: `%APPDATA%\PCController\config.json` (or `controller config path`).

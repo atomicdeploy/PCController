@@ -22,8 +22,12 @@ func resizeFrameBuffer(buffer []byte, width, height int) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if cap(buffer) < count {
-		return make([]byte, count), nil
+	if cap(buffer) < count || cap(buffer)-count > count {
+		capacity := count
+		if count <= int(^uint(0)>>1)-count/4 {
+			capacity += count / 4
+		}
+		return make([]byte, count, capacity), nil
 	}
 	buffer = buffer[:count]
 	clear(buffer)

@@ -65,7 +65,7 @@ func (cache *glassCompositionCache) prepare(bounds image.Rectangle, panels, cont
 	resized := cache.background == nil || cache.background.Bounds() != bounds
 	if resized || !slices.Equal(cache.panels, keys) {
 		if resized {
-			cache.background = image.NewRGBA(bounds)
+			cache.background = reuseRGBA(cache.background, bounds)
 		} else {
 			clear(cache.background.Pix)
 		}
@@ -74,27 +74,27 @@ func (cache *glassCompositionCache) prepare(bounds image.Rectangle, panels, cont
 		}
 		cache.panels = keys
 	}
-	if resized || !slices.Equal(cache.masks, masks) || len(cache.controls) != len(controls) {
+	if !slices.Equal(cache.masks, masks) || len(cache.controls) != len(controls) {
 		cache.controls = make([]glassControlRaster, len(controls))
 		cache.masks = append(cache.masks[:0], masks...)
 	}
 	for i, layer := range controls {
 		entry := &cache.controls[i]
 		key := layer.key()
-		if entry.body != nil && entry.key == key {
-			continue
-		}
 		rect := image.Rect(layer.rect.X, layer.rect.Y, layer.rect.X+layer.rect.Width, layer.rect.Y+layer.rect.Height)
 		bodyBounds := rect.Intersect(bounds)
 		spread := glassShadowExtent(layer.style)
 		shadowBounds := rect.Inset(-spread).Intersect(bounds)
+		if entry.body != nil && entry.key == key && entry.body.Bounds() == bodyBounds && entry.shadow != nil && entry.shadow.Bounds() == shadowBounds {
+			continue
+		}
 		if entry.body == nil || entry.body.Bounds() != bodyBounds {
-			entry.body = image.NewRGBA(bodyBounds)
+			entry.body = reuseRGBA(entry.body, bodyBounds)
 		} else {
 			clear(entry.body.Pix)
 		}
 		if entry.shadow == nil || entry.shadow.Bounds() != shadowBounds {
-			entry.shadow = image.NewRGBA(shadowBounds)
+			entry.shadow = reuseRGBA(entry.shadow, shadowBounds)
 		} else {
 			clear(entry.shadow.Pix)
 		}

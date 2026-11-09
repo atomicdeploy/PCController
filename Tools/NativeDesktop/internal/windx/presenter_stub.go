@@ -36,6 +36,13 @@ func (presenter *Presenter) Resize(_, _ int) error {
 	return ErrUnavailable
 }
 
+func (presenter *Presenter) PresentResized(_ *image.RGBA) error {
+	if presenter == nil {
+		return ErrClosed
+	}
+	return ErrUnavailable
+}
+
 func (presenter *Presenter) SetOpacity(_ float64) error {
 	if presenter == nil {
 		return ErrClosed

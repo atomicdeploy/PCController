@@ -147,6 +147,45 @@ func TestPresenterIntegration(t *testing.T) {
 	}
 }
 
+func TestPresenterResizePresentsOnlyCompletedFrame(t *testing.T) {
+	if os.Getenv("PCCONTROLLER_DESKTOP_DIRECTX_SMOKE") != "1" {
+		t.Skip("set PCCONTROLLER_DESKTOP_DIRECTX_SMOKE=1 for native resize verification")
+	}
+	if _, err := Probe(); err != nil {
+		t.Skipf("hardware DirectX stack unavailable: %v", err)
+	}
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	hwnd := createDirectXTestWindow(t, 64, 64)
+	defer destroyDirectXTestWindow(hwnd)
+	p, err := NewPresenter(hwnd, 64, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	for _, size := range []image.Point{{80, 48}, {81, 49}, {60, 40}, {60, 40}} {
+		before := p.Status().Presents
+		frame := image.NewRGBA(image.Rect(0, 0, size.X, size.Y))
+		for offset := 0; offset < len(frame.Pix); offset += 4 {
+			copy(frame.Pix[offset:offset+4], []byte{20, 40, 60, 120})
+		}
+		if err := p.PresentResized(frame); err != nil {
+			t.Fatal(err)
+		}
+		status := p.Status()
+		if status.Presents != before+1 || status.Width != size.X || status.Height != size.Y || status.DeviceLost {
+			t.Fatalf("resize exposed an intermediate frame or wrong dimensions: %+v", status)
+		}
+		if p.source[0] != 60 || p.source[1] != 40 || p.source[2] != 20 || p.source[3] != 120 {
+			t.Fatal("completed frame pixels did not survive resize")
+		}
+	}
+	before := p.Status()
+	if err := p.PresentResized(nil); err == nil || p.Status().Presents != before.Presents {
+		t.Fatal("invalid frame replaced valid presentation")
+	}
+}
+
 var (
 	windxTestUser32        = windows.NewLazySystemDLL("user32.dll")
 	windxTestCreateWindow  = windxTestUser32.NewProc("CreateWindowExW")

@@ -548,7 +548,7 @@ func (s *Shell) composeGlassControls(foreground *image.RGBA) *image.RGBA {
 		return nil
 	}
 	if s.glassFrame == nil || s.glassFrame.Bounds() != foreground.Bounds() {
-		s.glassFrame = image.NewRGBA(foreground.Bounds())
+		s.glassFrame = reuseRGBA(s.glassFrame, foreground.Bounds())
 	}
 	glass := s.glassFrame
 	controls := make([]glassControlLayer, 0, 7)
@@ -816,9 +816,18 @@ func drawGlassRoundedRectLayers(
 	radius = math.Min(radius, math.Min(halfWidth, halfHeight))
 	revealRadius := clampFloat(float64(rect.Height)*2.35, 56, 112)
 	for y := top; y < bottom; y++ {
+		py := float64(y) + 0.5
+		vertical := clampFloat((py-float64(rect.Y))/math.Max(float64(rect.Height), 1), 0, 1)
+		// The vertical material gradient is constant across a scanline.
+		// Preserve arithmetic order, but calculate it once rather than once
+		// per pixel of a full-window panel.
+		topLight := (1 - vertical) * (0.095 + 0.035*hover)
+		bottomShade := vertical * (0.055 + 0.025*pressed)
+		rowR := (fillR + (255-fillR)*topLight) * (1 - bottomShade)
+		rowG := (fillG + (255-fillG)*topLight) * (1 - bottomShade)
+		rowB := (fillB + (255-fillB)*topLight) * (1 - bottomShade)
 		for x := left; x < right; x++ {
 			px := float64(x) + 0.5
-			py := float64(y) + 0.5
 			distance := roundedRectDistance(
 				px,
 				py,
@@ -870,16 +879,15 @@ func drawGlassRoundedRectLayers(
 				continue
 			}
 
-			vertical := clampFloat(
-				(py-float64(rect.Y))/math.Max(float64(rect.Height), 1),
-				0,
-				1,
-			)
-			horizontal := clampFloat(
-				(px-float64(rect.X))/math.Max(float64(rect.Width), 1),
-				0,
-				1,
-			)
+			innerEdge := clampFloat(0.62-math.Abs(distance+2.15), 0, 1)
+			horizontal := 0.0
+			if !style.Panel || innerEdge > 0 {
+				horizontal = clampFloat(
+					(px-float64(rect.X))/math.Max(float64(rect.Width), 1),
+					0,
+					1,
+				)
+			}
 			reveal := 0.0
 			if hover > 0 {
 				revealDistance := math.Hypot(
@@ -891,14 +899,9 @@ func drawGlassRoundedRectLayers(
 			}
 
 			localAlpha := fillAlpha
-			localR, localG, localB := fillR, fillG, fillB
+			localR, localG, localB := rowR, rowG, rowB
 			// A subtle vertical material gradient and deterministic micro-grain
 			// keep the control from reading as one flat translucent rectangle.
-			topLight := (1 - vertical) * (0.095 + 0.035*hover)
-			bottomShade := vertical * (0.055 + 0.025*pressed)
-			localR = (localR + (255-localR)*topLight) * (1 - bottomShade)
-			localG = (localG + (255-localG)*topLight) * (1 - bottomShade)
-			localB = (localB + (255-localB)*topLight) * (1 - bottomShade)
 			// Pointer reveal is strongest on the rim.  The fill receives only
 			// a restrained bloom, avoiding a neon/halo look on wide controls.
 			localR += (accentR - localR) * reveal * 0.16
@@ -932,54 +935,57 @@ func drawGlassRoundedRectLayers(
 			// diffuse light across the upper face, a soft off-axis reflection,
 			// and slightly denser glass at the foot.  These layers stay inside
 			// the silhouette so they cannot create fringe or outer halos.
-			upperVeneer := inner *
-				clampFloat(1-vertical*1.55, 0, 1) *
-				(1 - pressed*0.72)
-			if upperVeneer > 0 && !style.Panel {
-				compositeStraightPixel(
-					target,
-					x,
-					y,
-					255,
-					255,
-					255,
-					(13+9*hover)*upperVeneer,
-				)
-			}
-			reflectionX := (horizontal - 0.28) / 0.34
-			reflectionY := (vertical - 0.12) / 0.72
-			reflection := inner *
-				math.Exp(-(reflectionX*reflectionX+reflectionY*reflectionY)*1.4) *
-				(1 - pressed*0.8)
-			if reflection > 0.01 && !style.Panel {
-				compositeStraightPixel(
-					target,
-					x,
-					y,
-					225,
-					248,
-					255,
-					(8+7*hover)*reflection,
-				)
-			}
-			lowerDensity := inner *
-				clampFloat((vertical-0.52)*2.08, 0, 1)
-			if lowerDensity > 0 && !style.Panel {
-				compositeStraightPixel(
-					target,
-					x,
-					y,
-					2,
-					15,
-					24,
-					(7+14*pressed)*lowerDensity,
-				)
+			// Panels never draw these control-only veneers. In particular, do
+			// not evaluate an exponential for every pixel of the window canvas.
+			if !style.Panel {
+				upperVeneer := inner *
+					clampFloat(1-vertical*1.55, 0, 1) *
+					(1 - pressed*0.72)
+				if upperVeneer > 0 {
+					compositeStraightPixel(
+						target,
+						x,
+						y,
+						255,
+						255,
+						255,
+						(13+9*hover)*upperVeneer,
+					)
+				}
+				reflectionX := (horizontal - 0.28) / 0.34
+				reflectionY := (vertical - 0.12) / 0.72
+				reflection := inner *
+					math.Exp(-(reflectionX*reflectionX+reflectionY*reflectionY)*1.4) *
+					(1 - pressed*0.8)
+				if reflection > 0.01 {
+					compositeStraightPixel(
+						target,
+						x,
+						y,
+						225,
+						248,
+						255,
+						(8+7*hover)*reflection,
+					)
+				}
+				lowerDensity := inner *
+					clampFloat((vertical-0.52)*2.08, 0, 1)
+				if lowerDensity > 0 {
+					compositeStraightPixel(
+						target,
+						x,
+						y,
+						2,
+						15,
+						24,
+						(7+14*pressed)*lowerDensity,
+					)
+				}
 			}
 
 			// The inside bevel is intentionally directional: the top/left
 			// catches light, while the lower edge supplies just enough depth
 			// to resemble Windows 11's raised acrylic controls.
-			innerEdge := clampFloat(0.62-math.Abs(distance+2.15), 0, 1)
 			specularDirection := clampFloat(
 				1.15-vertical*1.15-horizontal*0.18,
 				0,
@@ -1124,8 +1130,19 @@ func roundedRectDistance(
 ) float64 {
 	qx := math.Abs(x-centerX) - (halfWidth - radius)
 	qy := math.Abs(y-centerY) - (halfHeight - radius)
-	return math.Hypot(math.Max(qx, 0), math.Max(qy, 0)) +
-		math.Min(math.Max(qx, qy), 0) - radius
+	// Only the rounded corners require a hypotenuse. Interior and straight
+	// edges have exactly the same signed distance without four min/max calls
+	// and Hypot per pixel. Do not approximate the antialiased silhouette.
+	if qx <= 0 {
+		if qy <= 0 {
+			return math.Max(qx, qy) - radius
+		}
+		return qy - radius
+	}
+	if qy <= 0 {
+		return qx - radius
+	}
+	return math.Hypot(qx, qy) - radius
 }
 
 func glassNoise(x, y int) float64 {
