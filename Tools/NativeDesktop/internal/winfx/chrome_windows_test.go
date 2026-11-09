@@ -27,10 +27,10 @@ func TestTitleBarWindowStyleModes(t *testing.T) {
 	}
 
 	custom := titleBarWindowStyle(native, false)
-	if custom&(wsCaption|wsSysMenu|wsMinimizeBox|wsMaximizeBox|wsPopup) != 0 {
-		t.Fatalf("captionless style retained native chrome bits: %#x", custom)
+	if custom&wsPopup != 0 {
+		t.Fatalf("custom style retained popup semantics: %#x", custom)
 	}
-	wantCustom := uint32(wsThickFrame | wsClipChildren | wsClipSiblings)
+	wantCustom := wantNative
 	if custom&wantCustom != wantCustom || custom&unrelated == 0 {
 		t.Fatalf("captionless style = %#x, required bits %#x", custom, wantCustom)
 	}
@@ -67,9 +67,9 @@ func TestWindowChromeStyleBorderModes(t *testing.T) {
 		{
 			name:       "captionless automatic resize frame",
 			borderMode: WindowBorderAuto,
-			required:   wsThickFrame | wsClipChildren | wsClipSiblings,
-			forbidden: wsCaption | wsSysMenu | wsMinimizeBox |
-				wsMaximizeBox | wsPopup,
+			required: wsCaption | wsSysMenu | wsMinimizeBox | wsMaximizeBox |
+				wsThickFrame | wsClipChildren | wsClipSiblings,
+			forbidden: wsPopup,
 		},
 		{
 			name:       "captionless no border",

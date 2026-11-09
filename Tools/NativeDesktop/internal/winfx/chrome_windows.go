@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -48,13 +49,12 @@ var (
 	chromeSetWindowPos      = chromeUser32.NewProc("SetWindowPos")
 	chromeReleaseCapture    = chromeUser32.NewProc("ReleaseCapture")
 	chromeSendMessageW      = chromeUser32.NewProc("SendMessageW")
+	chromeGetCursorPos      = chromeUser32.NewProc("GetCursorPos")
 )
 
-// MakeBorderless removes the ordinary caption while retaining Windows'
-// invisible resize frame and an ordinary top-level window. GlassDWM's final
-// HWND also has no system menu or WS_EX_WINDOWEDGE and clips its descendants.
-// Retaining WS_THICKFRAME is the one intentional difference: it provides the
-// user-requested native resize loop.
+// MakeBorderless hides the ordinary caption through WM_NCCALCSIZE, not by
+// removing the window-manager capabilities. Windows still owns transitions,
+// system commands, caption dragging and Aero Snap; the application paints chrome.
 func MakeBorderless(hwnd uintptr) error {
 	return ConfigureWindowChrome(hwnd, false, WindowBorderAuto)
 }
@@ -137,7 +137,7 @@ func windowChromeStyle(
 			WindowBorderAuto,
 		)
 	}
-	if nativeTitleBar {
+	if nativeTitleBar || mode == WindowBorderAuto {
 		style &^= wsPopup
 		style |= wsCaption |
 			wsSysMenu |
@@ -156,9 +156,6 @@ func windowChromeStyle(
 		wsPopup |
 		wsSysMenu |
 		wsThickFrame
-	if mode == WindowBorderAuto {
-		style |= wsThickFrame
-	}
 	style |= wsClipChildren | wsClipSiblings
 	return style, nil
 }
@@ -249,7 +246,13 @@ func BeginWindowDrag(hwnd uintptr) error {
 		return ErrInvalidWindow
 	}
 	_, _, _ = chromeReleaseCapture.Call()
-	result, _, callErr := chromeSendMessageW.Call(hwnd, wmNCLButtonDown, htCaption, 0)
+	var point struct{ X, Y int32 }
+	ok, _, callErr := chromeGetCursorPos.Call(uintptr(unsafe.Pointer(&point)))
+	if ok == 0 {
+		return boolCallError("GetCursorPos(begin drag)", callErr)
+	}
+	position := uintptr(uint32(uint16(point.X)) | uint32(uint16(point.Y))<<16)
+	result, _, callErr := chromeSendMessageW.Call(hwnd, wmNCLButtonDown, htCaption, position)
 	if result == 0 && callErr != windows.ERROR_SUCCESS {
 		return boolCallError("SendMessageW(WM_NCLBUTTONDOWN)", callErr)
 	}

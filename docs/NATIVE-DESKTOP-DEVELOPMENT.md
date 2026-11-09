@@ -107,6 +107,33 @@ compiled test at the runner's stable product-owned path is invoked with
 new per-task path. Screenshots from the resize fixture can be requested with the
 same capture-tool/output-directory environment used by the gallery.
 
+## Windows transitions and Aero Snap
+
+Custom chrome keeps `WS_CAPTION`, `WS_SYSMENU`, `WS_MINIMIZEBOX`,
+`WS_MAXIMIZEBOX` and `WS_THICKFRAME` as window-manager metadata. The native caption
+is still hidden by `WM_NCCALCSIZE`; removing these style capabilities instead had
+disabled Windows' normal window-management behavior. Explicit Border: None
+remains a genuinely frameless opt-out; native-titlebar mode is unchanged.
+
+The actual painted caption reports `HTCAPTION`, `HTMINBUTTON`, `HTMAXBUTTON`
+and `HTCLOSE`, with child HWNDs passing those hits to the top-level window.
+In particular `HTMAXBUTTON` is the Windows 11 Snap Layout hover contract.
+Minimize/maximize/restore use `WM_SYSCOMMAND`, preserving OS transitions and
+accessibility preferences rather than synthesizing application animations.
+Close retains the existing close-to-tray and authoring guards. Maximized client
+bounds are constrained to the monitor work area; restored windows keep their
+full custom client surface. Native caption dragging and magnetic widget snapping
+coexist. No global Windows animation or Snap setting is changed.
+
+`TestControllerNativeWindowCommandsAndSnapContract` exercises real test-owned
+HWNDs in both macOS and Windows custom-chrome styles: native style flags, parent/
+child hit routing, captured release/cancel, minimize/maximize/restore, restored
+geometry and taskbar-safe maximized bounds. The border lifecycle fixture covers
+native/custom, acrylic/blur/solid, legacy/DirectX and compact modes. Automated
+state/geometry checks are not visual proof of the OS transition or human Snap
+Layout acceptance; those still require checking the installed window with the
+user's Windows animation/Snap preferences enabled.
+
 ## Preserve and resume
 
 - Host settings: `%APPDATA%\PCController\config.json` (or `controller config path`).

@@ -23,13 +23,8 @@ func TestLivePrimaryCaptionlessBorderPolicy(t *testing.T) {
 	if hwnd == 0 {
 		t.Fatal("running PCControllerDesktop primary window was not found")
 	}
-	style, err := getWindowStyle(hwnd)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if style&wsCaption != 0 {
-		t.Fatal("this probe requires a captionless primary window")
-	}
+	// WS_CAPTION remains present as window-manager metadata in custom mode.
+	// Client geometry, not that style bit, determines whether a caption is drawn.
 	var outer, client win.RECT
 	if !win.GetWindowRect(win.HWND(hwnd), &outer) || !win.GetClientRect(win.HWND(hwnd), &client) {
 		t.Fatal("read primary window geometry")

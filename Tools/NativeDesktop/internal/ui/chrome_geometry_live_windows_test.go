@@ -15,6 +15,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/lxn/walk"
 	"github.com/lxn/win"
 	"golang.org/x/sys/windows"
 
@@ -31,7 +32,8 @@ func TestShellChromeGeometryLifecycle(t *testing.T) {
 		t.Skip("set PCCONTROLLER_DESKTOP_WINDOW_TESTS=1 for native window integration")
 	}
 	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
+	t.Cleanup(runtime.UnlockOSThread)
+	activateNativeWindowTestManifest(t)
 	cfg := config.Default()
 	cfg.Device.BaseURL = "http://127.0.0.1:1"
 	cfg.UI.Locale = "en"
@@ -66,7 +68,10 @@ func TestShellChromeGeometryLifecycle(t *testing.T) {
 	if err := shell.createWindow(); err != nil {
 		t.Fatal(err)
 	}
-	if err := shell.loadArtwork(); err != nil {
+	if err := shell.loadArtworkWithProductIcon(func() (walk.Image, error) {
+		_, source, _, _ := runtime.Caller(0)
+		return walk.NewIconFromFile(filepath.Join(filepath.Dir(source), "..", "..", "..", "Controller", "winres", "icon.ico"))
+	}); err != nil {
 		shell.dispose()
 		t.Fatal(err)
 	}

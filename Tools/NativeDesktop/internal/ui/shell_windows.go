@@ -763,6 +763,9 @@ func (s *Shell) createWindow() error {
 			case win.WM_KILLFOCUS:
 				s.cancelKeyboardActivation()
 			case wmNCHitTest:
+				if s.customCaptionHit(lParam) != win.HTCLIENT {
+					return ^uintptr(0), true // route non-client input to the root HWND
+				}
 				if s.transparentPixelPassesThrough(lParam) {
 					return ^uintptr(0), true // HTTRANSPARENT
 				}
@@ -804,6 +807,9 @@ func (s *Shell) createWindow() error {
 				s.cancelKeyboardActivation()
 			}
 			if uint32(message) == wmNCHitTest {
+				if s.customCaptionHit(lParam) != win.HTCLIENT {
+					return ^uintptr(0), true // route non-client input to the root HWND
+				}
 				if s.transparentPixelPassesThrough(lParam) {
 					return ^uintptr(0), true // HTTRANSPARENT
 				}
@@ -1002,12 +1008,19 @@ func (s *Shell) restoreCaptionIcon(redrawFrame bool) {
 }
 
 func (s *Shell) loadArtwork() error {
+	return s.loadArtworkWithProductIcon(func() (walk.Image, error) {
+		if s.controller != nil {
+			return walk.NewIconFromResource("APP")
+		}
+		return newProductIconImage()
+	})
+}
+
+// Keep PE resource acquisition separate so native test executables without the
+// packaged icon group can use the same shared artwork/rendering lifecycle.
+func (s *Shell) loadArtworkWithProductIcon(load func() (walk.Image, error)) error {
 	var err error
-	if s.controller != nil {
-		s.appIcon, err = walk.NewIconFromResource("APP")
-	} else {
-		s.appIcon, err = newProductIconImage()
-	}
+	s.appIcon, err = load()
 	if err != nil {
 		return err
 	}
@@ -1929,6 +1942,7 @@ func (s *Shell) windowMessage(hwnd, message, wParam, lParam uintptr) (uintptr, b
 		return 0, false
 	case wmNCCalcSize:
 		if effectiveTitleBarMode(s.Config().UI) != config.TitleBarNative {
+			s.constrainMaximizedClient(win.HWND(hwnd), lParam)
 			return 0, true
 		}
 		return 0, false
@@ -1960,7 +1974,33 @@ func (s *Shell) windowMessage(hwnd, message, wParam, lParam uintptr) (uintptr, b
 		if s.transparentPixelPassesThrough(lParam) {
 			return ^uintptr(0), true // HTTRANSPARENT
 		}
+		// Do not let DefWindowProc discover invisible standard caption buttons
+		// behind our custom chrome. Only the painted hit regions are non-client.
+		return uintptr(s.customCaptionHit(lParam)), true
+	case win.WM_NCMOUSEMOVE:
+		if s.customCaptionHit(lParam) != win.HTCLIENT {
+			if point, ok := s.captionClientPoint(lParam); ok {
+				s.onMouseMove(point.X, point.Y, 0)
+				event := win.TRACKMOUSEEVENT{CbSize: uint32(unsafe.Sizeof(win.TRACKMOUSEEVENT{})),
+					DwFlags: win.TME_LEAVE | win.TME_NONCLIENT, HwndTrack: win.HWND(hwnd)}
+				win.TrackMouseEvent(&event)
+			}
+		}
+		return 0, false // USER32 handles the Windows 11 maximize-hover Snap menu
+	case win.WM_NCMOUSELEAVE:
+		s.onMouseLeave()
 		return 0, false
+	case win.WM_NCLBUTTONDOWN, win.WM_NCLBUTTONDBLCLK:
+		if captionButtonHit(int(wParam)) && s.customCaptionHit(lParam) == int(wParam) {
+			if point, ok := s.captionClientPoint(lParam); ok {
+				// Reuse the ordinary release/cancel state machine. Capturing the
+				// surface makes release-outside and capture loss behave identically.
+				win.SetCapture(s.surface.Handle())
+				s.onMouseDown(point.X, point.Y, walk.LeftButton)
+				return 0, true
+			}
+		}
+		return 0, false // HTCAPTION uses the native move/restore/Snap loop
 	case wmHotkey:
 		if s.hotkeyCaptureActive {
 			// A message already queued before UnregisterHotKey must not trigger
@@ -2510,14 +2550,9 @@ func resizeHitTest(hwnd win.HWND, lParam uintptr) (int, bool) {
 	}
 	x := int32(int16(uint16(lParam & 0xffff)))
 	y := int32(int16(uint16((lParam >> 16) & 0xffff)))
-	// WM_NCHITTEST lParam can be physical while a system-DPI-aware caller sees
-	// a virtualized GetWindowRect on a scaled monitor. Cursor and window APIs
-	// called in the same process share one coordinate space, so prefer that
-	// pair for real pointer hit testing.
-	var cursor win.POINT
-	if win.GetCursorPos(&cursor) {
-		x, y = cursor.X, cursor.Y
-	}
+	// PerMonitorV2 window/message coordinates share the same physical space.
+	// Honor the message point (including signed coordinates on left monitors),
+	// not a newer cursor position that may belong to a different hit-test query.
 	dpi := int32(win.GetDpiForWindow(hwnd))
 	if dpi < 96 {
 		dpi = 96
@@ -2759,12 +2794,12 @@ func (s *Shell) activateSurfaceAction(action actionID) {
 	case actionReconnect:
 		s.invoke("reconnect", nil)
 	case actionTitleMinimize:
-		win.ShowWindow(s.mw.Handle(), win.SW_MINIMIZE)
+		win.PostMessage(s.mw.Handle(), win.WM_SYSCOMMAND, win.SC_MINIMIZE, 0)
 	case actionTitleZoom:
 		if win.IsZoomed(s.mw.Handle()) {
-			win.ShowWindow(s.mw.Handle(), win.SW_RESTORE)
+			win.PostMessage(s.mw.Handle(), win.WM_SYSCOMMAND, win.SC_RESTORE, 0)
 		} else {
-			win.ShowWindow(s.mw.Handle(), win.SW_MAXIMIZE)
+			win.PostMessage(s.mw.Handle(), win.WM_SYSCOMMAND, win.SC_MAXIMIZE, 0)
 		}
 	case actionTitleClose:
 		_ = s.mw.Close()
