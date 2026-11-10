@@ -1,7 +1,7 @@
 {
   "format": "pccontroller-host-tool-lock/v1",
   "policy_name": "pccontroller-host-build-tools",
-  "resolved_at_utc": "2026-11-10T01:26:58.913Z",
+  "resolved_at_utc": "2026-11-10T01:38:57.916Z",
   "node": {
     "version": "26.13.0",
     "lts": "Lithium",
@@ -132,7 +132,7 @@
     "installer_sha256": "3c69305081e4a647144339a936244fcf7d3d9e558319e1ad7be2cd2886d4b6a1"
   },
   "web": {
-    "package_lock_sha256": "7ecb7086c3e4051abad7127ed1b54e1f64a0cc2c5301023ccd9946e68d4c11c5"
+    "package_lock_sha256": "c2f8dcb6e01aa9187204db9ee8768c938f536993b91570e0881df216597c705c"
   },
   "build": {
     "package_lock_sha256": "323ac44b9417ec4a68487f026e41d4bc29199b7f40ded040de0d5b592318ca98"
@@ -255,7 +255,7 @@
       },
       {
         "name": "peter-evans/create-pull-request",
-        "revision": "5f6978faf089d4d20b00c7766989d076bb2fc7f1",
+        "revision": "15733dbdfeedb4f7fdb73d13c6f5ac83b710fab8",
         "version": "v8",
         "workflows": [
           "update-dependencies.yml"

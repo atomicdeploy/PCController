@@ -1,6 +1,6 @@
 {
   "policy_name": "controllerboardmini-atmega328p",
-  "resolved_at_utc": "2026-11-09T01:21:10.718Z",
+  "resolved_at_utc": "2026-11-10T01:20:35.724Z",
   "firmware": {
     "name": "controllerboardmini-atmega328p",
     "fqbn": "MiniCore:avr:328:bootloader=uart0,eeprom=keep,baudrate=115200,variant=modelP,BOD=2v7,LTO=Os_flto,clock=16MHz_external",
@@ -139,7 +139,7 @@
   },
   "go": {
     "version": "1.27.3",
-    "go_mod_sha256": "c43d1337bb9028137ba16e7bd5d90e2ef71bcca8f21ad1c8af4e8b779fa027ef",
-    "go_sum_sha256": "548479d6fe1c2f35830c281e05abe6d07df379b2f03c1444958c4fb1379eee2c"
+    "go_mod_sha256": "5f59e3e2bdbd185bea1399774fdb4bcc3efd820f815784d116c31e103e8a6257",
+    "go_sum_sha256": "1f7f5547dc487da868934b5d488feb246f2fde4eb9c98acc5e791d2eeccc819e"
   }
 }
