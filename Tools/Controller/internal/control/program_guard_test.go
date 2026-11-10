@@ -94,7 +94,19 @@ func TestDevelopmentUploadDisconnectWhileWaitingForProgrammingLock(t *testing.T)
 			deadline := time.Now().Add(10 * time.Second)
 			for {
 				stack := make([]byte, 64*1024)
-				stack = stack[:goruntime.Stack(stack, true)]
+				for {
+					n := goruntime.Stack(stack, true)
+					if n < len(stack) {
+						stack = stack[:n]
+						break
+					}
+					// A complete package run can leave enough background workers
+					// to truncate the sought goroutine out of a fixed buffer.
+					if len(stack) >= 16*1024*1024 {
+						t.Fatal("goroutine snapshot exceeds test diagnostic bound")
+					}
+					stack = make([]byte, len(stack)*2)
+				}
 				waiting := false
 				for _, goroutine := range strings.Split(string(stack), "\n\n") {
 					if strings.Contains(goroutine, "control.safeFlashCommand(") && strings.Contains(goroutine, "Mutex).Lock") {
