@@ -362,6 +362,7 @@ Interactive control:
 
 Automation, monitoring and bridges:
   controller sensors hwmon --url http://127.0.0.1:8787  Linux PCB sensor export
+  controller osd show --text "Ready" --duration 5s    Windows desktop overlay
   controller batch --file SCRIPT [connection flags]
   controller monitor [--interval 500ms] [--json] [connection flags]
   controller ipc serve [--listen 127.0.0.1:8787|--stdio] [connection flags]

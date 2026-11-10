@@ -227,6 +227,7 @@ const (
 )
 
 type Service struct {
+	DesktopOSD       DesktopOSDService
 	udpOnce          sync.Once
 	udpState         udpRuntime
 	Client           *controller.Client
@@ -1620,6 +1621,8 @@ func (service *Service) dispatch(
 			message = tagInboundAccess(message, access)
 			result, err = service.Client.SendTextMessage(ctx, message)
 		}
+	case "controller.osd.show", "controller.osd.status", "controller.osd.dismiss":
+		result, err = service.desktopOSDCall(ctx, request)
 	case "controller.bridge.list":
 		if service.BridgeList == nil {
 			err = errors.New("host bridge manager is unavailable")
@@ -2716,7 +2719,9 @@ func requestCapability(method string, params json.RawMessage) string {
 		return capabilityReset
 	case "controller.quit", "controller.exit":
 		return capabilityShutdown
-	case "controller.message.send":
+	case "controller.osd.status":
+		return capabilityRead
+	case "controller.message.send", "controller.osd.show", "controller.osd.dismiss":
 		return capabilityMessages
 	case "controller.display.send", "controller.opcode.send",
 		"controller.opcode.exchange", "controller.opcode.request", "controller.action.invoke":
@@ -3292,6 +3297,7 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 	socketIOPath := service.currentSocketIOPath()
 	mux := http.NewServeMux()
 	registerBoardSensorsHTTP(mux, service)
+	registerDesktopOSDHTTP(mux, service)
 	registerAPIReferenceHTTP(mux, service)
 	mux.HandleFunc("/api/diagnostics/cpu-profile", service.serveCPUProfile)
 	mux.HandleFunc("/api/diagnostics/execution-trace", service.serveExecutionTrace)
