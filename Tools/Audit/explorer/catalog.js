@@ -54,7 +54,9 @@
     : Object.entries(spec["x-methods"]).map(([name, m]) => ({
         id: name,
         name,
+        title:m.title,
         summary: m.summary,
+        description:m.description,
         capability: m.capability,
         safe: m.idempotency === "safe",
         schema: m.params_schema
@@ -128,8 +130,9 @@
           item.safe ? "badge safe" : "badge write",
         ),
       );
-    detail.append(badges, el("h1", streams ? item.name : item.id));
-    if (item.summary) detail.append(el("p", item.summary, "description"));
+    detail.append(badges, el("h1", streams ? item.name : (item.title??item.id)));
+    if(!streams && item.title) detail.append(el('code',item.id,'endpoint'));
+    if (item.description || item.summary) detail.append(el("p", item.description || item.summary, "description"));
     if (streams && item.guide) {
       detail.append(el("div", item.address, "endpoint"));
       for (const section of item.sections) {
@@ -167,6 +170,8 @@
         detail.append(methodLinks(["controller.subscribe", "controller.unsubscribe"]));
       }
     } else {
+      if(item.raw.use_case) detail.append(el('h2','Use case'),el('p',item.raw.use_case));
+      if(item.raw.result_description) detail.append(el('h2','Related HTTP workflow response'),el('p',item.raw.result_description));
       detail.append(
         el("div", "HTTP POST /api/rpc · WebSocket /ipc · NDJSON", "endpoint"),
       );
@@ -191,6 +196,8 @@
       detail.append(
         code(item.schema ? "Request template" : "JSON-RPC envelope", request),
       );
+      if (item.schema)
+        detail.append(fieldTable(item.schema));
       if (item.schema)
         detail.append(schemaPanel("Parameter schema", item.schema));
       if (item.result) detail.append(schemaPanel("Result schema", item.result));
@@ -220,13 +227,27 @@
         String(button.dataset.id === selected),
       );
   }
+  function fieldTable(schema) {
+    schema=expand(schema);
+    const box=el('section');
+    if(!schema.properties) return box;
+    box.append(el('h2','Parameters'));
+    const table=el('table');
+    const header=el('tr');header.append(el('th','Field'),el('th','Meaning'));table.append(header);
+    for(const [name,field] of Object.entries(schema.properties)) {
+      const row=el('tr');
+      row.append(el('td',name+(schema.required?.includes(name)?' *':'')),el('td',field.description??field.type??'Structured value; expand the parameter schema for its contract.'));
+      table.append(row);
+    }
+    box.append(table);return box;
+  }
   function filter() {
     const query = $("search").value.toLowerCase().trim();
     const list = items.filter(
       (item) =>
         (!caps.value || item.capability === caps.value) &&
         (!query ||
-          [item.id, item.name, item.summary, item.capability, item.address]
+          [item.id, item.name, item.summary, item.description, item.raw?.use_case, item.capability, item.address]
             .join(" ")
             .toLowerCase()
             .includes(query)),
