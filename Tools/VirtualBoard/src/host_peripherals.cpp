@@ -57,7 +57,7 @@ Mapping mapping(const std::string &text,bool bit) {
   }
   return value;
 }
-struct Sink { unsigned channel; bool failed=false; std::function<void(bool)> write; std::function<void()> close; };
+struct Sink { unsigned channel; bool failed=false; std::function<void(bool)> write; std::function<void()> close; bool safeInactive=true; };
 #ifdef __linux__
 int device(const std::string &path,const std::string &prefix,bool block=false) {
   if(path.rfind(prefix,0)!=0) throw std::invalid_argument("peripheral device path has wrong class");
@@ -162,7 +162,7 @@ struct HostPeripherals::Impl {
         char original[16]{}; const auto n=::pread(fd,original,sizeof(original)-1,0);
         if(n<=0) {::close(fd);throw std::runtime_error("cannot preserve LED brightness");}
         const std::string restore(original,static_cast<size_t>(n));
-        sinks.push_back({value.channel,false,[fd](bool on){const char c=on?'1':'0';if(::pwrite(fd,&c,1,0)!=1)throw std::runtime_error("LED update failed");},[fd,restore]{(void)::pwrite(fd,restore.data(),restore.size(),0);::close(fd);}});
+        sinks.push_back({value.channel,false,[fd](bool on){const char c=on?'1':'0';if(::pwrite(fd,&c,1,0)!=1)throw std::runtime_error("LED update failed");},[fd,restore]{(void)::pwrite(fd,restore.data(),restore.size(),0);::close(fd);},false});
 #else
         throw std::runtime_error("LED-class mappings require Linux; no keyboard key events are injected");
 #endif
@@ -184,7 +184,7 @@ struct HostPeripherals::Impl {
 #ifdef __linux__
         reservePhysical("optical:"+value.path);
         const int fd=device(value.path,"/dev/sr",true);
-        sinks.push_back({value.channel,false,[fd](bool on){if(::ioctl(fd,on?CDROMEJECT:CDROMCLOSETRAY)<0)throw std::runtime_error("optical tray operation refused (possibly busy/mounted)");},[fd]{::close(fd);}});
+        sinks.push_back({value.channel,false,[fd](bool on){if(::ioctl(fd,on?CDROMEJECT:CDROMCLOSETRAY)<0)throw std::runtime_error("optical tray operation refused (possibly busy/mounted)");},[fd]{::close(fd);},false});
 #elif defined(_WIN32)
         if(value.path.size()!=2 || value.path[1]!=':' || value.path[0]<'A' || value.path[0]>'Z') throw std::invalid_argument("optical mapping requires an explicit drive such as D:");
         reservePhysical("optical:"+value.path);
@@ -192,7 +192,7 @@ struct HostPeripherals::Impl {
         const std::string path="\\\\.\\"+value.path;
         HANDLE handle=CreateFileA(path.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_EXISTING,0,nullptr);
         if(handle==INVALID_HANDLE_VALUE)throw std::runtime_error("cannot open assigned optical drive");
-        sinks.push_back({value.channel,false,[handle](bool on){DWORD returned=0;if(!DeviceIoControl(handle,on?IOCTL_STORAGE_EJECT_MEDIA:IOCTL_STORAGE_LOAD_MEDIA,nullptr,0,nullptr,0,&returned,nullptr))throw std::runtime_error("optical tray operation refused");},[handle]{CloseHandle(handle);}});
+        sinks.push_back({value.channel,false,[handle](bool on){DWORD returned=0;if(!DeviceIoControl(handle,on?IOCTL_STORAGE_EJECT_MEDIA:IOCTL_STORAGE_LOAD_MEDIA,nullptr,0,nullptr,0,&returned,nullptr))throw std::runtime_error("optical tray operation refused");},[handle]{CloseHandle(handle);},false});
 #else
         throw std::runtime_error("optical tray mapping is not implemented on this platform");
 #endif
@@ -266,15 +266,21 @@ struct HostPeripherals::Impl {
     wake.notify_one(); if(worker.joinable())worker.join(); cleanup();
   }
   void run() {
-    uint16_t hz=0; uint8_t relays=0; bool baseline=false;
+    uint16_t hz=0; uint8_t relays=0; bool baseline=false,outputsDisabled=false;
+    auto disableOutputs=[&](const char *reason) {
+      if(outputsDisabled)return;
+      outputsDisabled=true;hz=0;tone(0);
+      for(auto &sink:sinks){if(sink.safeInactive && sink.write)try{sink.write(false);}catch(...){}sink.failed=true;}
+      std::cerr<<"peripheral: "<<reason<<"; mapped outputs disabled until restart\n";
+    };
     auto renewed=Clock::now();
     for(;;) {
       Edge edge{}; bool ready=false, overrun=false;
       {std::unique_lock<std::mutex> lock(mutex);wake.wait_for(lock,std::chrono::milliseconds(5),[&]{return stopping||overflow||!queue.empty();});if(stopping)return;overrun=overflow;overflow=false;if(!queue.empty()){edge=queue.front();queue.pop_front();ready=true;}}
-      if(overrun) {hz=0;tone(0);for(auto &sink:sinks){sink.failed=true;try{sink.close();}catch(...){}sink.close={};sink.write={};}std::cerr<<"peripheral: output backpressure; mapped outputs disabled until restart\n";}
-      if(ready) {
+      if(overrun) disableOutputs("output backpressure");
+      if(ready && !outputsDisabled) {
         // Do not replay stale queued actuation after a slow device operation.
-        if(Clock::now()-edge.time>std::chrono::milliseconds(250)){hz=0;tone(0);continue;}
+        if(Clock::now()-edge.time>std::chrono::milliseconds(250)){disableOutputs("stale output edge");continue;}
         for(auto &sink:sinks) if(!sink.failed && baseline && ((relays^edge.relays)&(1U<<(sink.channel-1)))) {
           try{sink.write((edge.relays&(1U<<(sink.channel-1)))!=0);}catch(const std::exception &e){sink.failed=true;std::cerr<<"peripheral R"<<sink.channel<<": "<<e.what()<<"; no retry\n";}
         }
