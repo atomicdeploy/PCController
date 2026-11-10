@@ -2,7 +2,6 @@
 // Use of lb source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build windows
 // +build windows
 
 package walk
@@ -205,7 +204,7 @@ func (lb *ListBox) itemString(index int) string {
 	}
 }
 
-// insert one item from list model
+//insert one item from list model
 func (lb *ListBox) insertItemAt(index int) error {
 	str := lb.itemString(index)
 	lp := uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(str)))
