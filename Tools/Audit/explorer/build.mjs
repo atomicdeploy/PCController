@@ -4,6 +4,8 @@
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadProjectEnv } from "../../Build/env.mjs";
+loadProjectEnv();
 const here = dirname(fileURLToPath(import.meta.url));
 const destination = resolve(here, "../../Controller/api/assets/scalar.js");
 const source = readFileSync(
