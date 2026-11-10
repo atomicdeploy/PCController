@@ -200,6 +200,7 @@ test("reviewed integration guides permit only the paired Pealayer repository", (
     "docs/RF-APPLICATION-ACTIONS.md",
     "docs/Channel-Folders.md",
     "docs/SOFTWARE-UPDATES.md",
+    "docs/NATIVE-PERIPHERAL-BRIDGE.md",
   ]) {
     assert.deepEqual(
       privacyFindings(path, "https://github.com/ToghrolTP/pealayer/pull/46", context),

@@ -34,6 +34,7 @@ const repositoryIdentityPaths = new Set([
   "docs/Requirements-Backlog.md",
   "docs/Media-Timing-and-MCU-Expansion.md",
   "docs/Shared-Production-Firmware.md",
+  "docs/NATIVE-PERIPHERAL-BRIDGE.md",
 ]);
 
 // These reviewed integration documents cite the paired client or candidate
@@ -62,6 +63,7 @@ const reviewedExternalRepositories = new Map([
   ["docs/RF-APPLICATION-ACTIONS.md", new Set(["toghroltp/pealayer"])],
   ["docs/Channel-Folders.md", new Set(["toghroltp/pealayer"])],
   ["docs/SOFTWARE-UPDATES.md", new Set(["toghroltp/pealayer"])],
+  ["docs/NATIVE-PERIPHERAL-BRIDGE.md", new Set(["toghroltp/pealayer"])],
 ]);
 
 // External repository URLs are limited to reviewed dependency provenance.
