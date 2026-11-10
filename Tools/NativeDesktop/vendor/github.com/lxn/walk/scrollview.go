@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+//go:build windows
 // +build windows
 
 package walk
@@ -324,6 +325,7 @@ func (sv *ScrollView) CreateLayoutItem(ctx *LayoutContext) LayoutItem {
 	svli.idealSize = cli.MinSize()
 
 	h, v := sv.Scrollbars()
+	svli.horizontal, svli.vertical = h, v
 
 	if h {
 		svli.layoutFlags |= ShrinkableHorz | GrowableHorz | GreedyHorz
@@ -376,6 +378,8 @@ type scrollViewLayoutItem struct {
 	layoutFlags LayoutFlags
 	scrollX     float64
 	scrollY     float64
+	horizontal  bool
+	vertical    bool
 }
 
 func (li *scrollViewLayoutItem) LayoutFlags() LayoutFlags {
@@ -405,25 +409,29 @@ func (li *scrollViewLayoutItem) HeightForWidth(width int) int {
 func (li *scrollViewLayoutItem) PerformLayout() []LayoutResultItem {
 	composite := li.children[0]
 
+	// geometry.Size includes the non-client scrollbars. Reserve their actual
+	// footprints for every kind of content, not only height-for-width labels.
+	// Otherwise a tall, ordinary grid extends beneath the vertical scrollbar
+	// and clips the right edge of fields even when it comfortably fits.
 	clientSize := li.geometry.Size
-	clientSize.Width -= li.sbSize.Width
-	clientSize.Height -= li.sbSize.Height
-
 	minSize := composite.(MinSizeForSizer).MinSizeForSize(clientSize)
-	if hfw, ok := composite.(HeightForWidther); ok && hfw.HasHeightForWidth() {
-		if minSize.Height > clientSize.Height {
-			if minSize.Width > clientSize.Width {
-				clientSize.Width = minSize.Width
-				minSize = composite.(MinSizeForSizer).MinSizeForSize(clientSize)
-			} else {
-				clientSize.Width -= int(win.GetSystemMetricsForDpi(win.SM_CXVSCROLL, uint32(li.ctx.dpi)))
-				minSize = composite.(MinSizeForSizer).MinSizeForSize(clientSize)
-				if minSize.Width > clientSize.Width {
-					clientSize.Width = minSize.Width
-					minSize = composite.(MinSizeForSizer).MinSizeForSize(clientSize)
-				}
-			}
+	var showHorizontal, showVertical bool
+	for pass := 0; pass < 3; pass++ {
+		showHorizontal = showHorizontal || li.horizontal && minSize.Width > clientSize.Width
+		showVertical = showVertical || li.vertical && minSize.Height > clientSize.Height
+		next := li.geometry.Size
+		if showVertical {
+			next.Width -= int(win.GetSystemMetricsForDpi(win.SM_CXVSCROLL, uint32(li.ctx.dpi)))
 		}
+		if showHorizontal {
+			next.Height -= int(win.GetSystemMetricsForDpi(win.SM_CYHSCROLL, uint32(li.ctx.dpi)))
+		}
+		next.Width, next.Height = maxi(0, next.Width), maxi(0, next.Height)
+		if next == clientSize {
+			break
+		}
+		clientSize = next
+		minSize = composite.(MinSizeForSizer).MinSizeForSize(clientSize)
 	}
 
 	s := maxSize(minSize, clientSize)

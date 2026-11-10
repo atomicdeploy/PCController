@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+//go:build windows
 // +build windows
 
 package walk
@@ -15,6 +16,8 @@ import (
 )
 
 const tabWidgetWindowClass = `\o/ Walk_TabWidget_Class \o/`
+
+var tabWidgetMapWindowPoints = syscall.NewLazyDLL("user32.dll").NewProc("MapWindowPoints")
 
 func init() {
 	AppendToWalkInit(func() {
@@ -241,27 +244,18 @@ func (tw *TabWidget) resizePages() {
 // pageBounds returns page bounds in native pixels.
 func (tw *TabWidget) pageBounds() Rectangle {
 	var r win.RECT
-	if !win.GetWindowRect(tw.hWndTab, &r) {
-		lastError("GetWindowRect")
+	if !win.GetClientRect(tw.hWndTab, &r) {
+		lastError("GetClientRect")
 		return Rectangle{}
-	}
-
-	p := win.POINT{
-		r.Left,
-		r.Top,
-	}
-	if !win.ScreenToClient(tw.hWnd, &p) {
-		newError("ScreenToClient failed")
-		return Rectangle{}
-	}
-
-	r = win.RECT{
-		p.X,
-		p.Y,
-		r.Right - r.Left + p.X,
-		r.Bottom - r.Top + p.Y,
 	}
 	win.SendMessage(tw.hWndTab, win.TCM_ADJUSTRECT, 0, uintptr(unsafe.Pointer(&r)))
+	// ScreenToClient is not valid for mirrored layouts: mapping only the
+	// physical left edge yielded an origin near the right edge, after which
+	// PerformLayout subtracted that origin twice and collapsed page width to
+	// zero. Map the entire RECT (two points) so Windows also swaps its edges
+	// when crossing between mirrored and non-mirrored HWNDs. Zero can be a
+	// successful no-translation result, so it is not an error sentinel.
+	_, _, _ = tabWidgetMapWindowPoints.Call(uintptr(tw.hWndTab), uintptr(tw.hWnd), uintptr(unsafe.Pointer(&r)), 2)
 
 	adjustment := 2 * int32(tw.IntFrom96DPI(1))
 	return Rectangle{

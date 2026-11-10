@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+//go:build windows
 // +build windows
 
 package walk
@@ -739,6 +740,20 @@ func (cb *ComboBox) CreateLayoutItem(ctx *LayoutContext) LayoutItem {
 	// FIXME: Use GetThemePartSize instead of guessing
 	w := maxi(defaultSize.Width, cb.maxItemTextWidth+int(win.GetSystemMetricsForDpi(win.SM_CXVSCROLL, uint32(ctx.dpi)))+8)
 	h := defaultSize.Height + 1
+	// USER32 fixes the closed dropdown height from its selected-item font.
+	// The dialog-unit guess can be taller (43px versus an actual 36px at
+	// 150%), causing adjacent labels to be centered against invisible space.
+	// Measure the real native field rather than moving or repainting its text.
+	if cb.hasStyleBits(win.CBS_DROPDOWN) {
+		itemHeight := cb.SendMessage(win.CB_GETITEMHEIGHT, ^uintptr(0), 0)
+		var native win.RECT
+		if itemHeight != win.CB_ERR && itemHeight > 0 &&
+			win.GetWindowRect(cb.hWnd, &native) {
+			if actual := int(native.Bottom - native.Top); actual >= int(itemHeight) && actual <= h*2 {
+				h = actual
+			}
+		}
+	}
 
 	return &comboBoxLayoutItem{
 		layoutFlags: layoutFlags,

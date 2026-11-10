@@ -556,7 +556,7 @@ func (r *Stroker) Line(b fixed.Point26_6) {
 	r.LineSeg(r, b)
 }
 
-//LineSeg is called by both the Stroker and Dasher
+// LineSeg is called by both the Stroker and Dasher
 func (r *Stroker) LineSeg(sgm Rasterx, b fixed.Point26_6) {
 	r.trailPoint = r.leadPoint
 	ba := b.Sub(r.a)

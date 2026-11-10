@@ -118,6 +118,9 @@ func (p nativePages) submitEffectsPage(ctx context.Context, action string, value
 		}
 		return p.loadEffectsPage(state), nil
 	case "create":
+		if values["definition"] != values["definition_baseline"] {
+			return desktop.Page{}, errors.New("Advanced JSON has unapplied changes; save that draft or explicitly discard it before creating an effect.")
+		}
 		if strings.TrimSpace(values["id"]) == "" || strings.TrimSpace(values["name"]) == "" {
 			return desktop.Page{}, errors.New("enter a new ID and name")
 		}

@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+//go:build windows
 // +build windows
 
 package walk
@@ -99,60 +100,58 @@ func CreateLayoutItemsForContainerWithContext(container Container, ctx *LayoutCo
 	return containerItem
 }
 
-func startLayoutPerformer(form Form) (performLayout chan ContainerLayoutItem, layoutResults chan []LayoutResult, inSizeLoop chan bool, updateStopwatch chan *stopwatch, quit chan struct{}) {
-	performLayout = make(chan ContainerLayoutItem)
-	layoutResults = make(chan []LayoutResult)
-	inSizeLoop = make(chan bool)
+func startLayoutPerformer(form Form) (performLayout chan layoutRequest, layoutResults chan layoutWorkResult, updateStopwatch chan *stopwatch, quit chan struct{}) {
+	// Keep one not-yet-started request. The UI thread replaces this slot with
+	// the newest geometry instead of waiting behind work that is already stale.
+	performLayout = make(chan layoutRequest, 1)
+	layoutResults = make(chan layoutWorkResult)
 	updateStopwatch = make(chan *stopwatch)
 	quit = make(chan struct{})
 
 	var stopwatch *stopwatch
 
 	go func() {
-		sizing := false
-		busy := false
-		var cancel chan struct{}
-		done := make(chan []LayoutResult)
+		var active layoutWorkerGeneration
+		done := make(chan layoutWorkResult)
 
 		for {
 			select {
-			case root := <-performLayout:
-				if busy {
-					close(cancel)
+			case request := <-performLayout:
+				request = latestQueuedLayoutRequest(request, performLayout)
+				cancel := active.begin(request.generation)
+
+				go layoutTree(
+					request.root,
+					request.root.Geometry().ClientSize,
+					cancel,
+					done,
+					stopwatch,
+					request,
+				)
+
+			case result := <-done:
+				// A canceled layout can finish concurrently with its
+				// replacement. Its tagged completion must neither cancel the
+				// newer job nor be committed to HWNDs.
+				if !active.complete(result.generation) {
+					continue
 				}
 
-				busy = true
-				cancel = make(chan struct{})
-
-				go layoutTree(root, root.Geometry().ClientSize, cancel, done, stopwatch)
-
-			case results := <-done:
-				busy = false
-				if cancel != nil {
-					close(cancel)
-					cancel = nil
-				}
-
-				if sizing {
-					layoutResults <- results
+				if result.synchronous {
+					layoutResults <- result
 				} else {
-					form.AsFormBase().synchronizeLayout(&formLayoutResult{form, stopwatch, results})
+					form.AsFormBase().synchronizeLayout(&formLayoutResult{
+						form:       form,
+						stopwatch:  result.stopwatch,
+						results:    result.results,
+						generation: result.generation,
+					})
 				}
-
-			case sizing = <-inSizeLoop:
 
 			case stopwatch = <-updateStopwatch:
 
 			case <-quit:
-				close(performLayout)
-				close(layoutResults)
-				close(inSizeLoop)
-				close(updateStopwatch)
-				if cancel != nil {
-					close(cancel)
-				}
-				close(done)
-				close(quit)
+				active.cancel()
 				return
 			}
 		}
@@ -161,8 +160,78 @@ func startLayoutPerformer(form Form) (performLayout chan ContainerLayoutItem, la
 	return
 }
 
+// offerLatestLayoutRequest is intentionally non-blocking for the UI thread
+// when an older request is still waiting in the performer queue. There is one
+// producer per FormBase, so removing the queued value is a safe replacement,
+// not work stealing between forms.
+func offerLatestLayoutRequest(queue chan layoutRequest, request layoutRequest) {
+	for {
+		select {
+		case queue <- request:
+			return
+		default:
+		}
+
+		select {
+		case <-queue:
+		default:
+		}
+	}
+}
+
+func latestQueuedLayoutRequest(first layoutRequest, queue <-chan layoutRequest) layoutRequest {
+	latest := first
+	for {
+		select {
+		case request := <-queue:
+			latest = request
+		default:
+			return latest
+		}
+	}
+}
+
+// layoutWorkerGeneration owns cancellation for exactly one generation.
+// Completing an older generation is a no-op; in particular it must not close
+// the cancellation channel belonging to the replacement generation.
+type layoutWorkerGeneration struct {
+	generation uint64
+	cancelCh   chan struct{}
+}
+
+func (state *layoutWorkerGeneration) begin(generation uint64) chan struct{} {
+	state.cancel()
+	state.generation = generation
+	state.cancelCh = make(chan struct{})
+	return state.cancelCh
+}
+
+func (state *layoutWorkerGeneration) complete(generation uint64) bool {
+	if generation == 0 || generation != state.generation {
+		return false
+	}
+	state.generation = 0
+	state.cancelCh = nil
+	return true
+}
+
+func (state *layoutWorkerGeneration) cancel() {
+	if state.cancelCh != nil {
+		close(state.cancelCh)
+	}
+	state.generation = 0
+	state.cancelCh = nil
+}
+
 // layoutTree lays out tree. size parameter is in native pixels.
-func layoutTree(root ContainerLayoutItem, size Size, cancel chan struct{}, done chan []LayoutResult, stopwatch *stopwatch) {
+func layoutTree(
+	root ContainerLayoutItem,
+	size Size,
+	cancel <-chan struct{},
+	done chan<- layoutWorkResult,
+	stopwatch *stopwatch,
+	request layoutRequest,
+) {
 	const minSizeCacheSubject = "layoutTree - populating min size cache"
 
 	if stopwatch != nil {
@@ -273,7 +342,15 @@ func layoutTree(root ContainerLayoutItem, size Size, cancel chan struct{}, done 
 				stopwatch.Stop(layoutSubject)
 			}
 
-			done <- layoutResults
+			select {
+			case done <- layoutWorkResult{
+				generation:  request.generation,
+				synchronous: request.synchronous,
+				stopwatch:   stopwatch,
+				results:     layoutResults,
+			}:
+			case <-cancel:
+			}
 			return
 
 		case <-cancel:
@@ -740,10 +817,24 @@ type Geometry struct {
 	ConsumingSpaceWhenInvisible bool
 }
 
+type layoutRequest struct {
+	root        ContainerLayoutItem
+	generation  uint64
+	synchronous bool
+}
+
+type layoutWorkResult struct {
+	generation  uint64
+	synchronous bool
+	stopwatch   *stopwatch
+	results     []LayoutResult
+}
+
 type formLayoutResult struct {
-	form      Form
-	stopwatch *stopwatch
-	results   []LayoutResult
+	form       Form
+	stopwatch  *stopwatch
+	results    []LayoutResult
+	generation uint64
 }
 
 type LayoutResult struct {

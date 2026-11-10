@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +10,58 @@ import (
 	"pccontroller.local/controller/internal/link"
 	"pccontroller.local/controller/internal/native"
 )
+
+type failedMotionReplacementPort struct {
+	*buzzerSettingsWirePort
+	short bool
+}
+
+func (p *failedMotionReplacementPort) Write(data []byte) (int, error) {
+	frame, err := native.Decode(data)
+	if err == nil && frame.Opcode == native.OpRelaySide && len(frame.Payload) == 2 && frame.Payload[1] == 2 {
+		if p.short {
+			return len(data) - 1, nil
+		}
+		return 0, errors.New("replacement transport failed")
+	}
+	return p.buzzerSettingsWirePort.Write(data)
+}
+
+func TestMotionHoldFailedReplacementPreservesSafetyStop(t *testing.T) {
+	for _, short := range []bool{false, true} {
+		t.Run(map[bool]string{false: "write-error", true: "short-write"}[short], func(t *testing.T) {
+			port := &failedMotionReplacementPort{buzzerSettingsWirePort: newBuzzerSettingsWirePort(native.DefaultSettings()), short: short}
+			r := New(Options{})
+			r.session = link.NewForPort("FAILED-MOTION-REPLACEMENT", port)
+			r.generation, r.connectionState = 7, "connected"
+			t.Cleanup(func() { r.Close() })
+			lease, err := r.StartMotionHold(context.Background(), 7, 1, 1, strings.Repeat("7", 32))
+			if err != nil {
+				t.Fatal(err)
+			}
+			<-port.writes
+			if err := r.Command(context.Background(), native.OpRelaySide, []byte{0, 2}); err == nil {
+				t.Fatal("failed replacement accepted")
+			}
+			r.mu.Lock()
+			valid := r.motionHoldValidLocked(lease)
+			r.motionHolds[0].ExpiresAt = time.Now().Add(-time.Millisecond)
+			r.mu.Unlock()
+			if !valid {
+				t.Fatal("failed replacement revoked watchdog")
+			}
+			r.expireMotionHold(lease, 0)
+			select {
+			case frame := <-port.writes:
+				if frame.Opcode != native.OpRelaySide || frame.Payload[1] != 0 {
+					t.Fatal("expiry did not stop", frame)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("watchdog stop missing after failed replacement")
+			}
+		})
+	}
+}
 
 func motionHoldFixture(t *testing.T) (*Runtime, *buzzerSettingsWirePort) {
 	t.Helper()

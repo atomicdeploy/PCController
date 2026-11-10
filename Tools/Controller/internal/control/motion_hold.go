@@ -44,7 +44,8 @@ func (r *Runtime) guardMotionHoldWrite(ctx context.Context, generation uint64, o
 	if mask == 0 {
 		return ctx
 	}
-	return link.WithRequestWriteGuard(ctx, func() error {
+	var replaced [2]MotionHoldLease
+	ctx = link.WithRequestWriteGuard(ctx, func() error {
 		r.mu.Lock()
 		defer r.mu.Unlock()
 		if r.generation != generation {
@@ -52,10 +53,19 @@ func (r *Runtime) guardMotionHoldWrite(ctx context.Context, generation uint64, o
 		}
 		for side := 0; side < 2; side++ {
 			if mask&(1<<side) != 0 {
-				r.motionHolds[side] = MotionHoldLease{}
+				replaced[side] = r.motionHolds[side]
 			}
 		}
 		return nil
+	})
+	return link.WithRequestWriteSuccess(ctx, func() {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		for side, lease := range replaced {
+			if lease.ID != "" && r.motionHoldValidLocked(lease) {
+				r.motionHolds[side] = MotionHoldLease{}
+			}
+		}
 	})
 }
 

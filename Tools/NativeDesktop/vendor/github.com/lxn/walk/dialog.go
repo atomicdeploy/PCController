@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+//go:build windows
 // +build windows
 
 package walk
@@ -43,10 +44,11 @@ type dialogish interface {
 
 type Dialog struct {
 	FormBase
-	result               int
-	defaultButton        *PushButton
-	cancelButton         *PushButton
-	centerInOwnerWhenRun bool
+	result                 int
+	defaultButton          *PushButton
+	cancelButton           *PushButton
+	centerInOwnerWhenRun   bool
+	preservePreparedBounds bool
 }
 
 func NewDialog(owner Form) (*Dialog, error) {
@@ -127,6 +129,15 @@ func (dlg *Dialog) CancelButton() *PushButton {
 	return dlg.cancelButton
 }
 
+// SetCenterInOwnerWhenRun controls Walk's legacy first-show centering pass.
+// Embedders that have already committed monitor- and DPI-correct hidden
+// bounds can disable it so Show does not recompute those bounds from the
+// dialog layout minimum.
+func (dlg *Dialog) SetCenterInOwnerWhenRun(value bool) {
+	dlg.centerInOwnerWhenRun = value
+	dlg.preservePreparedBounds = !value
+}
+
 func (dlg *Dialog) SetCancelButton(button *PushButton) error {
 	if button != nil && !win.IsChild(dlg.hWnd, button.hWnd) {
 		return newError("not a descendant of the dialog")
@@ -162,7 +173,7 @@ func (dlg *Dialog) Show() {
 		willRestore = state != ""
 	}
 
-	if !willRestore {
+	if !willRestore && !dlg.preservePreparedBounds {
 		var size Size
 		if layout := dlg.Layout(); layout != nil {
 			size = maxSize(dlg.clientComposite.MinSizeHint(), dlg.MinSizePixels())

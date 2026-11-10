@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+//go:build windows
 // +build windows
 
 package walk
@@ -271,7 +272,11 @@ func (cb *ContainerBase) doPaint() error {
 
 func (cb *ContainerBase) WndProc(hwnd win.HWND, msg uint32, wParam, lParam uintptr) uintptr {
 	switch msg {
-	case win.WM_CTLCOLOREDIT, win.WM_CTLCOLORSTATIC:
+	// Check boxes and radio buttons request WM_CTLCOLORBTN. Route it through
+	// the same effective ancestor brush path so transparent button-class
+	// controls inherit gradient or glass-safe container backgrounds instead
+	// of receiving a rectangular system-color backplate.
+	case win.WM_CTLCOLOREDIT, win.WM_CTLCOLORSTATIC, win.WM_CTLCOLORBTN:
 		if hBrush := cb.handleWMCTLCOLOR(wParam, lParam); hBrush != 0 {
 			return hBrush
 		}

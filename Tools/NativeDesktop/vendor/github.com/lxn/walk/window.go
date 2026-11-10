@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+//go:build windows
 // +build windows
 
 package walk
@@ -485,12 +486,39 @@ func MustRegisterWindowClassWithWndProcPtrAndStyle(className string, wndProcPtr 
 		panic("GetModuleHandle")
 	}
 
-	hIcon := win.LoadIcon(hInst, win.MAKEINTRESOURCE(7)) // rsrc uses 7 for app icon
-	if hIcon == 0 {
-		hIcon = win.LoadIcon(0, win.MAKEINTRESOURCE(win.IDI_APPLICATION))
+	loadIcon := func(hInstance win.HINSTANCE, resourceID uintptr, cx, cy int32) win.HICON {
+		return win.HICON(win.LoadImage(
+			hInstance,
+			win.MAKEINTRESOURCE(resourceID),
+			win.IMAGE_ICON,
+			cx,
+			cy,
+			win.LR_SHARED,
+		))
 	}
-	if hIcon == 0 {
-		panic("LoadIcon")
+	loadClassIcon := func(cx, cy int32) win.HICON {
+		// goversioninfo publishes the application icon under the standard
+		// IDI_APPLICATION resource ID. Keep resource 7 as a compatibility
+		// fallback for executables built with the older rsrc tool.
+		if hIcon := loadIcon(hInst, win.IDI_APPLICATION, cx, cy); hIcon != 0 {
+			return hIcon
+		}
+		if hIcon := loadIcon(hInst, 7, cx, cy); hIcon != 0 {
+			return hIcon
+		}
+		return loadIcon(0, win.IDI_APPLICATION, cx, cy)
+	}
+
+	hIcon := loadClassIcon(
+		win.GetSystemMetrics(win.SM_CXICON),
+		win.GetSystemMetrics(win.SM_CYICON),
+	)
+	hIconSm := loadClassIcon(
+		win.GetSystemMetrics(win.SM_CXSMICON),
+		win.GetSystemMetrics(win.SM_CYSMICON),
+	)
+	if hIcon == 0 || hIconSm == 0 {
+		panic("LoadImage icon")
 	}
 
 	hCursor := win.LoadCursor(0, win.MAKEINTRESOURCE(win.IDC_ARROW))
@@ -503,6 +531,7 @@ func MustRegisterWindowClassWithWndProcPtrAndStyle(className string, wndProcPtr 
 	wc.LpfnWndProc = wndProcPtr
 	wc.HInstance = hInst
 	wc.HIcon = hIcon
+	wc.HIconSm = hIconSm
 	wc.HCursor = hCursor
 	wc.HbrBackground = win.COLOR_BTNFACE + 1
 	wc.LpszClassName = syscall.StringToUTF16Ptr(className)

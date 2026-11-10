@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+//go:build windows
 // +build windows
 
 package walk
@@ -18,6 +19,8 @@ import (
 )
 
 const inchesPerMeter float64 = 39.37007874
+
+var bitmapReleaseDC = win.ReleaseDC
 
 type Bitmap struct {
 	hBmp               win.HBITMAP
@@ -265,6 +268,10 @@ func (bmp *Bitmap) ToImage() (*image.RGBA, error) {
 	var bi win.BITMAPINFO
 	bi.BmiHeader.BiSize = uint32(unsafe.Sizeof(bi.BmiHeader))
 	hdc := win.GetDC(0)
+	if hdc == 0 {
+		return nil, newError("GetDC failed")
+	}
+	defer bitmapReleaseDC(0, hdc)
 	if ret := win.GetDIBits(hdc, bmp.hBmp, 0, 0, nil, &bi, win.DIB_RGB_COLORS); ret == 0 {
 		return nil, newError("GetDIBits get bitmapinfo failed")
 	}
@@ -292,6 +299,104 @@ func (bmp *Bitmap) ToImage() (*image.RGBA, error) {
 	}
 
 	return img, nil
+}
+
+// ToImageInto copies a 32-bit Bitmap into an existing tightly packed RGBA
+// image. It is intended for repaint loops that need to reuse their Go pixel
+// storage instead of allocating a temporary DIB buffer and a second image on
+// every frame.
+func (bmp *Bitmap) ToImageInto(destination *image.RGBA) error {
+	if bmp == nil || bmp.hBmp == 0 {
+		return newError("invalid Bitmap")
+	}
+	if destination == nil {
+		return newError("nil destination image")
+	}
+
+	var bi win.BITMAPINFO
+	bi.BmiHeader.BiSize = uint32(unsafe.Sizeof(bi.BmiHeader))
+	hdc := win.GetDC(0)
+	if hdc == 0 {
+		return newError("GetDC failed")
+	}
+	defer bitmapReleaseDC(0, hdc)
+	if ret := win.GetDIBits(
+		hdc,
+		bmp.hBmp,
+		0,
+		0,
+		nil,
+		&bi,
+		win.DIB_RGB_COLORS,
+	); ret == 0 {
+		return newError("GetDIBits get bitmapinfo failed")
+	}
+
+	width := int(bi.BmiHeader.BiWidth)
+	rawHeight := int(bi.BmiHeader.BiHeight)
+	height := rawHeight
+	if height < 0 {
+		height = -height
+	}
+	expectedBounds := image.Rect(0, 0, width, height)
+	if width <= 0 || height <= 0 ||
+		bi.BmiHeader.BiBitCount != 32 ||
+		destination.Bounds() != expectedBounds ||
+		destination.Stride != width*4 ||
+		len(destination.Pix) != width*height*4 {
+		return newError("destination image does not match 32-bit Bitmap")
+	}
+
+	bi.BmiHeader.BiCompression = win.BI_RGB
+	if ret := win.GetDIBits(
+		hdc,
+		bmp.hBmp,
+		0,
+		uint32(height),
+		&destination.Pix[0],
+		&bi,
+		win.DIB_RGB_COLORS,
+	); ret == 0 {
+		return newError("GetDIBits failed")
+	}
+	bgraToRGBAInPlace(destination.Pix, width, height, rawHeight > 0)
+	return nil
+}
+
+func bgraToRGBAInPlace(pixels []byte, width, height int, bottomUp bool) {
+	stride := width * 4
+	if !bottomUp {
+		for y := 0; y < height; y++ {
+			swapRedBlue(pixels[y*stride : (y+1)*stride])
+		}
+		return
+	}
+
+	for y := 0; y < height/2; y++ {
+		top := pixels[y*stride : (y+1)*stride]
+		bottomOffset := (height - y - 1) * stride
+		bottom := pixels[bottomOffset : bottomOffset+stride]
+		for offset := 0; offset < stride; offset += 4 {
+			topBlue, topGreen := top[offset], top[offset+1]
+			topRed, topAlpha := top[offset+2], top[offset+3]
+			bottomBlue, bottomGreen := bottom[offset], bottom[offset+1]
+			bottomRed, bottomAlpha := bottom[offset+2], bottom[offset+3]
+			top[offset+0], top[offset+1] = bottomRed, bottomGreen
+			top[offset+2], top[offset+3] = bottomBlue, bottomAlpha
+			bottom[offset+0], bottom[offset+1] = topRed, topGreen
+			bottom[offset+2], bottom[offset+3] = topBlue, topAlpha
+		}
+	}
+	if height%2 != 0 {
+		middle := height / 2 * stride
+		swapRedBlue(pixels[middle : middle+stride])
+	}
+}
+
+func swapRedBlue(row []byte) {
+	for offset := 0; offset < len(row); offset += 4 {
+		row[offset], row[offset+2] = row[offset+2], row[offset]
+	}
 }
 
 func (bmp *Bitmap) hasTransparency() (bool, error) {
