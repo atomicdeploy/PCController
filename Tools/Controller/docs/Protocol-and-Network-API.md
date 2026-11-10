@@ -12,6 +12,14 @@ without a documentation server. Repository validation regenerates the
 contracts logically and rejects drift from the actual RPC dispatcher or REST
 route families.
 
+The running host serves the same explorer at `/api/docs/`. Choose
+**WebSocket & events** for the [connection and subscription guide](../api/protocols.html#websocket),
+read-only browser example, topic/cursor lifecycle, message schemas, and
+[Socket.IO handshake/framing](../api/protocols.html#socketio). The
+[JSON-RPC method catalog](../api/rpc.html) applies to both HTTP and WebSocket;
+the event page resolves its references offline rather than fetching schemas.
+The explorer is browse/copy only and never opens a control socket itself.
+
 ## Typed host notification envelope
 
 `controller.message.send` and `POST /api/messages` use the same bounded host

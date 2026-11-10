@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { createSchemaResolver } from "./explorer/schema-resolver.mjs";
 
 import {
   extractGoCaseMethods,
@@ -226,4 +227,60 @@ test('explorer includes complete protocol catalogs and source-derived JSON field
   assert.deepEqual(openapi.paths['/api/sensors/board'].get.tags,['sensors']);
   const bootstrap=readFileSync(join(outputDirectory,'assets/scalar.js'),'utf8');
   for(const safety of ['hideTestRequestButton: true','persistAuth: false','telemetry: false']) assert.ok(bootstrap.includes(safety),safety);
+});
+
+test('WebSocket explorer exposes connection guides, resolved RPC contracts and every emitted notification', () => {
+  const events = JSON.parse(readFileSync(join(outputDirectory, 'asyncapi.json'), 'utf8'));
+  const rpc = JSON.parse(readFileSync(join(outputDirectory, 'jsonrpc.schema.json'), 'utf8'));
+  const page = readFileSync(join(outputDirectory, 'protocols.html'), 'utf8');
+  const client = readFileSync(join(outputDirectory, 'assets/catalog.js'), 'utf8');
+  for (const name of ['reference.html', 'rpc.html', 'protocols.html']) {
+    const html = readFileSync(join(outputDirectory, name), 'utf8');
+    assert.ok(html.includes('WebSocket &amp; events'), name);
+    assert.ok(html.includes('href="asyncapi.json"'), name);
+  }
+  assert.ok(page.includes('id="rpc-contract"'), 'external RPC references must resolve offline');
+  assert.ok(client.includes('x-socket-io-events'), 'Socket.IO event metadata must use the published extension key');
+  const guides = events['x-connection-guides'];
+  assert.deepEqual(guides.map(guide => guide.id), ['websocket', 'socketio']);
+  const quickstart = guides[0].sections.find(section => section.code).code;
+  for (const method of quickstart.matchAll(/method: '(controller\.[a-z.]+)'/gu)) {
+    assert.ok(rpc['x-methods'][method[1]], method[1]);
+  }
+  assert.ok(quickstart.includes('config.websocket_path'));
+  assert.ok(quickstart.includes("'wss:'"));
+  assert.ok(!quickstart.includes('auth_token'));
+  const subscription = rpc.$defs.Subscription;
+  assert.equal(rpc['x-methods']['controller.subscribe'].params_schema.$ref, '#/$defs/Subscription');
+  const source = readFileSync(join(root, 'Tools/Controller/internal/ipcjson/ipc.go'), 'utf8');
+  const fields = source.match(/type wsSubscription struct \{([\s\S]*?)\n\}/u)[1];
+  for (const match of fields.matchAll(/json:"([^",]+)/gu)) assert.ok(subscription.properties[match[1]], match[1]);
+  const notifications = new Set(Object.values(events.components.messages).map(message => message.payload?.properties?.method?.const).filter(Boolean));
+  for (const match of source.matchAll(/wsNotification\{[\s\S]*?Method:\s*"(controller\.[a-z.]+)"/gu)) {
+    assert.ok(notifications.has(match[1]), `undocumented notification ${match[1]}`);
+    assert.ok(rpc.$defs.notification.properties.method.enum.includes(match[1]), match[1]);
+    assert.ok(events['x-socket-io-events'].outgoing.includes(match[1]), match[1]);
+  }
+  assert.ok(guides[1].sections.some(section => section.code?.startsWith('42["subscribe"')));
+});
+
+test('offline schema resolver expands nested response branches and preserves cycle edges', () => {
+  const events = JSON.parse(readFileSync(join(outputDirectory, 'asyncapi.json'), 'utf8'));
+  const rpc = JSON.parse(readFileSync(join(outputDirectory, 'jsonrpc.schema.json'), 'utf8'));
+  const { expand } = createSchemaResolver(events, rpc);
+  const response = expand(events.components.messages.JSONRPCResponse.payload);
+  assert.equal(response.oneOf[0].type, 'object');
+  assert.ok(response.oneOf[0].required.includes('result'));
+  assert.equal(response.oneOf[1].properties.error.properties.code.type, 'integer');
+  assert.equal(response.oneOf[0].properties.id.oneOf[0].type, 'string');
+  assert.ok(!JSON.stringify(response).includes('"$ref"'), 'all finite response branches must resolve');
+  const finite = expand(events.components.messages.JSONRPCRequest.payload);
+  assert.ok(!JSON.stringify(finite).includes('"$ref"'), 'request allOf/parameter schemas must also resolve');
+  const graph = { $defs: { node: { type: 'object', properties: { child: { $ref: '#/$defs/node' } } }, 'a/b~c': { type: 'string' }, forbidden: false } };
+  const resolver = createSchemaResolver(graph);
+  assert.equal(resolver.expand({ $ref: '#/$defs/node' }).properties.child.$ref, '#/$defs/node');
+  assert.equal(resolver.expand({ $ref: '#/$defs/a~1b~0c' }).type, 'string');
+  assert.equal(resolver.expand({ $ref: '#/$defs/forbidden' }), false);
+  assert.deepEqual(resolver.expand({ $ref: 'https://untrusted.invalid/schema' }), { $ref: 'https://untrusted.invalid/schema' });
+  assert.equal(resolver.expand({ $ref: '#/$defs/a~1b~0c', description: 'local override' }).description, 'local override');
 });
