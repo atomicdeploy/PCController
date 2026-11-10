@@ -210,7 +210,12 @@ roots and rejects gaps between the repository and Dependabot configuration.
 CodeQL runs `security-extended` queries across GitHub Actions, JavaScript and
 TypeScript tooling, Go on Linux and Windows, and C/C++ across AVR, Linux, and
 Windows builds. Platform-specific categories remain distinct, while the stable
-`🛡️ CodeQL · Entire repository` job is the protected-branch gate. Checkouts do
+`🛡️ CodeQL · Entire repository` job is the protected-branch gate. The Windows Go
+category builds both the integrated host and the standalone Native Desktop
+module, including the SDK entry point that needs a separate build tag.
+The branch rules also require CodeQL results and block high-or-higher security
+alerts; a successful analysis job alone does not mean there are no findings.
+Checkouts do
 not persist credentials, workflows receive no repository secrets, and the scan
 uploads SARIF only.
 

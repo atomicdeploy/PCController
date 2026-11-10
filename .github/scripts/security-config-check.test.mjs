@@ -105,6 +105,17 @@ test("CodeQL validation rejects a cosmetic gate that ignores failures", () => {
   assert.ok(errors.some((error) => error.includes("must fail for a non-success")));
 });
 
+test("CodeQL validation requires standalone Windows Desktop and its tagged SDK", () => {
+  for (const marker of [
+    "working-directory: Tools/NativeDesktop",
+    "go build -mod=vendor -buildvcs=false ./...",
+    "-tags pccontroller_desktop_sdk -buildmode=c-archive",
+  ]) {
+    const errors = validateCodeql(codeql.replace(marker, ""), inventory.languages);
+    assert.ok(errors.some((error) => error.includes(`go-windows build is missing ${marker}`)));
+  }
+});
+
 test("deployment validation rejects release-selected code on the self-hosted runner", () => {
   const mutated = deployment.replace(
     '      - name: "📥 Check out protected deployment controller"\n' +

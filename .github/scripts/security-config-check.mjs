@@ -290,6 +290,10 @@ export function validateCodeql(source, sourceLanguages) {
       "go run ./winres/generate_icon.go",
       "-buildmode=c-shared",
       "./cmd/controller-cabi",
+      "working-directory: Tools/NativeDesktop",
+      "go build -mod=vendor -buildvcs=false ./...",
+      "-tags pccontroller_desktop_sdk -buildmode=c-archive",
+      "./cmd/PCControllerDesktopDLL",
     ]],
     ["cpp-avr-linux", [
       "./build.sh --firmware-only --clean",

@@ -166,6 +166,19 @@ jobs:
           go build -buildvcs=false -trimpath -tags controllerlib -buildmode=c-shared -o "%RUNNER_TEMP%\host-codeql.dll" ./cmd/controller-cabi
           if errorlevel 1 exit /b 1
 
+      - name: "🪟 Extract standalone Native Desktop and SDK"
+        if: matrix.key == 'go-windows'
+        working-directory: Tools/NativeDesktop
+        shell: cmd
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          @echo off
+          go build -mod=vendor -buildvcs=false ./...
+          if errorlevel 1 exit /b 1
+          go build -mod=vendor -buildvcs=false -tags pccontroller_desktop_sdk -buildmode=c-archive -o "%RUNNER_TEMP%\desktop-codeql.a" ./cmd/PCControllerDesktopDLL
+          if errorlevel 1 exit /b 1
+
       - name: "⚡ Build AVR firmware and Linux Virtual Board"
         if: matrix.key == 'cpp-avr-linux'
         shell: bash
@@ -234,7 +247,7 @@ jobs:
             echo '|---|---|---|'
             echo '| Workflows | Actions | All tracked GitHub Actions workflows |'
             echo '| Project tooling | JavaScript/TypeScript | Build, Firmware, Audit, and CI helpers |'
-            echo '| Host | Go | Native Linux and Windows, tests, generator, and tagged C ABI |'
+            echo '| Host + Native Desktop | Go | Linux/Windows host and tagged C ABI; standalone Windows desktop and tagged SDK |'
             echo '| Firmware + Virtual Board | C/C++ | MiniCore AVR, native Linux, and native Windows |'
           } >> "$GITHUB_STEP_SUMMARY"
           [[ "$ANALYSIS_RESULT" == "success" ]]
