@@ -31,16 +31,18 @@ func (s *Service) StartMQTT(ctx context.Context) <-chan struct{} {
 			updates = s.SubscribeHostConfig(ctx)
 		}
 		config := s.hostConfig().Integrations.MQTT
-		var stop context.CancelFunc
-		var stopped chan struct{}
-		shutdown := func() {
-			if stop != nil {
-				stop()
-				<-stopped
-				stop = nil
+		nextConfig := func() (mqttbridge.Config, bool) {
+			for {
+				select {
+				case <-ctx.Done():
+					return mqttbridge.Config{}, false
+				case next, ok := <-updates:
+					if !ok || next.Integrations.MQTT != config {
+						return next.Integrations.MQTT, ok
+					}
+				}
 			}
 		}
-		defer shutdown()
 		report := func(status mqttbridge.Status) {
 			s.mqttState.Lock()
 			previous := s.mqttState.status
@@ -59,31 +61,25 @@ func (s *Service) StartMQTT(ctx context.Context) <-chan struct{} {
 		}
 		for {
 			report(mqttbridge.Status{Available: mqttbridge.Available, Enabled: config.Enabled})
+			var next mqttbridge.Config
+			var ok bool
 			if mqttbridge.Available && config.Enabled && s.Client != nil {
-				var session context.Context
-				session, stop = context.WithCancel(ctx)
-				stopped = make(chan struct{})
+				session, stop := context.WithCancel(ctx)
+				stopped := make(chan struct{})
 				go func(config mqttbridge.Config, stopped chan struct{}) {
 					defer close(stopped)
 					s.runMQTT(session, config, report)
 				}(config, stopped)
+				next, ok = nextConfig()
+				stop()
+				<-stopped
+			} else {
+				next, ok = nextConfig()
 			}
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case next, ok := <-updates:
-					if !ok {
-						return
-					}
-					if next.Integrations.MQTT == config {
-						continue
-					}
-					shutdown()
-					config = next.Integrations.MQTT
-				}
-				break
+			if !ok {
+				return
 			}
+			config = next
 		}
 	}()
 	return done
@@ -190,6 +186,9 @@ func (s *Service) runMQTT(ctx context.Context, config mqttbridge.Config, report 
 func (s *Service) mqttCommand(ctx context.Context, cfg mqttbridge.Config, cmd mqttbridge.Command) mqttbridge.Receipt {
 	fail := func(code, message string) mqttbridge.Receipt { return mqttbridge.Receipt{Code: code, Message: message} }
 	pwm := cmd.Method == "controller.pwm.set"
+	if !mqttMethodAllowed(cmd.Method) {
+		return fail("method_denied", "RPC method is not exposed over MQTT")
+	}
 	switch cmd.Method {
 	case "controller.action.invoke":
 		var params struct {
@@ -211,9 +210,6 @@ func (s *Service) mqttCommand(ctx context.Context, cfg mqttbridge.Config, cmd mq
 		if json.Unmarshal(cmd.Params, &params) != nil || params.Channel == nil {
 			return fail("invalid_params", "channel is required")
 		}
-	case "controller.display.send", "controller.buzzer.tone", "controller.menu.jump", "controller.illumination.set":
-	default:
-		return fail("method_denied", "RPC method is not exposed over MQTT")
 	}
 	var owner controlIntentOwner
 	if json.Unmarshal(cmd.Params, &owner) != nil || owner == (controlIntentOwner{}) {
