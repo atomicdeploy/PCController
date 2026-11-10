@@ -537,6 +537,7 @@ export function enrichOperation(operation, path, method, shapes) {
 }
 
 export function rpcMeaning(name, description) {
+  if(name==='controller.artifact.upload') description='Import base64-encoded artifact data through the JSON-RPC request into the immutable store. This differs from the raw/multipart HTTP upload route; neither operation flashes the board. Retain the verified descriptor for a separately authorized update.';
   const matches=[];
   for (const [path,value] of Object.entries(entries)) if(value[4]===name) matches.push(describeRoute(path,'get'));
   for (const [key,value] of Object.entries(mutations)) if(value[4]===name) {

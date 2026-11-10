@@ -3379,7 +3379,7 @@
       "summary": "Import artifact bytes",
       "idempotency": "idempotent-with-authoritative-readback",
       "title": "Import artifact bytes",
-      "description": "Store raw bytes or a multipart file in the immutable artifact catalog. kind is a query parameter, not a JSON field; this route does not flash the board.",
+      "description": "Import base64-encoded artifact data through the JSON-RPC request into the immutable store. This differs from the raw/multipart HTTP upload route; neither operation flashes the board. Retain the verified descriptor for a separately authorized update.",
       "use_case": "Upload a firmware file, retain artifact.sha256, then separately authorize /api/board/firmware/upload.",
       "result_description": "201 returns an operation/artifact receipt after validation. SHA-256 identifies the imported bytes; it is not a source commit hash.",
       "request_fields": {
@@ -8109,7 +8109,7 @@
       "summary": "Show a desktop overlay",
       "idempotency": "non-idempotent",
       "title": "Show a desktop overlay",
-      "description": "Present a non-activating Windows desktop overlay with a bounded lifetime, semantic icon, time-based transitions/marquee and up to five human-activated URI actions. Replaces the current OSD; never executes actions on receipt.",
+      "description": "Present a non-activating Windows desktop overlay with a bounded lifetime, semantic icon, transitions/marquee and up to five human-activated actions. behavior selects replacement or a bounded concurrent stack; actions never execute merely on receipt.",
       "use_case": "Show a script’s completion summary without stealing focus; enable sound/taskbar flash only when wanted.",
       "result_description": "Returns presentation status/identity. Accepted display is not action activation; retain id to wait for dismissal/action or to dismiss only that overlay.",
       "params_schema": {
@@ -8598,7 +8598,7 @@
       "summary": "Read PWM output registers",
       "idempotency": "safe",
       "title": "Read PWM output registers",
-      "description": "Read cached authoritative PWM output values without changing any channel.",
+      "description": "Read authoritative PWM output registers through the current board owner without changing a channel. During prepared playback the host retains the cached observation and its original generation/revision/time rather than creating polling traffic.",
       "use_case": "Initialize a mixer, then follow state updates instead of overwriting an active slider draft.",
       "result_description": "Returned values are observed register/setpoint state, not measured brightness or load current."
     },

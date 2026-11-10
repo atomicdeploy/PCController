@@ -191,12 +191,12 @@ const capabilityGroups = {
 };
 
 const methodOverrides = {
-  "controller.osd.show": "Present a non-activating Windows desktop overlay with a bounded lifetime, semantic icon, time-based transitions/marquee and up to five human-activated URI actions. Replaces the current OSD; never executes actions on receipt.",
+  "controller.osd.show": "Present a non-activating Windows desktop overlay with a bounded lifetime, semantic icon, transitions/marquee and up to five human-activated actions. behavior selects replacement or a bounded concurrent stack; actions never execute merely on receipt.",
   "controller.osd.status": "Read desktop OSD support, current presentation identity, expiry and last action/error without creating a window.",
   "controller.osd.dismiss": "Fade out the current OSD. Supply its id to prevent an obsolete dismissal from closing a replacement overlay.",
   "controller.pwm.set": "Set one physical PWM channel (0..15) using either calibrated percent (0..100) or raw_value (0..4095), never both. Supply current snapshot owner/revision fields; the host verifies admission and returns authoritative readback.",
   "controller.pwm.off": "Turn off selected PWM outputs through the current board owner and return authoritative state.",
-  "controller.pwm.values": "Read cached authoritative PWM output values without changing any channel.",
+  "controller.pwm.values": "Read authoritative PWM output registers through the current board owner without changing a channel. During prepared playback the host retains the cached observation and its original generation/revision/time rather than creating polling traffic.",
 	"controller.effects.library.get": "Return the portable effect library and its canonical ETag.",
 	"controller.effects.library.set": "Import or replace an effect library using mandatory if_match, canonical validation and serialized compare-and-swap; does not execute effects.",
 	"controller.automations.get": "Return configured host event/RF rules and their canonical ETag.",

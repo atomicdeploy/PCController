@@ -68,6 +68,8 @@ test('discovery and programming documentation distinguish inventory, staging, ac
   assert.equal(rpc['controller.discovery.github.workflow'].result_schema.properties.candidates.type,'array');
   assert.equal(rpc['controller.artifact.upload'].request_fields.properties.data.contentEncoding,'base64');
   assert.equal(rpc['controller.artifact.upload'].request_fields.properties.file,undefined);
+  assert.match(rpc['controller.artifact.upload'].description,/base64-encoded/u);
+  assert.match(rpc['controller.osd.show'].description,/concurrent stack/u);
 });
 
 test('RPC purpose text is distinct from its title and never a mechanical surface label',()=>{
