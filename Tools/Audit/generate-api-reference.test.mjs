@@ -204,6 +204,9 @@ test('explorer includes complete protocol catalogs and source-derived JSON field
   assert.equal(rpc['x-methods']['controller.osd.show'].params_schema.$ref,'#/$defs/OSDRequest');
   assert.equal(rpc.$defs.OSDAction.properties.label.maxLength,64);
   assert.equal(rpc.$defs.OSDRequest.properties.actions.maxItems,5);
+	assert.equal(rpc.$defs.OSDRequest.properties.behavior.default,'replace');
+	assert.ok(rpc.$defs.OSDRequest.properties.background.enum.includes('acrylic'));
+	assert.equal(rpc.$defs.OSDStatus.properties.items.maxItems,6);
   assert.equal(openapi.paths['/api/osd'].post.requestBody.content['application/json'].schema.$ref,'#/components/schemas/OSDRequest');
   assert.ok(openapi.paths['/api/osd'].delete);
   for(const method of Object.keys(rpc['x-methods'])) assert.ok(page.includes(method),method);

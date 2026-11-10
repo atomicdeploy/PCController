@@ -132,14 +132,18 @@ func textImage(text string, size int, bold bool, c color.RGBA) (*image.RGBA, err
 }
 
 type rendering struct {
-	base, frame                    *image.RGBA
-	surface                        *dib
-	title, body                    *image.RGBA
-	buttons                        []*image.RGBA
-	hits                           []image.Rectangle
-	scale                          float64
-	titleRect, bodyRect, closeRect image.Rectangle
-	ink, muted, accent             color.RGBA
+	base, frame          *image.RGBA
+	surface              *dib
+	title                *image.RGBA
+	bodies               []*image.RGBA
+	titleShadow          *image.RGBA
+	bodyShadows          []*image.RGBA
+	buttons              []*image.RGBA
+	hits                 []image.Rectangle
+	scale                float64
+	titleRect, closeRect image.Rectangle
+	bodyRects            []image.Rectangle
+	ink, muted, accent   color.RGBA
 }
 
 func (r *rendering) close() {
@@ -158,6 +162,9 @@ func rgba(s string) color.RGBA {
 // rounded uses analytic distance coverage; no jagged region clipping or
 // low-resolution scaling of corners. All coordinates are physical DPI pixels.
 func rounded(img *image.RGBA, r image.Rectangle, radius float64, c color.RGBA) {
+	paintRounded(img, r, radius, 0, c)
+}
+func paintRounded(img *image.RGBA, r image.Rectangle, radius, stroke float64, c color.RGBA) {
 	clip := r.Inset(-1).Intersect(img.Bounds())
 	cx, cy := float64(r.Min.X+r.Max.X)/2, float64(r.Min.Y+r.Max.Y)/2
 	hx, hy := float64(r.Dx())/2-radius, float64(r.Dy())/2-radius
@@ -166,6 +173,9 @@ func rounded(img *image.RGBA, r image.Rectangle, radius float64, c color.RGBA) {
 			qx, qy := math.Abs(float64(x)+.5-cx)-hx, math.Abs(float64(y)+.5-cy)-hy
 			distance := math.Hypot(max(qx, 0), max(qy, 0)) + min(max(qx, qy), 0) - radius
 			coverage := min(1, max(0, .5-distance))
+			if stroke > 0 {
+				coverage -= min(1, max(0, .5-distance-stroke))
+			}
 			if coverage == 0 {
 				continue
 			}
@@ -187,7 +197,9 @@ func prepare(req Request, dpi, width int, icon image.Image, dark bool) (*renderi
 		return nil, errors.New("display work area is too narrow for OSD")
 	}
 	rows := (len(req.Actions) + 2) / 3
-	height := px(106)
+	lines := strings.Split(req.Text, "\n")
+	extra := (len(lines) - 1) * 24
+	height := px(106 + extra)
 	if rows > 0 {
 		height += px(rows*40 + 4)
 	}
@@ -199,6 +211,10 @@ func prepare(req Request, dpi, width int, icon image.Image, dark bool) (*renderi
 	r.ink = rgba(tokens.Text)
 	r.muted = rgba(tokens.TextMuted)
 	r.accent = rgba(tokens.Accent)
+	transparent := req.Background == "transparent" || req.Background == "none"
+	if transparent {
+		r.muted = r.ink
+	}
 	switch req.Severity {
 	case "success":
 		r.accent = rgba(tokens.Success)
@@ -208,33 +224,45 @@ func prepare(req Request, dpi, width int, icon image.Image, dark bool) (*renderi
 		r.accent = rgba(tokens.Danger)
 	}
 	card := image.Rect(px(8), px(5), width-px(8), height-px(9))
-	for i := px(7); i > 0; i-- {
-		rounded(r.base, card.Add(image.Pt(0, px(2))).Inset(-i), float64(px(18)+i), color.RGBA{0, 0, 0, byte(2 + 8*(px(7)-i)/max(1, px(7)))})
+	glass := req.Background == "acrylic" || req.Background == "blur"
+	if glass {
+		bg := rgba(tokens.Surface)
+		bg.A = 90
+		rounded(r.base, r.base.Bounds(), float64(px(8)), bg)
 	}
-	border := rgba(tokens.StrokeHighlight)
-	border.A = 180
-	rounded(r.base, card, float64(px(18)), border)
-	bg := rgba(tokens.Surface)
-	bg.A = 246
-	rounded(r.base, card.Inset(1), float64(px(18)-1), bg)
-	// One continuous surface, with a soft brand glow rather than a second slab.
-	for y := card.Min.Y + 1; y < min(card.Max.Y, card.Min.Y+px(48)); y++ {
-		mix := .06 * math.Pow(1-float64(y-card.Min.Y)/float64(px(48)), 2)
-		for x := card.Min.X + 1; x < card.Max.X-1; x++ {
-			i := r.base.PixOffset(x, y)
-			if r.base.Pix[i+3] > 230 {
-				r.base.Pix[i] = byte(float64(r.base.Pix[i])*(1-mix) + float64(r.accent.R)*mix)
-				r.base.Pix[i+1] = byte(float64(r.base.Pix[i+1])*(1-mix) + float64(r.accent.G)*mix)
-				r.base.Pix[i+2] = byte(float64(r.base.Pix[i+2])*(1-mix) + float64(r.accent.B)*mix)
+	if !transparent && !glass {
+		for i := px(7); i > 0; i-- {
+			paintRounded(r.base, card.Add(image.Pt(0, px(2))).Inset(-i), float64(px(18)+i), float64(i), color.RGBA{0, 0, 0, byte(2 + 8*(px(7)-i)/max(1, px(7)))})
+		}
+		border := rgba(tokens.StrokeHighlight)
+		border.A = 180
+		bg := rgba(tokens.Surface)
+		bg.A = 246
+		rounded(r.base, card.Inset(1), float64(px(18)-1), bg)
+		paintRounded(r.base, card, float64(px(18)), 1, border)
+		// One continuous surface, with a soft brand glow rather than a second slab.
+		for y := card.Min.Y + 1; y < min(card.Max.Y, card.Min.Y+px(48)); y++ {
+			mix := .06 * math.Pow(1-float64(y-card.Min.Y)/float64(px(48)), 2)
+			for x := card.Min.X + 1; x < card.Max.X-1; x++ {
+				i := r.base.PixOffset(x, y)
+				if r.base.Pix[i+3] > 230 {
+					r.base.Pix[i] = byte(float64(r.base.Pix[i])*(1-mix) + float64(r.accent.R)*mix)
+					r.base.Pix[i+1] = byte(float64(r.base.Pix[i+1])*(1-mix) + float64(r.accent.G)*mix)
+					r.base.Pix[i+2] = byte(float64(r.base.Pix[i+2])*(1-mix) + float64(r.accent.B)*mix)
+				}
 			}
 		}
 	}
 	if icon != nil {
-		scaled, err := graphics.Resize(icon, px(42), px(42))
+		bounds := icon.Bounds()
+		factor := min(float64(px(42))/float64(bounds.Dx()), float64(px(42))/float64(bounds.Dy()))
+		iw, ih := max(1, int(math.Round(float64(bounds.Dx())*factor))), max(1, int(math.Round(float64(bounds.Dy())*factor)))
+		scaled, err := graphics.Resize(icon, iw, ih)
 		if err != nil {
 			return nil, err
 		}
-		draw.Draw(r.base, image.Rect(px(29), px(28), px(71), px(70)), scaled, image.Point{}, draw.Over)
+		at := image.Pt(px(29)+(px(42)-iw)/2, px(28)+(px(42)-ih)/2)
+		draw.Draw(r.base, image.Rectangle{Min: at, Max: at.Add(image.Pt(iw, ih))}, scaled, image.Point{}, draw.Over)
 	}
 	r.closeRect = image.Rect(width-px(45), px(15), width-px(17), px(43))
 	// Close glyph remains subordinate to the semantic icon, not stretched to fill.
@@ -244,14 +272,23 @@ func prepare(req Request, dpi, width int, icon image.Image, dark bool) (*renderi
 	}
 	draw.Draw(r.base, image.Rect(r.closeRect.Min.X+(r.closeRect.Dx()-closeText.Bounds().Dx())/2, r.closeRect.Min.Y, r.closeRect.Max.X, r.closeRect.Max.Y), closeText, image.Point{}, draw.Over)
 	r.titleRect = image.Rect(px(88), px(23), width-px(58), px(48))
-	r.bodyRect = image.Rect(px(88), px(49), width-px(28), px(77))
 	r.title, err = textImage(req.Title, px(16), true, r.ink)
 	if err != nil {
 		return nil, err
 	}
-	r.body, err = textImage(req.Text, px(14), false, r.muted)
-	if err != nil {
-		return nil, err
+	if transparent {
+		r.titleShadow = textShadow(r.title, dark)
+	}
+	for i, line := range lines {
+		body, bodyErr := textImage(line, px(14), false, r.muted)
+		if bodyErr != nil {
+			return nil, bodyErr
+		}
+		r.bodies = append(r.bodies, body)
+		if transparent {
+			r.bodyShadows = append(r.bodyShadows, textShadow(body, dark))
+		}
+		r.bodyRects = append(r.bodyRects, image.Rect(px(88), px(49+i*24), width-px(28), px(77+i*24)))
 	}
 	for row := 0; row < rows; row++ {
 		count := min(3, len(req.Actions)-row*3)
@@ -259,7 +296,7 @@ func prepare(req Request, dpi, width int, icon image.Image, dark bool) (*renderi
 		left := width - px(24) - count*cell - (count-1)*px(8)
 		for col := 0; col < count; col++ {
 			index := row*3 + col
-			box := image.Rect(left+col*(cell+px(8)), px(87+row*40), left+col*(cell+px(8))+cell, px(119+row*40))
+			box := image.Rect(left+col*(cell+px(8)), px(87+extra+row*40), left+col*(cell+px(8))+cell, px(119+extra+row*40))
 			r.hits = append(r.hits, box)
 			label := req.Actions[index].Label
 			var im *image.RGBA
@@ -311,8 +348,11 @@ func RenderPreview(request Request, dpi int, dark bool, icon image.Image) (*imag
 
 func (r *rendering) paint(elapsed time.Duration, reduced bool, hover int) *image.RGBA {
 	copy(r.frame.Pix, r.base.Pix)
-	line := func(im *image.RGBA, box image.Rectangle) {
+	line := func(im, shadow *image.RGBA, box image.Rectangle) {
 		offset := int(Marquee(elapsed, float64(im.Bounds().Dx()-box.Dx()), r.scale, reduced))
+		if shadow != nil {
+			draw.Draw(r.frame, box, shadow, image.Pt(offset-1, -1), draw.Over)
+		}
 		draw.Draw(r.frame, box, im, image.Pt(offset, 0), draw.Over)
 		if im.Bounds().Dx() > box.Dx() {
 			fade := max(1, int(14*r.scale))
@@ -337,8 +377,14 @@ func (r *rendering) paint(elapsed time.Duration, reduced bool, hover int) *image
 			}
 		}
 	}
-	line(r.title, r.titleRect)
-	line(r.body, r.bodyRect)
+	line(r.title, r.titleShadow, r.titleRect)
+	for i, body := range r.bodies {
+		var shadow *image.RGBA
+		if len(r.bodyShadows) > i {
+			shadow = r.bodyShadows[i]
+		}
+		line(body, shadow, r.bodyRects[i])
+	}
 	for i, box := range r.hits {
 		stroke := r.muted
 		stroke.A = 65
@@ -357,4 +403,38 @@ func (r *rendering) paint(elapsed time.Duration, reduced bool, hover int) *image
 		draw.Draw(r.frame, im.Bounds().Add(at).Intersect(box), im, image.Point{}, draw.Over)
 	}
 	return r.frame
+}
+
+func textShadow(im *image.RGBA, dark bool) *image.RGBA {
+	shadow := image.NewRGBA(im.Bounds())
+	for i := 0; i < len(im.Pix); i += 4 {
+		a := byte(uint16(im.Pix[i+3]) * 3 / 4)
+		shadow.Pix[i+3] = a
+		if !dark {
+			shadow.Pix[i] = a
+			shadow.Pix[i+1] = a
+			shadow.Pix[i+2] = a
+		}
+	}
+	return shadow
+}
+
+func (r *rendering) offsets(elapsed time.Duration, reduced bool) []int {
+	result := []int{int(Marquee(elapsed, float64(r.title.Bounds().Dx()-r.titleRect.Dx()), r.scale, reduced))}
+	for i, body := range r.bodies {
+		result = append(result, int(Marquee(elapsed, float64(body.Bounds().Dx()-r.bodyRects[i].Dx()), r.scale, reduced)))
+	}
+	return result
+}
+
+func (r *rendering) scrolls() bool {
+	if r.title.Bounds().Dx() > r.titleRect.Dx() {
+		return true
+	}
+	for i, body := range r.bodies {
+		if body.Bounds().Dx() > r.bodyRects[i].Dx() {
+			return true
+		}
+	}
+	return false
 }

@@ -14,6 +14,7 @@ type DesktopOSDService interface {
 	Show(context.Context, hostui.OSDRequest) (hostui.OSDStatus, error)
 	Dismiss(context.Context, string) (hostui.OSDStatus, error)
 	Status() hostui.OSDStatus
+	Result(string) (hostui.OSDStatus, error)
 }
 type defaultDesktopOSD struct{}
 
@@ -24,6 +25,9 @@ func (defaultDesktopOSD) Dismiss(ctx context.Context, id string) (hostui.OSDStat
 	return hostui.DismissOSD(ctx, id)
 }
 func (defaultDesktopOSD) Status() hostui.OSDStatus { return hostui.DesktopOSDStatus() }
+func (defaultDesktopOSD) Result(id string) (hostui.OSDStatus, error) {
+	return hostui.DesktopOSDResult(id)
+}
 
 func (s *Service) desktopOSDCall(ctx context.Context, request Request) (any, error) {
 	surface := s.DesktopOSD
@@ -32,6 +36,15 @@ func (s *Service) desktopOSDCall(ctx context.Context, request Request) (any, err
 	}
 	switch request.Method {
 	case "controller.osd.status":
+		var params struct {
+			ID string `json:"id,omitempty"`
+		}
+		if err := decodeStrictParams(request.Params, &params); err != nil {
+			return nil, &RPCError{Code: -32602, Message: err.Error()}
+		}
+		if params.ID != "" {
+			return surface.Result(params.ID)
+		}
 		return surface.Status(), nil
 	case "controller.osd.show":
 		var params hostui.OSDRequest
@@ -42,6 +55,15 @@ func (s *Service) desktopOSDCall(ctx context.Context, request Request) (any, err
 			config := s.hostConfig()
 			if params.Title == "" {
 				params.Title = productidentity.Title(config.UI.AppTitle)
+			}
+			if params.Position == "" {
+				params.Position = config.Integrations.Notifications.OSDPosition
+			}
+			if params.Behavior == "" {
+				params.Behavior = config.Integrations.Notifications.OSDBehavior
+			}
+			if params.Background == "" {
+				params.Background = config.Integrations.Notifications.OSDBackground
 			}
 			if config.UI.Appearance.ReduceMotion {
 				params.ReduceMotion = true
@@ -87,6 +109,9 @@ func registerDesktopOSDHTTP(mux *http.ServeMux, service *Service) {
 			return
 		}
 		params := json.RawMessage(`{}`)
+		if r.Method == "GET" && r.URL.Query().Get("id") != "" {
+			params, _ = json.Marshal(map[string]string{"id": r.URL.Query().Get("id")})
+		}
 		if r.Method != "GET" && !(r.Method == "DELETE" && r.ContentLength == 0) {
 			decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32768))
 			if err := decoder.Decode(&params); err != nil {

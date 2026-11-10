@@ -46,6 +46,9 @@ func ValidateOSD(r OSDRequest) (OSDRequest, error) {
 		return r, err
 	}
 	for _, a := range r.Actions {
+		if a.URI == "" {
+			continue
+		}
 		if err = validateActionURI(a.URI); err != nil {
 			return r, err
 		}
@@ -60,6 +63,13 @@ func DismissOSD(ctx context.Context, id string) (OSDStatus, error) {
 	return osdPresenter().Dismiss(ctx, id)
 }
 func DesktopOSDStatus() OSDStatus { return osdPresenter().Status() }
+func DesktopOSDResult(id string) (OSDStatus, error) {
+	status, found := osdPresenter().Result(id)
+	if !found {
+		return OSDStatus{}, fmt.Errorf("OSD result is unknown or has expired from the 64-receipt history")
+	}
+	return status, nil
+}
 func CloseDesktopOSD() {
 	desktopOSD.Lock()
 	p := desktopOSD.presenter

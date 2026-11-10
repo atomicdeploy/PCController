@@ -456,15 +456,16 @@ function osdSchemas(prefix) {
   return {
     OSDEmpty:{type:'object',additionalProperties:false,properties:{}},
     OSDDismiss:{type:'object',additionalProperties:false,properties:{id:{type:'string',maxLength:64,description:'Exact active OSD identity; omission dismisses whichever overlay is current.'}}},
-    OSDAction:{type:'object',required:['label','uri'],additionalProperties:false,properties:{label:{type:'string',minLength:1,maxLength:64},uri:{type:'string',minLength:1,maxLength:2048,description:'Allowed pccontroller://, http:// or https:// URI. Activated only by an explicit button click; never a shell command or remote icon source.'}}},
+    OSDAction:{type:'object',required:['label'],anyOf:[{required:['id']},{required:['uri']}],additionalProperties:false,properties:{id:{type:'string',minLength:1,maxLength:64,pattern:'^[^\\s]+$',description:'Unique choice identifier; required for script-only buttons without a URI.'},label:{type:'string',minLength:1,maxLength:64},uri:{type:'string',minLength:1,maxLength:2048,description:'Optional pccontroller://, http:// or https:// URI. Activated only by an explicit button click; omission returns a script choice without launching anything.'}}},
     OSDRequest:{type:'object',required:['text'],additionalProperties:false,properties:{
-      id:{type:'string',maxLength:64},title:{type:'string',maxLength:128},text:{type:'string',minLength:1,maxLength:2048,examples:['Desktop overlay preview']},
+      id:{type:'string',maxLength:64},title:{type:'string',maxLength:128},text:{type:'string',minLength:1,maxLength:2048,description:'Up to six explicit lines (LF or CRLF); each long line scrolls independently.',examples:['Desktop overlay preview\nSecond line']},
       icon:{enum:['app','info','success','warning','error','door','hot','temperature-cleared','motion','relay','radio'],default:'app'},
       severity:{enum:['info','success','warning','error']},duration_ms:{type:'integer',anyOf:[{const:0},{minimum:500,maximum:120000}],default:5000},
-      position:{enum:['bottom-center','top-center','bottom-right','top-right'],default:'bottom-center'},theme:{enum:['system','dark','light'],default:'system'},reduce_motion:{type:'boolean',default:false},
+      position:{enum:['top-left','top-center','top-right','center','bottom-left','bottom-center','bottom-right'],default:'bottom-center'},theme:{enum:['system','dark','light'],default:'system'},reduce_motion:{type:'boolean',default:false},
+      behavior:{enum:['replace','stack'],default:'replace'},background:{enum:['current','none','transparent','acrylic','blur'],default:'current'},
       actions:{type:'array',maxItems:5,items:ref('OSDAction')},
     }},
-    OSDStatus:{type:'object',required:['supported','active','accepted'],properties:{supported:{type:'boolean'},active:{type:'boolean'},accepted:{type:'integer',minimum:0},id:{type:'string'},shown_at:{type:'string',format:'date-time'},expires_at:{type:'string',format:'date-time'},last_action:{type:'string'},last_error:{type:'string'}}},
+    OSDStatus:{type:'object',required:['supported','active','accepted'],properties:{supported:{type:'boolean'},active:{type:'boolean'},accepted:{type:'integer',minimum:0},id:{type:'string'},shown_at:{type:'string',format:'date-time'},expires_at:{type:'string',format:'date-time'},last_action:{type:'string'},last_action_id:{type:'string'},dismissal:{enum:['expired','dismissed','action','replaced','closed','failed']},last_error:{type:'string'},active_count:{type:'integer',minimum:0,maximum:6},items:{type:'array',maxItems:6,items:ref('OSDStatus')},dpi:{type:'integer'},pixel_width:{type:'integer'},pixel_height:{type:'integer'},background:{enum:['current','transparent','acrylic','blur']}}},
   };
 }
 
@@ -559,7 +560,7 @@ const rpcActionSchemas = actionSchemas("#/$defs/");
 const rpcActionMethodContracts = {
   "controller.osd.show": { params:"OSDRequest", result:"OSDStatus" },
   "controller.osd.dismiss": { params:"OSDDismiss", result:"OSDStatus" },
-  "controller.osd.status": { params:"OSDEmpty", result:"OSDStatus" },
+  "controller.osd.status": { params:"OSDDismiss", result:"OSDStatus" },
 	"controller.app.action": { params: "AppActionRequest", result: "ActionOperationEnvelope" },
 	"controller.app.action.ack": { params: "ActionAck", result: "ActionOperationEnvelope" },
 	"controller.app.action.outcome": { params: "ActionOutcomeRequest", result: "ActionOperationEnvelope" },
@@ -631,6 +632,7 @@ function operationFor(route, method) {
   };
 	if(route.path==='/api/osd'){
 		operation.responses['200'].content['application/json'].schema={$ref:'#/components/schemas/OSDStatus'};
+		if(method==='get') operation.parameters=[{in:'query',name:'id',required:false,schema:{type:'string',maxLength:64},description:'Exact active or retained terminal notification identity; omission reads the current presentation.'}];
 		if(method!=='get') operation.requestBody={required:true,content:{'application/json':{schema:{$ref:'#/components/schemas/'+(method==='post'?'OSDRequest':'OSDDismiss')}}}};
 	}
 	if (route.path === "/api/sensors/metrics") {

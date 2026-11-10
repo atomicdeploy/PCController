@@ -15,8 +15,9 @@ import (
 var ErrUnsupported = errors.New("desktop OSD requires an interactive Windows session")
 
 type Action struct {
+	ID    string `json:"id,omitempty"`
 	Label string `json:"label"`
-	URI   string `json:"uri"`
+	URI   string `json:"uri,omitempty"`
 }
 
 type Request struct {
@@ -28,25 +29,36 @@ type Request struct {
 	DurationMS   int      `json:"duration_ms,omitempty"`
 	Position     string   `json:"position,omitempty"`
 	Theme        string   `json:"theme,omitempty"`
+	Behavior     string   `json:"behavior,omitempty"`
+	Background   string   `json:"background,omitempty"`
 	ReduceMotion bool     `json:"reduce_motion,omitempty"`
 	Actions      []Action `json:"actions,omitempty"`
 }
 
 type Status struct {
-	Supported  bool      `json:"supported"`
-	Active     bool      `json:"active"`
-	ID         string    `json:"id,omitempty"`
-	ShownAt    time.Time `json:"shown_at,omitempty"`
-	ExpiresAt  time.Time `json:"expires_at,omitempty"`
-	Accepted   uint64    `json:"accepted"`
-	LastAction string    `json:"last_action,omitempty"`
-	LastError  string    `json:"last_error,omitempty"`
+	Supported    bool      `json:"supported"`
+	Active       bool      `json:"active"`
+	ID           string    `json:"id,omitempty"`
+	ShownAt      time.Time `json:"shown_at,omitempty"`
+	ExpiresAt    time.Time `json:"expires_at,omitempty"`
+	Accepted     uint64    `json:"accepted"`
+	LastAction   string    `json:"last_action,omitempty"`
+	LastActionID string    `json:"last_action_id,omitempty"`
+	Dismissal    string    `json:"dismissal,omitempty"`
+	LastError    string    `json:"last_error,omitempty"`
+	ActiveCount  int       `json:"active_count,omitempty"`
+	Items        []Status  `json:"items,omitempty"`
+	DPI          int       `json:"dpi,omitempty"`
+	PixelWidth   int       `json:"pixel_width,omitempty"`
+	PixelHeight  int       `json:"pixel_height,omitempty"`
+	Background   string    `json:"background,omitempty"`
 }
 
 type Presenter interface {
 	Show(context.Context, Request) (Status, error)
 	Dismiss(context.Context, string) (Status, error)
 	Status() Status
+	Result(string) (Status, bool)
 	Close()
 }
 
@@ -70,10 +82,13 @@ func Normalize(r Request) (Request, error) {
 		}
 		return true
 	}
-	r.Text = strings.TrimSpace(r.Text)
+	r.Text = strings.TrimSpace(strings.ReplaceAll(r.Text, "\r\n", "\n"))
 	r.Title = strings.TrimSpace(r.Title)
 	if r.Text == "" || !validText(r.Text, 2048) || !validText(r.Title, 128) {
 		return r, errors.New("OSD text requires 1..2048 characters; title allows at most 128, without control characters")
+	}
+	if strings.Count(r.Text, "\n") >= 6 {
+		return r, errors.New("OSD text supports at most six explicit lines; long lines scroll horizontally")
 	}
 	if len(r.ID) > 64 || !validText(r.ID, 64) || strings.ContainsAny(r.ID, "\n\t") {
 		return r, errors.New("OSD id must be at most 64 characters without controls")
@@ -88,9 +103,26 @@ func Normalize(r Request) (Request, error) {
 		r.Position = "bottom-center"
 	}
 	switch r.Position {
-	case "bottom-center", "top-center", "bottom-right", "top-right":
+	case "bottom-left", "bottom-center", "bottom-right", "center", "top-left", "top-center", "top-right":
 	default:
-		return r, errors.New("OSD position must be bottom-center, top-center, bottom-right or top-right")
+		return r, errors.New("OSD position must be top/bottom-left/center/right, or center")
+	}
+	if r.Behavior == "" {
+		r.Behavior = "replace"
+	}
+	if r.Behavior != "replace" && r.Behavior != "stack" {
+		return r, errors.New("OSD behavior must be replace or stack")
+	}
+	if r.Background == "" {
+		r.Background = "current"
+	}
+	if r.Background == "none" {
+		r.Background = "transparent"
+	}
+	switch r.Background {
+	case "current", "transparent", "acrylic", "blur":
+	default:
+		return r, errors.New("OSD background must be current, transparent, acrylic or blur")
 	}
 	if r.Theme == "" {
 		r.Theme = "system"
@@ -117,9 +149,19 @@ func Normalize(r Request) (Request, error) {
 		return r, errors.New("OSD supports at most five actions")
 	}
 	r.Actions = append([]Action(nil), r.Actions...)
+	identities := make(map[string]bool)
 	for i, a := range r.Actions {
-		if strings.TrimSpace(a.Label) == "" || !validText(a.Label, 64) || len(a.URI) > 2048 || !validText(a.URI, 2048) || strings.TrimSpace(a.URI) == "" {
-			return r, fmt.Errorf("OSD action %d needs a label (1..64 characters) and URI (1..2048)", i)
+		if strings.TrimSpace(a.Label) == "" || !validText(a.Label, 64) || len(a.URI) > 2048 || !validText(a.URI, 2048) {
+			return r, fmt.Errorf("OSD action %d needs a label (1..64 characters) and optional URI (at most 2048)", i)
+		}
+		if len(a.ID) > 64 || !validText(a.ID, 64) || strings.ContainsAny(a.ID, "\n\t ") || (a.URI == "" && a.ID == "") {
+			return r, fmt.Errorf("OSD action %d needs a whitespace-free id (at most 64 bytes) when no URI is supplied", i)
+		}
+		if a.ID != "" {
+			if identities[a.ID] {
+				return r, errors.New("OSD action ids must be unique")
+			}
+			identities[a.ID] = true
 		}
 	}
 	return r, nil

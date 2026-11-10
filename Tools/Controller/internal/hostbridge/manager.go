@@ -1298,6 +1298,9 @@ func (manager *Manager) notificationLoop() {
 		var err error
 		if config.Integrations.Notifications.Presentation == "osd" {
 			request := hostui.OSDForNotification(job.notification, config.Integrations.Notifications.OSDDurationMS)
+			request.Position = config.Integrations.Notifications.OSDPosition
+			request.Behavior = config.Integrations.Notifications.OSDBehavior
+			request.Background = config.Integrations.Notifications.OSDBackground
 			request.ReduceMotion = config.UI.Appearance.ReduceMotion
 			_, err = hostui.ShowOSD(ctx, request)
 			if err != nil {

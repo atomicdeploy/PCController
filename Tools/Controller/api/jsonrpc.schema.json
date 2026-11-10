@@ -36,11 +36,29 @@
     "OSDAction": {
       "type": "object",
       "required": [
-        "label",
-        "uri"
+        "label"
+      ],
+      "anyOf": [
+        {
+          "required": [
+            "id"
+          ]
+        },
+        {
+          "required": [
+            "uri"
+          ]
+        }
       ],
       "additionalProperties": false,
       "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[^\\s]+$",
+          "description": "Unique choice identifier; required for script-only buttons without a URI."
+        },
         "label": {
           "type": "string",
           "minLength": 1,
@@ -50,7 +68,7 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 2048,
-          "description": "Allowed pccontroller://, http:// or https:// URI. Activated only by an explicit button click; never a shell command or remote icon source."
+          "description": "Optional pccontroller://, http:// or https:// URI. Activated only by an explicit button click; omission returns a script choice without launching anything."
         }
       }
     },
@@ -73,8 +91,9 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 2048,
+          "description": "Up to six explicit lines (LF or CRLF); each long line scrolls independently.",
           "examples": [
-            "Desktop overlay preview"
+            "Desktop overlay preview\nSecond line"
           ]
         },
         "icon": {
@@ -116,10 +135,13 @@
         },
         "position": {
           "enum": [
-            "bottom-center",
+            "top-left",
             "top-center",
-            "bottom-right",
-            "top-right"
+            "top-right",
+            "center",
+            "bottom-left",
+            "bottom-center",
+            "bottom-right"
           ],
           "default": "bottom-center"
         },
@@ -134,6 +156,23 @@
         "reduce_motion": {
           "type": "boolean",
           "default": false
+        },
+        "behavior": {
+          "enum": [
+            "replace",
+            "stack"
+          ],
+          "default": "replace"
+        },
+        "background": {
+          "enum": [
+            "current",
+            "none",
+            "transparent",
+            "acrylic",
+            "blur"
+          ],
+          "default": "current"
         },
         "actions": {
           "type": "array",
@@ -176,8 +215,50 @@
         "last_action": {
           "type": "string"
         },
+        "last_action_id": {
+          "type": "string"
+        },
+        "dismissal": {
+          "enum": [
+            "expired",
+            "dismissed",
+            "action",
+            "replaced",
+            "closed",
+            "failed"
+          ]
+        },
         "last_error": {
           "type": "string"
+        },
+        "active_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 6
+        },
+        "items": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "$ref": "#/$defs/OSDStatus"
+          }
+        },
+        "dpi": {
+          "type": "integer"
+        },
+        "pixel_width": {
+          "type": "integer"
+        },
+        "pixel_height": {
+          "type": "integer"
+        },
+        "background": {
+          "enum": [
+            "current",
+            "transparent",
+            "acrylic",
+            "blur"
+          ]
         }
       }
     },
@@ -1270,7 +1351,7 @@
             ],
             "properties": {
               "params": {
-                "$ref": "#/$defs/OSDEmpty"
+                "$ref": "#/$defs/OSDDismiss"
               }
             }
           }
@@ -3525,7 +3606,7 @@
       "summary": "Read desktop OSD support, current presentation identity, expiry and last action/error without creating a window.",
       "idempotency": "safe",
       "params_schema": {
-        "$ref": "#/$defs/OSDEmpty"
+        "$ref": "#/$defs/OSDDismiss"
       },
       "result_schema": {
         "$ref": "#/$defs/OSDStatus"
@@ -5011,8 +5092,17 @@
                     "items": {},
                     "type": "array"
                   },
+                  "osd_background": {
+                    "type": "string"
+                  },
+                  "osd_behavior": {
+                    "type": "string"
+                  },
                   "osd_duration_ms": {
                     "type": "integer"
+                  },
+                  "osd_position": {
+                    "type": "string"
                   },
                   "presentation": {
                     "type": "string"

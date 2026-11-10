@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"image"
 	"runtime"
+	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -16,6 +18,7 @@ import (
 	"github.com/lxn/win"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
 var (
@@ -38,6 +41,8 @@ type command struct {
 	request *Request
 	dismiss string
 	close   bool
+	finish  string
+	offset  *int
 	result  chan reply
 }
 type reply struct {
@@ -51,8 +56,10 @@ type presenter struct {
 	done     chan struct{}
 	commands chan command
 	hwnd     atomic.Uintptr
+	closed   atomic.Bool
 	mu       sync.RWMutex
 	state    Status
+	history  []Status
 	err      error
 	// Everything below belongs exclusively to the locked window thread.
 	rendering      *rendering
@@ -63,22 +70,61 @@ type presenter struct {
 	hover, pressed int
 	sequence       uint64
 	lastOpacity    byte
-	lastOffset     [2]int
+	lastOffset     []int
+	endReason      string
 	frameStop      chan struct{}
 	frameGate      *atomic.Bool
 	frameToken     uint32
+	stackOffset    int
+	onChange       func()
+	inputs         []*inputTarget
+	inputOrigin    image.Point
+	inputsVisible  bool
 }
 
-func newPresenter(o Options) Presenter {
+func newWindowPresenter(o Options) *presenter {
 	return &presenter{options: o, ready: make(chan struct{}), done: make(chan struct{}), commands: make(chan command, 16), state: Status{Supported: true}, hover: -1, pressed: -1}
 }
 func (p *presenter) Status() Status { p.mu.RLock(); defer p.mu.RUnlock(); return p.state }
+func (p *presenter) Result(id string) (Status, bool) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if id == "" || p.state.ID == id {
+		return p.state, true
+	}
+	for i := len(p.history) - 1; i >= 0; i-- {
+		if p.history[i].ID == id {
+			return p.history[i], true
+		}
+	}
+	return Status{}, false
+}
+
+// Caller holds mu. Bounded receipts preserve a button result when a subsequent
+// notification replaces the surface before a waiting script's next read.
+func (p *presenter) rememberLocked(reason string) {
+	if !p.state.Active {
+		return
+	}
+	p.state.Active = false
+	p.state.Dismissal = reason
+	p.history = append(p.history, p.state)
+	if len(p.history) > 64 {
+		p.history = p.history[len(p.history)-64:]
+	}
+}
 func (p *presenter) start(ctx context.Context) error {
+	if p.closed.Load() {
+		return errors.New("OSD presenter closed")
+	}
 	p.once.Do(func() { go p.loop() })
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-p.ready:
+	}
+	if p.closed.Load() {
+		return errors.New("OSD presenter closed")
 	}
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -121,6 +167,7 @@ func (p *presenter) Dismiss(ctx context.Context, id string) (Status, error) {
 	return p.send(ctx, command{dismiss: id})
 }
 func (p *presenter) Close() {
+	p.closed.Store(true)
 	if p.hwnd.Load() == 0 {
 		return
 	}
@@ -182,7 +229,7 @@ func (p *presenter) loop() {
 		close(p.ready)
 		return
 	}
-	h := win.CreateWindowEx(0x00080000|0x00000080|0x08000000|0x00000008, &osdClass[0], nil, win.WS_POPUP, 0, 0, 1, 1, 0, 0, win.GetModuleHandle(nil), nil)
+	h := win.CreateWindowEx(0x00080000|0x00000020|0x00000080|0x08000000|0x00000008, &osdClass[0], nil, win.WS_POPUP, 0, 0, 1, 1, 0, 0, win.GetModuleHandle(nil), nil)
 	if h == 0 {
 		p.mu.Lock()
 		p.err = ErrUnsupported
@@ -196,14 +243,18 @@ func (p *presenter) loop() {
 	close(p.ready)
 	defer func() {
 		p.stopFrames()
+		destroyInputs(p.inputs)
 		osdWindows.Delete(h)
 		p.hwnd.Store(0)
 		p.rendering.close()
 		win.DestroyWindow(h)
 		p.mu.Lock()
-		p.state.Active = false
+		p.rememberLocked("closed")
 		p.mu.Unlock()
 	}()
+	if p.closed.Load() {
+		return
+	}
 	var msg win.MSG
 	for {
 		n := win.GetMessage(&msg, 0, 0, 0)
@@ -248,20 +299,59 @@ func (p *presenter) configure(r Request) error {
 			return err
 		}
 	}
-	next, err := prepare(r, dpi, int(work.Right-work.Left), icon, dark)
+	renderRequest := r
+	requestedBackdrop := r.Background
+	if requestedBackdrop == "current" || requestedBackdrop == "" {
+		requestedBackdrop = winfx.BackdropSolid
+	}
+	var actual string
+	if p.rendering != nil && p.request.Background == r.Background {
+		actual, _ = winfx.Refresh(uintptr(h), requestedBackdrop, dark, false)
+	} else {
+		actual, _ = winfx.Apply(uintptr(h), requestedBackdrop, dark, false)
+	}
+	if actual == winfx.BackdropSolid {
+		renderRequest.Background = "current"
+	}
+	effective := renderRequest.Background
+	next, err := prepare(renderRequest, dpi, int(work.Right-work.Left), icon, dark)
 	if err != nil {
 		return err
 	}
 	s := float64(dpi) / 96
 	margin := int(24 * s)
+	if next.base.Bounds().Dy()+2*margin > int(work.Bottom-work.Top) {
+		next.close()
+		return errors.New("OSD content exceeds the display work area")
+	}
 	x := int(work.Left) + (int(work.Right-work.Left)-next.base.Bounds().Dx())/2
 	y := int(work.Bottom) - next.base.Bounds().Dy() - margin
-	if r.Position == "top-center" || r.Position == "top-right" {
-		y = int(work.Top) + margin
+	if strings.HasPrefix(r.Position, "top-") {
+		y = int(work.Top) + margin + p.stackOffset
+	} else if r.Position == "center" {
+		y = int(work.Top) + (int(work.Bottom-work.Top)-next.base.Bounds().Dy())/2 + p.stackOffset
+	} else {
+		y -= p.stackOffset
+	}
+	if strings.HasSuffix(r.Position, "-left") {
+		x = int(work.Left) + margin
+	}
+	if y < int(work.Top)+margin || y+next.base.Bounds().Dy() > int(work.Bottom)-margin {
+		next.close()
+		return errors.New("OSD stack exceeds the display work area")
 	}
 	if r.Position == "top-right" || r.Position == "bottom-right" {
 		x = int(work.Right) - next.base.Bounds().Dx() - margin
 	}
+	inputs, err := createInputs(p, next)
+	if err != nil {
+		next.close()
+		return err
+	}
+	destroyInputs(p.inputs)
+	p.inputs = inputs
+	p.inputOrigin = image.Pt(-1, -1)
+	p.inputsVisible = false
 	p.rendering.close()
 	p.rendering = next
 	p.request = r
@@ -269,21 +359,33 @@ func (p *presenter) configure(r Request) error {
 	p.hover = -1
 	p.pressed = -1
 	p.lastOpacity = 0
-	p.lastOffset = [2]int{-1, -1}
+	p.lastOffset = nil
+	p.mu.Lock()
+	p.state.DPI = dpi
+	p.state.PixelWidth = next.base.Bounds().Dx()
+	p.state.PixelHeight = next.base.Bounds().Dy()
+	p.state.Background = effective
+	p.mu.Unlock()
 	win.SetWindowPos(h, win.HWND_TOPMOST, int32(x), int32(y), int32(next.base.Bounds().Dx()), int32(next.base.Bounds().Dy()), win.SWP_NOACTIVATE)
 	return nil
 }
 
-func (p *presenter) hide() {
+func (p *presenter) hide(reason string) {
 	h := win.HWND(p.hwnd.Load())
 	p.stopFrames()
 	win.KillTimer(h, 2)
 	win.ShowWindow(h, win.SW_HIDE)
+	destroyInputs(p.inputs)
+	p.inputs = nil
+	p.inputsVisible = false
 	p.rendering.close()
 	p.rendering = nil
 	p.mu.Lock()
-	p.state.Active = false
+	p.rememberLocked(reason)
 	p.mu.Unlock()
+	if p.onChange != nil {
+		p.onChange()
+	}
 }
 func (p *presenter) render(force bool) error {
 	if p.rendering == nil {
@@ -291,15 +393,15 @@ func (p *presenter) render(force bool) error {
 	}
 	elapsed := time.Since(p.started)
 	if elapsed >= p.duration {
-		p.hide()
+		p.hide(p.endReason)
 		return nil
 	}
 	r := p.rendering
 	alpha, slide := Timeline(elapsed, p.duration, p.request.ReduceMotion)
 	opacity := byte(alpha * 255)
-	offsets := [2]int{int(Marquee(elapsed, float64(r.title.Bounds().Dx()-r.titleRect.Dx()), r.scale, p.request.ReduceMotion)), int(Marquee(elapsed, float64(r.body.Bounds().Dx()-r.bodyRect.Dx()), r.scale, p.request.ReduceMotion))}
-	if force || opacity != p.lastOpacity || offsets != p.lastOffset {
-		if force || offsets != p.lastOffset {
+	offsets := r.offsets(elapsed, p.request.ReduceMotion)
+	if force || opacity != p.lastOpacity || !slices.Equal(offsets, p.lastOffset) {
+		if force || !slices.Equal(offsets, p.lastOffset) {
 			im := r.paint(elapsed, p.request.ReduceMotion, p.hover)
 			for i := 0; i < len(im.Pix); i += 4 {
 				r.surface.pixels[i] = im.Pix[i+2]
@@ -316,11 +418,12 @@ func (p *presenter) render(force bool) error {
 		if ok == 0 {
 			return fmt.Errorf("OSD UpdateLayeredWindow: %v", callErr)
 		}
+		p.positionInputs(image.Pt(int(point.X), int(point.Y)), opacity > 0)
 		p.lastOpacity = opacity
 		p.lastOffset = offsets
 	}
 	h := win.HWND(p.hwnd.Load())
-	moving := !p.request.ReduceMotion && (elapsed < 160*time.Millisecond || p.duration-elapsed < 160*time.Millisecond || r.title.Bounds().Dx() > r.titleRect.Dx() || r.body.Bounds().Dx() > r.bodyRect.Dx())
+	moving := !p.request.ReduceMotion && (elapsed < 160*time.Millisecond || p.duration-elapsed < 160*time.Millisecond || r.scrolls())
 	if moving {
 		win.KillTimer(h, 2)
 		p.startFrames()
@@ -385,7 +488,7 @@ func osdWindowProc(h win.HWND, msg uint32, w, l uintptr) uintptr {
 			p.mu.Lock()
 			p.state.LastError = err.Error()
 			p.mu.Unlock()
-			p.hide()
+			p.hide("failed")
 		}
 	}
 	switch msg {
@@ -394,8 +497,24 @@ func osdWindowProc(h win.HWND, msg uint32, w, l uintptr) uintptr {
 			select {
 			case c := <-p.commands:
 				var err error
+				if c.finish != "" {
+					p.hide(c.finish)
+					c.result <- reply{status: p.Status()}
+					continue
+				}
+				if c.offset != nil {
+					delta := *c.offset - p.stackOffset
+					if strings.HasPrefix(p.request.Position, "bottom-") {
+						delta = -delta
+					}
+					p.stackOffset = *c.offset
+					p.anchor.Y += delta
+					err = p.render(true)
+					c.result <- reply{status: p.Status(), err: err}
+					continue
+				}
 				if c.close {
-					p.hide()
+					p.hide("closed")
 					c.result <- reply{status: p.Status()}
 					win.PostQuitMessage(0)
 					return 0
@@ -408,8 +527,10 @@ func osdWindowProc(h win.HWND, msg uint32, w, l uintptr) uintptr {
 							p.request.ID = fmt.Sprintf("osd-%d", p.sequence)
 						}
 						p.started = time.Now()
+						p.endReason = "expired"
 						p.duration = time.Duration(p.request.DurationMS) * time.Millisecond
 						p.mu.Lock()
+						p.rememberLocked("replaced")
 						p.state.Active = true
 						p.state.ID = p.request.ID
 						p.state.ShownAt = p.started
@@ -417,6 +538,8 @@ func osdWindowProc(h win.HWND, msg uint32, w, l uintptr) uintptr {
 						p.state.Accepted++
 						p.state.LastError = ""
 						p.state.LastAction = ""
+						p.state.LastActionID = ""
+						p.state.Dismissal = ""
 						p.mu.Unlock()
 						err = p.render(true)
 						if err == nil {
@@ -430,8 +553,9 @@ func osdWindowProc(h win.HWND, msg uint32, w, l uintptr) uintptr {
 						err = errors.New("OSD id no longer active")
 					} else {
 						p.duration = time.Since(p.started) + 160*time.Millisecond
+						p.endReason = "dismissed"
 						if p.request.ReduceMotion {
-							p.hide()
+							p.hide("dismissed")
 						} else {
 							p.mu.Lock()
 							p.state.ExpiresAt = time.Now().Add(160 * time.Millisecond)
@@ -522,16 +646,17 @@ func osdWindowProc(h win.HWND, msg uint32, w, l uintptr) uintptr {
 		}
 		point := image.Pt(int(int16(l&0xffff)), int(int16(l>>16)))
 		if point.In(p.rendering.closeRect) {
-			p.hide()
+			p.hide("dismissed")
 			return 0
 		}
 		if p.hover >= 0 && p.hover == p.pressed && p.hover < len(p.request.Actions) && point.In(p.rendering.hits[p.hover]) {
 			action := p.request.Actions[p.hover]
 			p.mu.Lock()
 			p.state.LastAction = action.Label
+			p.state.LastActionID = action.ID
 			p.mu.Unlock()
-			p.hide()
-			if p.options.Activate != nil {
+			p.hide("action")
+			if p.options.Activate != nil && action.URI != "" {
 				id := p.request.ID
 				go func() {
 					if err := p.options.Activate(action.URI); err != nil {
@@ -550,10 +675,13 @@ func osdWindowProc(h win.HWND, msg uint32, w, l uintptr) uintptr {
 		if p.rendering != nil {
 			fail(p.configure(p.request))
 			fail(p.render(true))
+			if p.onChange != nil {
+				p.onChange()
+			}
 		}
 		return 0
 	case win.WM_CLOSE:
-		p.hide()
+		p.hide("closed")
 		win.PostQuitMessage(0)
 		return 0
 	}

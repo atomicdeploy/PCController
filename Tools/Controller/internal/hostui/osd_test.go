@@ -81,3 +81,21 @@ func TestOSDNotificationRetainsSemanticIdentityAndActions(t *testing.T) {
 		t.Fatal(r)
 	}
 }
+
+func TestOSDMultilineAndScriptChoices(t *testing.T) {
+	r, err := ValidateOSD(OSDRequest{Text: "One\r\nTwo", Actions: []OSDAction{{ID: "confirm", Label: "Confirm"}}})
+	if err != nil || r.Text != "One\nTwo" || r.Actions[0].URI != "" {
+		t.Fatal(r, err)
+	}
+	for _, request := range []OSDRequest{
+		{Text: "x", Behavior: "unlimited"},
+		{Text: "x", Background: "file:///x"},
+		{Text: strings.Repeat("line\n", 6) + "seventh"},
+		{Text: "x", Actions: []OSDAction{{Label: "No identity"}}},
+		{Text: "x", Actions: []OSDAction{{ID: "same", Label: "One"}, {ID: "same", Label: "Two"}}},
+	} {
+		if _, err := ValidateOSD(request); err == nil {
+			t.Fatal("invalid multiline/choice request accepted", request)
+		}
+	}
+}

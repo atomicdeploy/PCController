@@ -64,7 +64,8 @@ func (f *osdFixture) Dismiss(_ context.Context, id string) (hostui.OSDStatus, er
 	f.dismissed = id
 	return hostui.OSDStatus{Supported: true}, nil
 }
-func (f *osdFixture) Status() hostui.OSDStatus { return hostui.OSDStatus{Supported: true} }
+func (f *osdFixture) Status() hostui.OSDStatus                { return hostui.OSDStatus{Supported: true} }
+func (f *osdFixture) Result(string) (hostui.OSDStatus, error) { return f.Status(), nil }
 
 func TestOSDHTTPAdmissionReadOnlyStatusAndStrictPayload(t *testing.T) {
 	fake := &osdFixture{}

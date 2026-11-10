@@ -9,6 +9,9 @@ func TestOSDNotificationPreferencesValidateWithoutChangingDefaults(t *testing.T)
 	}
 	c.Integrations.Notifications.Presentation = "osd"
 	c.Integrations.Notifications.OSDDurationMS = 7000
+	c.Integrations.Notifications.OSDBehavior = "stack"
+	c.Integrations.Notifications.OSDPosition = "bottom-left"
+	c.Integrations.Notifications.OSDBackground = "acrylic"
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}

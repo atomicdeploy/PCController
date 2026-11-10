@@ -12,20 +12,34 @@ may cover ordinary desktop windows.
   antialiased rounded edges, DPI-sized system text and original-aspect artwork.
 - A short cubic fade/slide at entrance and dismissal. Long headings/body text
   scroll at a fixed speed with pauses at both ends, independently of frame rate.
-- Bottom/top center or right placement within the primary display work area.
+- Body text preserves up to six explicit LF/CRLF lines, with height and action
+  placement adapting to them. Each long line scrolls independently; short lines
+  remain still. Oversized messages fail rather than covering off-screen controls.
+- Top/bottom left, center or right, plus screen-center placement within the
+  primary display work area. Default: bottom-center.
 - Up to five compact action buttons. Their URIs are inert until an explicit
-  click; only `pccontroller:`, `http:` and `https:` routes are admitted. No
+  click; only `pccontroller:`, `http:` and `https:` routes are admitted. Script
+  choices instead supply an `id` and omit `uri`, so nothing is launched. No
   arbitrary executable, remote icon download or script evaluation is accepted.
 - The overlay does not take foreground focus or appear in the taskbar. Passive
   text/background lets desktop clicks through; the close/action targets remain
   interactive. Buttons are pointer-operated; keyboard focus remains in the
   foreground application.
+  The visual HWND is always `WS_EX_TRANSPARENT`; small owned, non-activating
+  input surfaces cover only the buttons and close target. This works across
+  applications/threads, unlike relying on `HTTRANSPARENT` alone.
 - Windows' client-area animation preference and the host's reduced-motion
   preference disable automatic movement. Static overlays sleep until expiry;
   fonts, icons and DIB surfaces are not recreated on animation frames.
 
-One overlay is current per host process. A new show replaces it. Use the returned
-`id` when dismissing so a delayed dismissal cannot close a replacement.
+Default `behavior: replace` replaces the active overlays. Opt-in `stack` keeps up
+to six independently timed overlays, grouped by position, with a 10-DIP gap and
+event-driven reflow on dismissal. The oldest remains nearest the screen edge;
+new overlays extend inward. A full stack or insufficient display space fails
+without evicting an existing choice. Supplying an active ID replaces that exact
+item even in stack mode. Use the returned `id` when dismissing so a delayed
+dismissal cannot close a replacement. An omitted dismissal ID targets only the
+most recently active overlay, not the entire stack.
 `duration_ms` includes both transitions, defaults to 5000 and accepts 500..120000.
 The lifetime is not renewed by hover or status reads.
 
@@ -43,6 +57,54 @@ Use the actual configured listener (often 8787; GUI-owned hosts may use 8788).
 The convenience CLI uses `PCCONTROLLER_IPC_TOKEN` if a credential is needed.
 The existing `ipc call` CLI also supports its normal token-reference mechanism.
 
+### Multiline messages and blocking script choices
+
+```powershell
+$controller = "$env:LOCALAPPDATA\Programs\PCController\bin\controller.exe"
+$result = & $controller osd show --title "Choose an action" --icon info `
+  --text "First line`nSecond line of the message" --duration 30s `
+  --button "continue=Continue" --button "cancel=Cancel" --wait | ConvertFrom-Json
+if ($result.last_action_id -eq 'continue') { 'Continue selected' }
+```
+
+`--wait` prints one final JSON result after expiry, dismissal or selection, rather
+than an initial acceptance receipt. `dismissal` is `expired`, `dismissed`, `action`,
+`replaced`, `closed` or `failed`; `last_action_id` and `last_action` identify the
+selected choice and its caption. Terminal notification outcomes return exit 0;
+invalid input, transport/presentation failure or interrupted waiting returns a
+nonzero exit code. Ctrl+C stops waiting without replaying or implicitly dismissing
+a host-owned notification. Standalone process exit closes its own overlay.
+
+Without `--wait`, a host-owned show returns immediately. Standalone mode already
+stays alive until completion; adding `--wait` changes its output to the final
+result. An explicit wait performs bounded status reads; it neither holds a
+long-running mutation request open nor starts another host or board connection.
+The host retains the most recent 64 terminal receipts until process exit, so a
+later notification cannot erase a choice before the script's next read.
+
+Icons: `app`, `info`, `success`, `warning`, `error`, `door`, `hot`,
+`temperature-cleared`, `motion`, `relay`, `radio`. `--severity` independently chooses
+`info`, `success`, `warning` or `error` accents. `--theme system|dark|light` and
+`--position top-left|top-center|top-right|center|bottom-left|bottom-center|bottom-right`
+are also available.
+
+### Stacking and backgrounds
+
+```powershell
+& $controller osd show --text 'First message' --behavior stack --duration 12s
+& $controller osd show --text 'Second message' --behavior stack --background acrylic
+& $controller osd show --text 'Transparent overlay' --background none --position top-right
+```
+
+`--background current` preserves the charcoal/light card (default). `none` is an
+alias for `transparent`: no card fill, outline or shadow; text, icons and button
+surfaces remain. `acrylic` and `blur` reuse the existing native desktop composition
+stack with a light tint over the real background, not a captured wallpaper.
+Windows accessibility/transparency/composition policy may require a normal card;
+the response's `background` reports the effective mode. A raster preview can show
+the foreground but cannot prove a live compositor blur. `active_count` and `items`
+list the active surfaces; each has its own identity, DPI, geometry and result.
+
 ## HTTP, JSON-RPC, WebSocket and NDJSON
 
 `GET /api/osd` reads state; `POST /api/osd` shows; `DELETE /api/osd` dismisses,
@@ -51,6 +113,10 @@ optionally supplying `{"id":"..."}`. The same operations are
 existing `/api/rpc`, `/ipc`, NDJSON and binary-UDP RPC transports. Existing host
 remote/origin and read/message capability policies still apply. There is no
 additional listener or permission bypass.
+Status accepts an optional `id` (`GET /api/osd?id=...` over HTTP) to retrieve the
+current or retained terminal result for that exact notification. Unknown/evicted
+identities fail explicitly. Prefer generated unique IDs for concurrent scripts;
+deliberately reusing an ID replaces that presentation.
 
 ```json
 {
@@ -84,7 +150,7 @@ OSD instead of native toasts. Merge these fields into the existing
 other rules/actions:
 
 ```json
-{"presentation":"osd","osd_duration_ms":7000}
+{"presentation":"osd","osd_duration_ms":7000,"osd_position":"bottom-center","osd_behavior":"replace","osd_background":"current"}
 ```
 
 The default is unchanged (`native`). Existing enable/important-kind filters,
@@ -92,6 +158,8 @@ door safety rules, semantic icons, configured actions and audio preferences
 still apply. Configuration reload is hot-applied; no output is actuated to
 preview this setting. Scheduled tasks and external automation can also call the
 same CLI/API explicitly.
+Position, behavior and background preferences also apply to API/CLI requests
+that omit those fields; explicitly supplied values override them.
 
 If the OSD cannot be presented (for example on a non-interactive host), autonomous
 alerts fall back to the existing native notifier and record the degraded route.
@@ -121,3 +189,7 @@ using an inert callback, with no board connection or output. Set
 144-DPI previews using the actual renderer and embedded product icon.
 The native-module fixture also asserts per-monitor window awareness and physical
 backing dimensions; a non-visual test verifies restoration of an unaware caller.
+An additional opt-in compositor fixture captures only an app-owned checkerboard
+behind its own OSD for current/transparent/acrylic/blur comparison. It does not
+capture user windows or inject global input. Source-owned input-window messages
+verify URI actions and script choices without executing external commands.

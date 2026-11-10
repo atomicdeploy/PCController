@@ -18,7 +18,7 @@ func TestOSDLivePreviewNoFocusAndExpiry(t *testing.T) {
 	if os.Getenv("PCCONTROLLER_OSD_LIVE") != "1" {
 		t.Skip("explicit desktop presentation verification only")
 	}
-	request := OSDRequest{ID: "osd-verification", Title: "Desktop OSD preview", Text: "Long captions scroll smoothly while the action buttons remain in place — without taking focus from your application.", Icon: "app", DurationMS: 900, Actions: []OSDAction{{Label: "Open events", URI: "pccontroller://page/events"}, {Label: "Preferences", URI: "pccontroller://page/settings"}}}
+	request := OSDRequest{ID: "osd-verification", Title: "Desktop OSD preview", Text: "First line of the message\nA longer second line scrolls independently while the action buttons remain in place.", Icon: "app", DurationMS: 900, Actions: []OSDAction{{Label: "Open events", URI: "pccontroller://page/events"}, {Label: "Preferences", URI: "pccontroller://page/settings"}}}
 	icon, err := loadOSDIcon(request.Icon)
 	if err != nil {
 		t.Fatal(err)
