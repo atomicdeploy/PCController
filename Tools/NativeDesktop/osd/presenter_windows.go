@@ -36,6 +36,8 @@ var (
 
 const osdCommand = win.WM_APP + 0x681
 const osdFrame = win.WM_APP + 0x682
+const osdInputLeave = win.WM_APP + 0x683
+const osdInputCancel = win.WM_APP + 0x684
 
 type command struct {
 	request *Request
@@ -62,24 +64,32 @@ type presenter struct {
 	history  []Status
 	err      error
 	// Everything below belongs exclusively to the locked window thread.
-	rendering      *rendering
-	request        Request
-	started        time.Time
-	duration       time.Duration
-	anchor         image.Point
-	hover, pressed int
-	sequence       uint64
-	lastOpacity    byte
-	lastOffset     []int
-	endReason      string
-	frameStop      chan struct{}
-	frameGate      *atomic.Bool
-	frameToken     uint32
-	stackOffset    int
-	onChange       func()
-	inputs         []*inputTarget
-	inputOrigin    image.Point
-	inputsVisible  bool
+	rendering                *rendering
+	request                  Request
+	started                  time.Time
+	duration                 time.Duration
+	anchor                   image.Point
+	hover, pressed           int
+	hoverInput, pressedInput win.HWND
+	hoverFrom                []float64
+	hoverStarted             time.Time
+	lastHover                []float64
+	exiting                  bool
+	exitStarted              time.Time
+	exitDuration             time.Duration
+	exitOpacity, exitSlide   float64
+	sequence                 uint64
+	lastOpacity              byte
+	lastOffset               []int
+	endReason                string
+	frameStop                chan struct{}
+	frameGate                *atomic.Bool
+	frameToken               uint32
+	stackOffset              int
+	onChange                 func()
+	inputs                   []*inputTarget
+	inputOrigin              image.Point
+	inputsVisible            bool
 }
 
 func newWindowPresenter(o Options) *presenter {
@@ -358,6 +368,10 @@ func (p *presenter) configure(r Request) error {
 	p.anchor = image.Pt(x, y)
 	p.hover = -1
 	p.pressed = -1
+	p.hoverInput, p.pressedInput = 0, 0
+	p.hoverFrom = make([]float64, len(r.Actions)+1)
+	p.hoverStarted = time.Now()
+	p.lastHover = nil
 	p.lastOpacity = 0
 	p.lastOffset = nil
 	p.mu.Lock()
@@ -387,22 +401,90 @@ func (p *presenter) hide(reason string) {
 		p.onChange()
 	}
 }
+
+func (p *presenter) visualAt(now time.Time) (float64, float64) {
+	if p.exiting {
+		return exitFrame(now.Sub(p.exitStarted), p.exitDuration, p.exitOpacity, p.exitSlide)
+	}
+	return Timeline(now.Sub(p.started), p.duration, p.request.ReduceMotion)
+}
+
+func (p *presenter) setHover(target int, now time.Time) {
+	if target == p.hover {
+		return
+	}
+	p.hoverFrom, _ = hoverFrame(p.hoverFrom, p.hover, now.Sub(p.hoverStarted), p.request.ReduceMotion)
+	p.hover, p.hoverStarted = target, now
+}
+
+func (p *presenter) leaveInput(input win.HWND) bool {
+	if p.hoverInput != input {
+		return false
+	}
+	p.hoverInput = 0
+	p.setHover(-1, time.Now())
+	return true
+}
+
+func (p *presenter) hitTarget(at image.Point) int {
+	if p.rendering == nil || p.exiting {
+		return -1
+	}
+	for i, box := range p.rendering.hits {
+		if at.In(box) {
+			return i
+		}
+	}
+	if at.In(p.rendering.closeRect) {
+		return len(p.rendering.hits)
+	}
+	return -1
+}
+
+func (p *presenter) beginDismiss(reason string) error {
+	if p.rendering == nil || p.exiting {
+		return nil
+	}
+	now := time.Now()
+	opacity, slide := p.visualAt(now)
+	p.exitDuration = min(exitTime, p.duration-now.Sub(p.started))
+	p.exiting, p.exitStarted = true, now
+	p.exitOpacity, p.exitSlide = opacity, slide
+	p.endReason = reason
+	p.pressed, p.pressedInput, p.hoverInput = -1, 0, 0
+	p.setHover(-1, now)
+	// Reject activation immediately, but retain the small input targets until
+	// the visual exit ends. A fast second click must not hit the desktop behind
+	// a button that is still visibly fading away.
+	if p.request.ReduceMotion || p.exitDuration <= 0 {
+		p.hide(reason)
+		return nil
+	}
+	p.mu.Lock()
+	p.state.ExpiresAt = now.Add(p.exitDuration)
+	p.mu.Unlock()
+	return p.render(false)
+}
+
 func (p *presenter) render(force bool) error {
 	if p.rendering == nil {
 		return nil
 	}
-	elapsed := time.Since(p.started)
-	if elapsed >= p.duration {
+	now := time.Now()
+	elapsed := now.Sub(p.started)
+	if (p.exiting && now.Sub(p.exitStarted) >= p.exitDuration) || (!p.exiting && elapsed >= p.duration) {
 		p.hide(p.endReason)
 		return nil
 	}
 	r := p.rendering
-	alpha, slide := Timeline(elapsed, p.duration, p.request.ReduceMotion)
+	alpha, slide := p.visualAt(now)
 	opacity := byte(alpha * 255)
 	offsets := r.offsets(elapsed, p.request.ReduceMotion)
-	if force || opacity != p.lastOpacity || !slices.Equal(offsets, p.lastOffset) {
-		if force || !slices.Equal(offsets, p.lastOffset) {
-			im := r.paint(elapsed, p.request.ReduceMotion, p.hover)
+	hover, hoverMoving := hoverFrame(p.hoverFrom, p.hover, now.Sub(p.hoverStarted), p.request.ReduceMotion)
+	hoverChanged := !slices.Equal(hover, p.lastHover)
+	if force || opacity != p.lastOpacity || !slices.Equal(offsets, p.lastOffset) || hoverChanged {
+		if force || !slices.Equal(offsets, p.lastOffset) || hoverChanged {
+			im := r.paint(elapsed, p.request.ReduceMotion, hover)
 			for i := 0; i < len(im.Pix); i += 4 {
 				r.surface.pixels[i] = im.Pix[i+2]
 				r.surface.pixels[i+1] = im.Pix[i+1]
@@ -421,9 +503,10 @@ func (p *presenter) render(force bool) error {
 		p.positionInputs(image.Pt(int(point.X), int(point.Y)), opacity > 0)
 		p.lastOpacity = opacity
 		p.lastOffset = offsets
+		p.lastHover = hover
 	}
 	h := win.HWND(p.hwnd.Load())
-	moving := !p.request.ReduceMotion && (elapsed < 160*time.Millisecond || p.duration-elapsed < 160*time.Millisecond || r.scrolls())
+	moving := !p.request.ReduceMotion && (p.exiting || hoverMoving || elapsed < exitTime || p.duration-elapsed < exitTime || r.scrolls())
 	if moving {
 		win.KillTimer(h, 2)
 		p.startFrames()
@@ -527,6 +610,7 @@ func osdWindowProc(h win.HWND, msg uint32, w, l uintptr) uintptr {
 							p.request.ID = fmt.Sprintf("osd-%d", p.sequence)
 						}
 						p.started = time.Now()
+						p.exiting = false
 						p.endReason = "expired"
 						p.duration = time.Duration(p.request.DurationMS) * time.Millisecond
 						p.mu.Lock()
@@ -552,16 +636,7 @@ func osdWindowProc(h win.HWND, msg uint32, w, l uintptr) uintptr {
 					if c.dismiss != "" && c.dismiss != p.request.ID {
 						err = errors.New("OSD id no longer active")
 					} else {
-						p.duration = time.Since(p.started) + 160*time.Millisecond
-						p.endReason = "dismissed"
-						if p.request.ReduceMotion {
-							p.hide("dismissed")
-						} else {
-							p.mu.Lock()
-							p.state.ExpiresAt = time.Now().Add(160 * time.Millisecond)
-							p.mu.Unlock()
-							err = p.render(true)
-						}
+						err = p.beginDismiss("dismissed")
 					}
 				}
 				c.result <- reply{p.Status(), err}
@@ -603,15 +678,10 @@ func osdWindowProc(h win.HWND, msg uint32, w, l uintptr) uintptr {
 			return 0
 		}
 		point := image.Pt(int(int16(l&0xffff)), int(int16(l>>16)))
-		hover := -1
-		for i, r := range p.rendering.hits {
-			if point.In(r) {
-				hover = i
-			}
-		}
+		hover := p.hitTarget(point)
 		if hover != p.hover {
-			p.hover = hover
-			fail(p.render(true))
+			p.setHover(hover, time.Now())
+			fail(p.render(false))
 			if p.rendering == nil {
 				return 0
 			}
@@ -621,23 +691,26 @@ func osdWindowProc(h win.HWND, msg uint32, w, l uintptr) uintptr {
 			cursor = win.IDC_HAND
 		}
 		win.SetCursor(win.LoadCursor(0, win.MAKEINTRESOURCE(uintptr(cursor))))
-		track := win.TRACKMOUSEEVENT{CbSize: uint32(unsafe.Sizeof(win.TRACKMOUSEEVENT{})), DwFlags: 2, HwndTrack: h}
-		win.TrackMouseEvent(&track)
 		return 0
-	case 0x02a3: // WM_MOUSELEAVE
-		p.hover = -1
-		fail(p.render(true))
+	case osdInputLeave:
+		if p.leaveInput(win.HWND(w)) {
+			fail(p.render(false))
+		}
+		return 0
+	case osdInputCancel:
+		if p.pressedInput == win.HWND(w) {
+			p.pressed, p.pressedInput = -1, 0
+			p.setHover(-1, time.Now())
+			fail(p.render(false))
+		}
 		return 0
 	case win.WM_LBUTTONDOWN:
 		p.pressed = -1
 		if p.rendering != nil {
 			point := image.Pt(int(int16(l&0xffff)), int(int16(l>>16)))
-			for i, box := range p.rendering.hits {
-				if point.In(box) {
-					p.pressed = i
-					p.hover = i
-				}
-			}
+			p.pressed = p.hitTarget(point)
+			p.setHover(p.pressed, time.Now())
+			fail(p.render(false))
 		}
 		return 0
 	case win.WM_LBUTTONUP:
@@ -645,17 +718,25 @@ func osdWindowProc(h win.HWND, msg uint32, w, l uintptr) uintptr {
 			return 0
 		}
 		point := image.Pt(int(int16(l&0xffff)), int(int16(l>>16)))
-		if point.In(p.rendering.closeRect) {
-			p.hide("dismissed")
+		pressed := p.pressed
+		p.pressed, p.pressedInput = -1, 0
+		target := p.hitTarget(point)
+		if target < 0 || target != pressed {
+			p.setHover(target, time.Now())
+			fail(p.render(false))
 			return 0
 		}
-		if p.hover >= 0 && p.hover == p.pressed && p.hover < len(p.request.Actions) && point.In(p.rendering.hits[p.hover]) {
-			action := p.request.Actions[p.hover]
+		if target == len(p.rendering.hits) {
+			fail(p.beginDismiss("dismissed"))
+			return 0
+		}
+		if target < len(p.request.Actions) {
+			action := p.request.Actions[target]
 			p.mu.Lock()
 			p.state.LastAction = action.Label
 			p.state.LastActionID = action.ID
 			p.mu.Unlock()
-			p.hide("action")
+			fail(p.beginDismiss("action"))
 			if p.options.Activate != nil && action.URI != "" {
 				id := p.request.ID
 				go func() {

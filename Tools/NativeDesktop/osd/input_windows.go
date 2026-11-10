@@ -19,12 +19,19 @@ var (
 	inputCallback   = windows.NewCallback(inputWindowProc)
 	inputWindows    sync.Map
 	inputAlpha      = osdUser.NewProc("SetLayeredWindowAttributes")
+	inputCapture    = osdUser.NewProc("GetCapture")
 )
 
+func inputOwnsCapture(h win.HWND) bool {
+	captured, _, _ := inputCapture.Call()
+	return captured == uintptr(h)
+}
+
 type inputTarget struct {
-	hwnd  win.HWND
-	owner *presenter
-	rect  image.Rectangle
+	hwnd     win.HWND
+	owner    *presenter
+	rect     image.Rectangle
+	tracking bool
 }
 
 func inputWindowProc(h win.HWND, msg uint32, w, l uintptr) uintptr {
@@ -39,22 +46,47 @@ func inputWindowProc(h win.HWND, msg uint32, w, l uintptr) uintptr {
 	case win.WM_NCHITTEST:
 		return win.HTCLIENT
 	case win.WM_MOUSEMOVE, win.WM_LBUTTONDOWN, win.WM_LBUTTONUP:
+		p := target.owner
+		if msg == win.WM_LBUTTONUP {
+			defer func() {
+				if inputOwnsCapture(h) {
+					win.ReleaseCapture()
+				}
+			}()
+		}
+		// Both HWNDs are owned by this same locked UI thread. Dispatch in order,
+		// rather than building a posted-move/leave/capture message backlog.
+		if p.rendering == nil || p.exiting {
+			return 0
+		}
+		if msg == win.WM_MOUSEMOVE {
+			p.hoverInput = h
+		}
 		if msg == win.WM_LBUTTONDOWN {
 			win.SetCapture(h)
-		}
-		if msg == win.WM_LBUTTONUP {
-			win.ReleaseCapture()
+			p.pressedInput = h
 		}
 		x, y := int(int16(l&0xffff))+target.rect.Min.X, int(int16(l>>16))+target.rect.Min.Y
 		point := uintptr(uint16(x)) | uintptr(uint16(y))<<16
-		win.PostMessage(win.HWND(target.owner.hwnd.Load()), msg, w, point)
-		if msg == win.WM_MOUSEMOVE {
+		win.SendMessage(win.HWND(p.hwnd.Load()), msg, w, point)
+		// Release only after dispatching UP. Capture loss must not erase its
+		// matching press before the owner handles it.
+		if msg == win.WM_MOUSEMOVE && !target.tracking && !p.exiting {
 			track := win.TRACKMOUSEEVENT{CbSize: uint32(unsafe.Sizeof(win.TRACKMOUSEEVENT{})), DwFlags: 2, HwndTrack: h}
-			win.TrackMouseEvent(&track)
+			target.tracking = win.TrackMouseEvent(&track)
 		}
 		return 0
 	case 0x02a3:
-		win.PostMessage(win.HWND(target.owner.hwnd.Load()), msg, 0, 0)
+		target.tracking = false
+		if !inputOwnsCapture(h) {
+			win.SendMessage(win.HWND(target.owner.hwnd.Load()), osdInputLeave, uintptr(h), 0)
+		}
+		return 0
+	case win.WM_CAPTURECHANGED, win.WM_CANCELMODE:
+		win.SendMessage(win.HWND(target.owner.hwnd.Load()), osdInputCancel, uintptr(h), 0)
+		if msg == win.WM_CANCELMODE && inputOwnsCapture(h) {
+			win.ReleaseCapture()
+		}
 		return 0
 	}
 	return win.DefWindowProc(h, msg, w, l)

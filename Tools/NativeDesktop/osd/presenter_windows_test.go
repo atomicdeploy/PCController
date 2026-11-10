@@ -175,8 +175,12 @@ func TestOSDLiveActionClickIsExplicitAndSingleShot(t *testing.T) {
 		t.Fatal("duplicate activation", uri)
 	case <-time.After(50 * time.Millisecond):
 	}
+	deadline := time.Now().Add(time.Second)
+	for p.Status().Active && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
 	if p.Status().Active {
-		t.Fatal("activated overlay remained on screen")
+		t.Fatal("activated overlay did not finish its exit")
 	}
 	first := p.Status()
 	r.ID = "script-choice"
@@ -185,7 +189,7 @@ func TestOSDLiveActionClickIsExplicitAndSingleShot(t *testing.T) {
 		t.Fatal(err)
 	}
 	clickInput()
-	deadline := time.Now().Add(time.Second)
+	deadline = time.Now().Add(time.Second)
 	for p.Status().Active && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}

@@ -65,22 +65,56 @@ func (d *dib) close() {
 	d.bitmap = 0
 }
 
-func textImage(text string, size int, bold bool, c color.RGBA) (*image.RGBA, error) {
+func newTextFont(size int, semibold bool) (win.HFONT, error) {
+	var lf win.LOGFONT
+	lf.LfHeight = -int32(size)
+	lf.LfWeight = win.FW_NORMAL
+	family := "Segoe UI"
+	if semibold {
+		lf.LfWeight = win.FW_SEMIBOLD
+		// Generic Segoe UI + weight 600 maps to the Bold (700) style on GDI.
+		// The distinct Semibold face must be selected explicitly.
+		family = "Segoe UI Semibold"
+	}
+	lf.LfQuality = win.ANTIALIASED_QUALITY
+	copy(lf.LfFaceName[:], windows.StringToUTF16(family))
+	f := win.CreateFontIndirect(&lf)
+	if f == 0 {
+		return 0, errors.New("OSD font creation failed")
+	}
+	if semibold {
+		dc := win.CreateCompatibleDC(0)
+		if dc == 0 {
+			win.DeleteObject(win.HGDIOBJ(f))
+			return 0, errors.New("OSD font verification DC failed")
+		}
+		old := win.SelectObject(dc, win.HGDIOBJ(f))
+		var metrics win.TEXTMETRIC
+		ok := win.GetTextMetrics(dc, &metrics)
+		win.SelectObject(dc, old)
+		win.DeleteDC(dc)
+		if !ok {
+			win.DeleteObject(win.HGDIOBJ(f))
+			return 0, errors.New("OSD font weight verification failed")
+		}
+		if metrics.TmWeight != win.FW_SEMIBOLD {
+			// Older/missing-font installations get legible Regular, never an
+			// unintended Bold substitution masquerading as Semibold.
+			win.DeleteObject(win.HGDIOBJ(f))
+			return newTextFont(size, false)
+		}
+	}
+	return f, nil
+}
+
+func textImage(text string, size int, semibold bool, c color.RGBA) (*image.RGBA, error) {
 	text = strings.Join(strings.Fields(text), " ")
 	if text == "" {
 		return image.NewRGBA(image.Rect(0, 0, 1, max(1, size))), nil
 	}
-	var lf win.LOGFONT
-	lf.LfHeight = -int32(size)
-	lf.LfWeight = win.FW_NORMAL
-	if bold {
-		lf.LfWeight = win.FW_SEMIBOLD
-	}
-	lf.LfQuality = win.ANTIALIASED_QUALITY
-	copy(lf.LfFaceName[:], windows.StringToUTF16("Segoe UI"))
-	f := win.CreateFontIndirect(&lf)
-	if f == 0 {
-		return nil, errors.New("OSD font creation failed")
+	f, err := newTextFont(size, semibold)
+	if err != nil {
+		return nil, err
 	}
 	defer win.DeleteObject(win.HGDIOBJ(f))
 	dc := win.CreateCompatibleDC(0)
@@ -131,6 +165,28 @@ func textImage(text string, size int, bold bool, c color.RGBA) (*image.RGBA, err
 	return img, nil
 }
 
+// A standalone glyph is an icon, not a line of text: font ascent/descent and
+// advance padding must not determine its position within a square hit target.
+func glyphInkBounds(img *image.RGBA) image.Rectangle {
+	b := img.Bounds()
+	var ink image.Rectangle
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			if img.Pix[img.PixOffset(x, y)+3] != 0 {
+				ink = ink.Union(image.Rect(x, y, x+1, y+1))
+			}
+		}
+	}
+	return ink
+}
+
+func trimGlyph(img *image.RGBA) *image.RGBA {
+	ink := glyphInkBounds(img)
+	cropped := image.NewRGBA(image.Rect(0, 0, max(1, ink.Dx()), max(1, ink.Dy())))
+	draw.Draw(cropped, cropped.Bounds(), img, ink.Min, draw.Src)
+	return cropped
+}
+
 type rendering struct {
 	base, frame          *image.RGBA
 	surface              *dib
@@ -139,6 +195,8 @@ type rendering struct {
 	titleShadow          *image.RGBA
 	bodyShadows          []*image.RGBA
 	buttons              []*image.RGBA
+	closeGlyph           *image.RGBA
+	closeGlyphAt         image.Point
 	hits                 []image.Rectangle
 	scale                float64
 	titleRect, closeRect image.Rectangle
@@ -264,13 +322,18 @@ func prepare(req Request, dpi, width int, icon image.Image, dark bool) (*renderi
 		at := image.Pt(px(29)+(px(42)-iw)/2, px(28)+(px(42)-ih)/2)
 		draw.Draw(r.base, image.Rectangle{Min: at, Max: at.Add(image.Pt(iw, ih))}, scaled, image.Point{}, draw.Over)
 	}
-	r.closeRect = image.Rect(width-px(45), px(15), width-px(17), px(43))
+	closeSize := px(28)
+	r.closeRect = image.Rect(width-px(17)-closeSize, px(15), width-px(17), px(15)+closeSize)
 	// Close glyph remains subordinate to the semantic icon, not stretched to fill.
 	closeText, err := textImage("×", px(20), false, r.muted)
 	if err != nil {
 		return nil, err
 	}
-	draw.Draw(r.base, image.Rect(r.closeRect.Min.X+(r.closeRect.Dx()-closeText.Bounds().Dx())/2, r.closeRect.Min.Y, r.closeRect.Max.X, r.closeRect.Max.Y), closeText, image.Point{}, draw.Over)
+	r.closeGlyph = trimGlyph(closeText)
+	r.closeGlyphAt = image.Pt(
+		r.closeRect.Min.X+(r.closeRect.Dx()-r.closeGlyph.Bounds().Dx())/2,
+		r.closeRect.Min.Y+(r.closeRect.Dy()-r.closeGlyph.Bounds().Dy())/2,
+	)
 	r.titleRect = image.Rect(px(88), px(23), width-px(58), px(48))
 	r.title, err = textImage(req.Title, px(16), true, r.ink)
 	if err != nil {
@@ -301,7 +364,7 @@ func prepare(req Request, dpi, width int, icon image.Image, dark bool) (*renderi
 			label := req.Actions[index].Label
 			var im *image.RGBA
 			for {
-				im, err = textImage(label, px(13), true, r.ink)
+				im, err = textImage(label, px(14), false, r.ink)
 				if err != nil {
 					return nil, err
 				}
@@ -343,11 +406,23 @@ func RenderPreview(request Request, dpi int, dark bool, icon image.Image) (*imag
 		return nil, err
 	}
 	defer r.close()
-	return r.paint(0, request.ReduceMotion, -1), nil
+	return r.paint(0, request.ReduceMotion, nil), nil
 }
 
-func (r *rendering) paint(elapsed time.Duration, reduced bool, hover int) *image.RGBA {
+func (r *rendering) paint(elapsed time.Duration, reduced bool, hover []float64) *image.RGBA {
 	copy(r.frame.Pix, r.base.Pix)
+	amount := func(i int) float64 {
+		if i < len(hover) {
+			return min(1, max(0, hover[i]))
+		}
+		return 0
+	}
+	if level := amount(len(r.hits)); level > 0 {
+		c := r.muted
+		c.A = byte(30 * level)
+		rounded(r.frame, r.closeRect, 7*r.scale, c)
+	}
+	draw.Draw(r.frame, r.closeGlyph.Bounds().Add(r.closeGlyphAt).Intersect(r.closeRect), r.closeGlyph, image.Point{}, draw.Over)
 	line := func(im, shadow *image.RGBA, box image.Rectangle) {
 		offset := int(Marquee(elapsed, float64(im.Bounds().Dx()-box.Dx()), r.scale, reduced))
 		if shadow != nil {
@@ -387,16 +462,19 @@ func (r *rendering) paint(elapsed time.Duration, reduced bool, hover int) *image
 	}
 	for i, box := range r.hits {
 		stroke := r.muted
-		stroke.A = 65
+		level := amount(i)
+		stroke.A = byte(65 + 25*level)
 		rounded(r.frame, box, 7*r.scale, stroke)
 		fill := color.RGBA{65, 60, 75, 220}
 		if r.ink.R < 128 {
 			fill = color.RGBA{224, 219, 233, 245}
 		}
-		if i == hover {
-			fill = r.accent
-			fill.A = 60
-		}
+		// Keep surface opacity stable: the old hover replaced the opaque fill
+		// with a near-transparent tint, producing a conspicuous flash.
+		mix := .20 * level
+		fill.R = byte(float64(fill.R)*(1-mix) + float64(r.accent.R)*mix)
+		fill.G = byte(float64(fill.G)*(1-mix) + float64(r.accent.G)*mix)
+		fill.B = byte(float64(fill.B)*(1-mix) + float64(r.accent.B)*mix)
 		rounded(r.frame, box.Inset(1), max(1, 7*r.scale-1), fill)
 		im := r.buttons[i]
 		at := image.Pt(box.Min.X+(box.Dx()-im.Bounds().Dx())/2, box.Min.Y+(box.Dy()-im.Bounds().Dy())/2)
