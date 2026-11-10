@@ -151,6 +151,32 @@ screen-edge pixels immediately around activation, before forcing a repaint, in
 DirectX and legacy modes and while posted cleanup is blocked. Existing native
 minimize/maximize/restore and Snap hit-testing contracts must still pass.
 
+## Responsive activity dialogs
+
+Shared controller activity forms use retained native editors with adaptive rows.
+The editor column consumes spare width; read-only facts share its leading edge.
+Below a 600-DIP content width, labels stack above editors without replacing their
+HWNDs, values, validation state or drafts. Multi-section forms retain tabs;
+single-section forms render directly without a redundant tab/title frame.
+Connection opens at a compact 720×380 DIP instead of using the authoring-window
+height. Scalar inputs retain a consistent usable height rather than stretching
+vertically into oversized controls. Lists and multiline editors own flexible
+content space, with scrolling only when required.
+
+The shared footer measures captions with the actual native font, packs actions
+in a retained grid and wraps them above fixed-size Refresh/Close controls when
+necessary. Layout uses each action's own visibility intent, not inherited
+IsWindowVisible during modal initialization. This prevents initially invisible
+owners from collapsing the action area. Content-derived footer heights prevent
+action layout from stealing the form viewport. Ordinary loading, busy, validation,
+confirmation and dirty-close fences remain unchanged.
+
+`TestControllerConnectionFormResponsiveDark/Light` and
+`TestControllerEditorFormResponsive` verify real HWND geometry, wide editor
+growth, narrow reflow, actual requested widths, ancestor clipping, single-section
+chrome, action presence and literal draft retention. Source-owned screenshots
+cover compact/wide/narrow forms without operating a user's active dialog.
+
 ## Console / TUI button
 
 ### Single-process combined mode

@@ -64,8 +64,9 @@ func (s *Shell) openControllerFormObserved(key string, observe func(*walk.Dialog
 	}
 	var dialog *walk.Dialog
 	var body *walk.Composite
-	var actionsBody *walk.Composite
+	var actionsBody *walk.ScrollView
 	var heading *walk.Label
+	var headingIcon *walk.Label
 	var status *walk.Label
 	var closeButton, refreshButton *walk.PushButton
 	busy, dirty, closed := false, false, false
@@ -75,6 +76,42 @@ func (s *Shell) openControllerFormObserved(key string, observe func(*walk.Dialog
 	var saveButtons []**walk.PushButton
 	actionButtons := map[string]**walk.PushButton{}
 	building := false
+	var formRows []*controllerFormRow
+	footer := &controllerFormFooter{}
+	reflow := func() {
+		if dialog == nil || dialog.IsDisposed() {
+			return
+		}
+		width := dialog.ClientBounds().Width - 64
+		for _, row := range formRows {
+			row.reflow(width)
+		}
+		footer.reflow(dialog.ClientBounds().Width - 40)
+	}
+	styleForm := func() {
+		appearance, _ := winfx.ResolveAppearance(s.Config().UI.Theme)
+		if appearance.HighContrast {
+			return
+		}
+		colors := controllerPalette(appearance.Dark)
+		for _, row := range formRows {
+			if row.label != nil {
+				row.label.SetTextColor(colors.secondary)
+			}
+			if key == "connection" && row.root != nil && row.root.Name() == "form.row.state" && row.editor.Children().Len() > 0 {
+				if value, ok := row.editor.Children().At(0).(*walk.Label); ok {
+					color := colors.secondary
+					if value.Text() == "Connected" {
+						color = colors.success
+					}
+					value.SetTextColor(color)
+				}
+			}
+		}
+		if headingIcon != nil {
+			headingIcon.SetTextColor(colors.accent)
+		}
+	}
 	type conditionalRow struct {
 		field  presentation.Field
 		widget **walk.Composite
@@ -174,6 +211,7 @@ func (s *Shell) openControllerFormObserved(key string, observe func(*walk.Dialog
 		baseline = map[string]string{}
 		saveButtons = nil
 		conditionalRows = nil
+		formRows = nil
 		actionButtons = map[string]**walk.PushButton{}
 		table = nil
 		timeline = nil
@@ -251,6 +289,9 @@ func (s *Shell) openControllerFormObserved(key string, observe func(*walk.Dialog
 		var buttonGrid *walk.Composite
 		showActions := func() {
 			active := ""
+			if len(sectionKeys) == 1 {
+				active = sectionKeys[0]
+			}
 			if fieldTabs != nil && fieldTabs.CurrentIndex() >= 0 && fieldTabs.CurrentIndex() < len(sections) {
 				active = sectionKeys[fieldTabs.CurrentIndex()]
 			}
@@ -260,26 +301,9 @@ func (s *Shell) openControllerFormObserved(key string, observe func(*walk.Dialog
 				}
 			}
 			if buttonGrid != nil {
-				layout, ok := buttonGrid.Layout().(*walk.GridLayout)
-				if !ok {
-					return
-				}
-				// Move existing cells out of the way before compacting the visible
-				// actions. Keep the same native layout and button handles alive.
-				for i, item := range sectionActions {
-					if *item.button != nil {
-						_ = layout.SetRange(*item.button, walk.Rectangle{X: 0, Y: len(sectionActions) + i, Width: 1, Height: 1})
-					}
-				}
-				slot := 0
-				for _, item := range sectionActions {
-					if *item.button != nil && (*item.button).Visible() {
-						_ = layout.SetRange(*item.button, walk.Rectangle{X: slot % 3, Y: slot / 3, Width: 1, Height: 1})
-						slot++
-					}
-				}
 				buttonGrid.RequestLayout()
 			}
+			footer.reflow(dialog.ClientBounds().Width - 40)
 		}
 		flushSection := func() {
 			if len(sectionRows) == 0 {
@@ -290,7 +314,7 @@ func (s *Shell) openControllerFormObserved(key string, observe func(*walk.Dialog
 				title = "Options"
 			}
 			sectionKeys = append(sectionKeys, section)
-			sections = append(sections, d.TabPage{Title: s.nativeText(title), Layout: d.VBox{MarginsZero: true}, Children: []d.Widget{d.ScrollView{Layout: d.VBox{Margins: d.Margins{Left: 12, Top: 12, Right: 12, Bottom: 14}, Spacing: 10, Alignment: d.AlignHNearVNear}, Children: sectionRows, StretchFactor: 1}}})
+			sections = append(sections, d.TabPage{Title: s.nativeText(title), Layout: d.VBox{MarginsZero: true}, Children: []d.Widget{d.ScrollView{Name: "form.viewport", Layout: d.VBox{Margins: d.Margins{Left: 4, Top: 12, Right: 4, Bottom: 12}, Spacing: 14, Alignment: d.AlignHNearVNear}, Children: sectionRows, StretchFactor: 1}}})
 			sectionRows = nil
 		}
 		for _, item := range controllerFormOrderedFields(next.Fields) {
@@ -307,7 +331,7 @@ func (s *Shell) openControllerFormObserved(key string, observe func(*walk.Dialog
 				section = field.Section
 			}
 			baseline[field.Key] = field.Value
-			row := []d.Widget{d.Label{Text: s.nativeText(field.Label), ToolTipText: s.nativeText(field.Label), RightToLeftReading: s.isRTL(), EllipsisMode: d.EllipsisEnd, MinSize: d.Size{Width: 180, Height: 30}, MaxSize: d.Size{Width: 180}}}
+			row := []d.Widget{}
 			if field.Multiline {
 				var input *walk.TextEdit
 				row = append(row, d.TextEdit{AssignTo: &input, Text: field.Value, ReadOnly: field.ReadOnly, VScroll: true, MinSize: d.Size{Height: 130}, StretchFactor: 1, OnTextChanged: changed})
@@ -316,12 +340,13 @@ func (s *Shell) openControllerFormObserved(key string, observe func(*walk.Dialog
 					setters[field.Key] = func(value string) { _ = input.SetText(value) }
 				}
 			} else if field.ReadOnly {
-				row = append(row, d.Label{Text: field.Value, StretchFactor: 1})
+				row = append(row, d.Label{Name: "form.value." + field.Key, Text: field.Value, TextAlignment: d.AlignNear, Alignment: d.AlignHNearVCenter, RightToLeftReading: s.isRTL(), EllipsisMode: d.EllipsisEnd, MinSize: d.Size{Height: 32}, StretchFactor: 1})
+				row = append(row, d.HSpacer{})
 			} else if field.Numeric {
 				var input *walk.LineEdit
 				// Keep the literal draft. NumberEdit.Value retains the previous
 				// valid number while its native edit contains invalid text.
-				row = append(row, d.LineEdit{AssignTo: &input, Text: field.Value, MinSize: d.Size{Width: 120, Height: 30}, StretchFactor: 1, OnTextChanged: changed})
+				row = append(row, d.LineEdit{Name: "form.value." + field.Key, AssignTo: &input, Text: field.Value, MinSize: d.Size{Width: 80, Height: 32}, MaxSize: d.Size{Height: 32}, StretchFactor: 1, OnTextChanged: changed})
 				getters[field.Key] = func() string {
 					if input == nil {
 						return field.Value
@@ -331,7 +356,7 @@ func (s *Shell) openControllerFormObserved(key string, observe func(*walk.Dialog
 				setters[field.Key] = func(value string) { _ = input.SetText(value) }
 			} else if len(field.Choices) == 2 && field.Choices[0] == "false" && field.Choices[1] == "true" {
 				var input *walk.CheckBox
-				row = append(row, d.CheckBox{AssignTo: &input, Checked: field.Value == "true", StretchFactor: 1, MinSize: d.Size{Height: 30}, OnCheckedChanged: changed})
+				row = append(row, d.CheckBox{Name: "form.value." + field.Key, AssignTo: &input, Checked: field.Value == "true", Alignment: d.AlignHNearVCenter, MinSize: d.Size{Width: 32, Height: 32}, MaxSize: d.Size{Width: 32, Height: 32}, OnCheckedChanged: changed}, d.HSpacer{})
 				getters[field.Key] = func() string {
 					if input == nil {
 						return field.Value
@@ -361,7 +386,7 @@ func (s *Shell) openControllerFormObserved(key string, observe func(*walk.Dialog
 						labels[i] = s.nativeText(label)
 					}
 				}
-				row = append(row, d.ComboBox{AssignTo: &combo, Model: labels, CurrentIndex: index, MinSize: d.Size{Height: 30}, StretchFactor: 1, OnCurrentIndexChanged: changed})
+				row = append(row, d.ComboBox{Name: "form.value." + field.Key, AssignTo: &combo, Model: labels, CurrentIndex: index, MinSize: d.Size{Height: 32}, MaxSize: d.Size{Height: 32}, StretchFactor: 1, OnCurrentIndexChanged: changed})
 				getters[field.Key] = func() string {
 					if combo == nil {
 						return field.Value
@@ -394,7 +419,7 @@ func (s *Shell) openControllerFormObserved(key string, observe func(*walk.Dialog
 				}
 			} else {
 				var edit *walk.LineEdit
-				row = append(row, d.LineEdit{AssignTo: &edit, Text: field.Value, MinSize: d.Size{Height: 30}, StretchFactor: 1, OnTextChanged: changed})
+				row = append(row, d.LineEdit{Name: "form.value." + field.Key, AssignTo: &edit, Text: field.Value, MinSize: d.Size{Height: 32}, MaxSize: d.Size{Height: 32}, StretchFactor: 1, OnTextChanged: changed})
 				getters[field.Key] = func() string {
 					if edit == nil {
 						return field.Value
@@ -424,20 +449,26 @@ func (s *Shell) openControllerFormObserved(key string, observe func(*walk.Dialog
 					}})
 				}
 			}
-			var rowWidget *walk.Composite
-			sectionRows = append(sectionRows, d.Composite{AssignTo: &rowWidget, Layout: d.HBox{MarginsZero: true, Spacing: 16}, Children: row})
+			rowLayout := &controllerFormRow{multiline: field.Multiline}
+			sectionRows = append(sectionRows, d.Composite{Name: "form.row." + field.Key, AssignTo: &rowLayout.root, Layout: d.HBox{MarginsZero: true, Spacing: 10, Alignment: d.AlignHNearVCenter}, OnSizeChanged: func() { rowLayout.reflow(dialog.ClientBounds().Width - 64) }, Children: []d.Widget{
+				d.Label{Name: "form.label." + field.Key, AssignTo: &rowLayout.label, Text: s.nativeText(field.Label), ToolTipText: s.nativeText(field.Label), RightToLeftReading: s.isRTL(), EllipsisMode: d.EllipsisEnd, Alignment: d.AlignHNearVCenter, MinSize: d.Size{Width: 160, Height: 32}, MaxSize: d.Size{Width: 160, Height: 32}},
+				d.Composite{AssignTo: &rowLayout.editor, Layout: d.HBox{MarginsZero: true, Spacing: 8, Alignment: d.AlignHNearVCenter}, Children: row, StretchFactor: 4},
+			}})
+			formRows = append(formRows, rowLayout)
 			if field.WhenKey != "" {
-				conditionalRows = append(conditionalRows, conditionalRow{field, &rowWidget})
+				conditionalRows = append(conditionalRows, conditionalRow{field, &rowLayout.root})
 			}
 		}
 		flushSection()
-		if len(sections) > 0 {
+		if len(sections) == 1 {
+			children = append(children, sections[0].Children...)
+		} else if len(sections) > 1 {
 			children = append(children, d.TabWidget{AssignTo: &fieldTabs, Pages: sections, StretchFactor: 1, OnCurrentIndexChanged: showActions})
 		}
 		if next.Output != "" {
 			children = append(children, d.TextEdit{Text: next.Output, ReadOnly: true, VScroll: true, MinSize: d.Size{Height: 160}, StretchFactor: 1})
 		}
-		buttons := []d.Widget{}
+		buttons := []d.Widget{d.HSpacer{}}
 		for _, item := range next.Actions {
 			action := item
 			var button *walk.PushButton
@@ -447,7 +478,7 @@ func (s *Shell) openControllerFormObserved(key string, observe func(*walk.Dialog
 			if controllerFormRequiresChanges(action) && action.Enabled {
 				saveButtons = append(saveButtons, &button)
 			}
-			buttons = append(buttons, d.PushButton{AssignTo: &button, Text: s.nativeText(action.Label), Enabled: action.Enabled, MinSize: d.Size{Width: 100, Height: 30}, MaxSize: d.Size{Width: 200, Height: 32}, OnClicked: func() {
+			buttons = append(buttons, d.PushButton{AssignTo: &button, Column: len(buttons), Text: s.nativeText(action.Label), Enabled: action.Enabled, MinSize: d.Size{Width: 96, Height: 32}, MaxSize: d.Size{Width: 240, Height: 32}, OnClicked: func() {
 				action := action
 				for _, current := range page.Actions {
 					if controllerFormActionSlot(key, current.ID) == slot {
@@ -529,9 +560,9 @@ func (s *Shell) openControllerFormObserved(key string, observe func(*walk.Dialog
 				}()
 			}})
 		}
-		if len(buttons) > 0 {
-			// A bounded grid wraps actions instead of widening the form off-screen.
-			if err := (d.Composite{AssignTo: &buttonGrid, Layout: d.Grid{Columns: min(3, len(buttons)), Spacing: 8, MarginsZero: true, Alignment: d.AlignHNearVNear}, Children: buttons}).Create(d.NewBuilder(actionsBody)); err != nil {
+		if len(buttons) > 1 {
+			// Reserve caption-sized cells; the footer reflows the same controls.
+			if err := (d.Composite{AssignTo: &buttonGrid, Layout: d.Grid{Columns: len(buttons), Spacing: 8, MarginsZero: true, Alignment: d.AlignHNearVCenter}, Children: buttons}).Create(d.NewBuilder(actionsBody)); err != nil {
 				status.SetText(err.Error())
 			}
 		}
@@ -597,7 +628,9 @@ func (s *Shell) openControllerFormObserved(key string, observe func(*walk.Dialog
 			baseline[name] = value
 		}
 		dirty = false
+		reflow()
 		theme.Refresh(s.Config().UI.Theme, s.motionEnabled)
+		styleForm()
 		if observe != nil {
 			observe(dialog)
 		}
@@ -637,15 +670,22 @@ func (s *Shell) openControllerFormObserved(key string, observe func(*walk.Dialog
 			})
 		}()
 	}
-	spec := d.Dialog{AssignTo: &dialog, Title: "PCController", Font: d.Font{Family: s.preferredFontFamily(), PointSize: 10}, MinSize: d.Size{Width: 560, Height: 360}, Size: d.Size{Width: 720, Height: 620}, Layout: d.VBox{Margins: d.Margins{Left: 20, Top: 18, Right: 20, Bottom: 18}, Spacing: 14}, CancelButton: &closeButton, Children: []d.Widget{
-		d.Label{AssignTo: &heading, Text: "PCController", Font: d.Font{Family: s.preferredFontFamily(), PointSize: 16, Bold: true}, MinSize: d.Size{Height: 36}},
-		d.Composite{AssignTo: &body, Layout: d.VBox{MarginsZero: true}, StretchFactor: 1},
-		d.Composite{AssignTo: &actionsBody, Layout: d.VBox{MarginsZero: true}},
-		d.Label{AssignTo: &status, Text: "", MinSize: d.Size{Height: 24}},
-		d.Composite{Layout: d.HBox{MarginsZero: true}, Children: []d.Widget{
-			d.PushButton{AssignTo: &refreshButton, Text: s.nativeText("Refresh"), OnClicked: func() { load() }},
+	spec := d.Dialog{AssignTo: &dialog, Title: "PCController", Font: d.Font{Family: s.preferredFontFamily(), PointSize: 10}, MinSize: d.Size{Width: 420, Height: 300}, Size: d.Size{Width: 720, Height: controllerFormWindowHeight(key)}, Layout: d.VBox{Margins: d.Margins{Left: 20, Top: 18, Right: 20, Bottom: 18}, Spacing: 12}, CancelButton: &closeButton, OnSizeChanged: reflow, Children: []d.Widget{
+		d.Composite{Layout: d.HBox{MarginsZero: true, Spacing: 12, Alignment: d.AlignHNearVCenter}, MaxSize: d.Size{Height: 44}, Children: []d.Widget{
+			d.Label{AssignTo: &headingIcon, Text: controllerFormGlyph(key), Font: d.Font{Family: "Segoe MDL2 Assets", PointSize: 16}, TextAlignment: d.AlignCenter, MinSize: d.Size{Width: 32, Height: 32}, MaxSize: d.Size{Width: 32, Height: 32}},
+			d.Label{AssignTo: &heading, Text: "PCController", Font: d.Font{Family: s.preferredFontFamily(), PointSize: 16, Bold: true}, Alignment: d.AlignHNearVCenter, EllipsisMode: d.EllipsisEnd, MinSize: d.Size{Height: 36}, StretchFactor: 1},
 			d.HSpacer{},
-			d.PushButton{AssignTo: &closeButton, Text: s.nativeText("Close"), OnClicked: func() { dialog.Cancel() }},
+		}},
+		d.Composite{AssignTo: &body, Layout: d.VBox{MarginsZero: true}, StretchFactor: 1},
+		d.Label{Name: "form.status", AssignTo: &status, Text: "", EllipsisMode: d.EllipsisEnd, MinSize: d.Size{Height: 20}, MaxSize: d.Size{Height: 20}},
+		d.Composite{Name: "form.footer", AssignTo: &footer.root, Layout: d.Grid{Columns: 3, MarginsZero: true, Spacing: 8, Alignment: d.AlignHNearVCenter}, MaxSize: d.Size{Height: 32}, Children: []d.Widget{
+			d.Composite{AssignTo: &footer.refreshCell, Column: 0, MaxSize: d.Size{Width: 92}, Layout: d.HBox{MarginsZero: true, SpacingZero: true}, Children: []d.Widget{
+				d.PushButton{AssignTo: &refreshButton, Text: s.nativeText("Refresh"), MinSize: d.Size{Width: 92, Height: 32}, MaxSize: d.Size{Width: 92, Height: 32}, OnClicked: func() { load() }}, d.HSpacer{},
+			}},
+			d.ScrollView{AssignTo: &actionsBody, Column: 1, VerticalFixed: true, Layout: d.VBox{MarginsZero: true, SpacingZero: true, Alignment: d.AlignHNearVNear}, StretchFactor: 4},
+			d.Composite{AssignTo: &footer.closeCell, Column: 2, MaxSize: d.Size{Width: 92}, Layout: d.HBox{MarginsZero: true, SpacingZero: true}, Children: []d.Widget{
+				d.HSpacer{}, d.PushButton{AssignTo: &closeButton, Text: s.nativeText("Close"), MinSize: d.Size{Width: 92, Height: 32}, MaxSize: d.Size{Width: 92, Height: 32}, OnClicked: func() { dialog.Cancel() }},
+			}},
 		}},
 	}}
 	if err := spec.Create(s.mw); err != nil {
@@ -653,6 +693,7 @@ func (s *Shell) openControllerFormObserved(key string, observe func(*walk.Dialog
 		return
 	}
 	defer dialog.Dispose()
+	footer.actions, footer.refresh, footer.close = actionsBody, refreshButton, closeButton
 	_ = dialog.SetRightToLeftLayout(s.isRTL())
 	_ = dialog.SetRightToLeftReading(s.isRTL())
 	geometry, err := winfx.AttachResponsiveDialogGeometry(uintptr(dialog.Handle()))
@@ -666,6 +707,7 @@ func (s *Shell) openControllerFormObserved(key string, observe func(*walk.Dialog
 	defer theme.Dispose()
 	theme.Apply(s.Config().UI.Theme, s.motionEnabled)
 	_ = theme.WatchSystemChanges(func() {
+		styleForm()
 		if tableModel != nil {
 			appearance, _ := winfx.ResolveAppearance(s.Config().UI.Theme)
 			colors := controllerPalette(appearance.Dark)
@@ -676,7 +718,7 @@ func (s *Shell) openControllerFormObserved(key string, observe func(*walk.Dialog
 		}
 	})
 	_ = dialog.SetIcon(s.appIcon)
-	if err := winfx.PrepareOwnedDialogPlacement(uintptr(dialog.Handle()), uintptr(s.mw.Handle()), winfx.DialogPlacement{X: -1, Y: -1, Width: 720, Height: 620}); err != nil {
+	if err := winfx.PrepareOwnedDialogPlacement(uintptr(dialog.Handle()), uintptr(s.mw.Handle()), winfx.DialogPlacement{X: -1, Y: -1, Width: 720, Height: controllerFormWindowHeight(key)}); err != nil {
 		s.showError("PCController", err)
 		return
 	}
@@ -728,6 +770,7 @@ func (s *Shell) openControllerFormObserved(key string, observe func(*walk.Dialog
 		}
 		suppressSelection = false
 		refreshActionState()
+		reflow()
 	}
 	if key == "rf" {
 		go func() {
