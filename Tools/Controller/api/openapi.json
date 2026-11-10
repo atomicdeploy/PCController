@@ -4730,6 +4730,13 @@
           "pixel_height": {
             "type": "integer"
           },
+          "text_renderer": {
+            "enum": [
+              "directwrite",
+              "gdi"
+            ],
+            "description": "Effective text rasterizer used for this presentation; omitted before presentation or when unsupported."
+          },
           "background": {
             "enum": [
               "current",
