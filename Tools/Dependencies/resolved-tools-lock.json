@@ -1,7 +1,7 @@
 {
   "format": "pccontroller-host-tool-lock/v1",
   "policy_name": "pccontroller-host-build-tools",
-  "resolved_at_utc": "2026-11-04T01:20:01.381Z",
+  "resolved_at_utc": "2026-11-10T01:20:36.980Z",
   "node": {
     "version": "26.13.0",
     "lts": "Lithium",
@@ -132,7 +132,7 @@
     "installer_sha256": "3c69305081e4a647144339a936244fcf7d3d9e558319e1ad7be2cd2886d4b6a1"
   },
   "web": {
-    "package_lock_sha256": "5172150cc64f215ea820775723539dbcc8610bfec1fccb7d01d2d8fbcdb086d5"
+    "package_lock_sha256": "900e9081d105001d8dc4ead9650012c3ca2e251655bc680e2c6772bdb7fa3e83"
   },
   "build": {
     "package_lock_sha256": "323ac44b9417ec4a68487f026e41d4bc29199b7f40ded040de0d5b592318ca98"
