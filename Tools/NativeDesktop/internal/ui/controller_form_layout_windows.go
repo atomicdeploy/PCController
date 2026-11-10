@@ -92,7 +92,7 @@ func (f *controllerFormFooter) reflow(width int) {
 	}
 	key := fmt.Sprintf("%p/%d/%t/%v", actionGrid, columns, above, widths)
 	for _, button := range allButtons {
-		key += fmt.Sprintf("/%x", button.Handle())
+		key += fmt.Sprintf("/%x:%t", button.Handle(), win.GetWindowLong(button.Handle(), win.GWL_STYLE)&win.WS_VISIBLE != 0)
 	}
 	// Continuous sizing normally keeps the same row/column arrangement. Let
 	// native layouts adjust widths without repeatedly parking every HWND.
