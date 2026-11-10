@@ -85,7 +85,7 @@ const readContractSource = (file) => sourceRef
   : readFileSync(resolve(root, file), "utf8");
 const productMetadata = JSON.parse(readFileSync(resolve(root, "Tools", "Controller", "web", "package.json"), "utf8"));
 const product = productIdentity(productMetadata);
-const shapeDirectories = ["Tools/Controller/internal/ipcjson", "Tools/Controller/internal/artifacts", "Tools/Controller/internal/releaseplane", "Tools/Controller/internal/appconfig", "Tools/Controller/internal/native", "Tools/Controller/internal/hostui", "Tools/Controller/internal/control", "Tools/Controller/internal/hostos"];
+const shapeDirectories = ["Tools/Controller/internal/ipcjson", "Tools/Controller/internal/artifacts", "Tools/Controller/internal/releaseplane", "Tools/Controller/internal/appconfig", "Tools/Controller/internal/native", "Tools/Controller/internal/hostui", "Tools/Controller/internal/control", "Tools/Controller/internal/hostos", "Tools/Controller/internal/mqttbridge"];
 const shapeFiles = ["Tools/Controller/controller.go", ...shapeDirectories.flatMap(directory => readdirSync(resolve(root,directory)).filter(name=>name.endsWith('.go')&&!name.endsWith('_test.go')).map(name=>`${directory}/${name}`))];
 if (sourceRef) {
   const existing = new Set(execFileSync('git',['ls-tree','-r','--name-only',sourceRef],{cwd:root,encoding:'utf8'}).trim().split(/\r?\n/u));
@@ -115,6 +115,7 @@ const capabilityGroups = {
   shutdown: ["controller.quit", "controller.exit"],
   messages: ["controller.message.send", "controller.osd.show", "controller.osd.dismiss"],
   host_configuration: [
+    "controller.mqtt.config.get", "controller.mqtt.config.set", "controller.mqtt.status",
     "controller.udp.config.set", "controller.udp.subscribe", "controller.udp.unsubscribe",
 		"controller.mirror.configure",
     "controller.host_menu.configure", "controller.host_menu.config.set", "controller.ui.config.set", "controller.ui.config.open",
@@ -172,6 +173,7 @@ const capabilityGroups = {
 		"controller.rf.catalog", "controller.pwm.trace.get",
   ],
   board_commands: [
+    "controller.buzzer.tone",
     "controller.channel.set", "controller.output.set",
 		"controller.mirror.apply", "controller.mirror.resync",
     "controller.program_state.set", "controller.program-state.set", "controller.menu.layout.set",
@@ -308,6 +310,7 @@ const methodOverrides = {
 };
 
 const nonIdempotentMethods = new Set([
+  "controller.buzzer.tone",
   "controller.osd.show",
   "controller.reset.lines", "controller.reset", "controller.port.reset", "controller.command.execute",
 	"controller.audio.play",
@@ -341,7 +344,7 @@ function defaultMethodSummary(name, capability) {
   const verbs = { get:'Read', set:'Set', list:'List', configure:'Configure', update:'Update', remove:'Remove', clear:'Clear', start:'Start', stop:'Stop', cancel:'Cancel', open:'Open', close:'Close', reset:'Reset', build:'Build' };
   const last = parts.at(-1);
   const verb = verbs[last];
-  const words = (verb ? parts.slice(0,-1) : parts).map(word => ['pwm','rf','lcd','udp','ui','os'].includes(word) ? word.toUpperCase() : word).join(' ');
+  const words = (verb ? parts.slice(0,-1) : parts).map(word => ['pwm','rf','lcd','udp','mqtt','ui','os'].includes(word) ? word.toUpperCase() : word).join(' ');
   return verb ? `${verb} ${words || 'the controller session'}.` : `${safeCapabilities.has(capability) ? 'Read' : 'Invoke'} the ${words} ${safeCapabilities.has(capability) ? 'surface' : 'operation'}.`;
 }
 for (const [capability, names] of Object.entries(capabilityGroups)) {
@@ -989,6 +992,22 @@ const rpcSchema = {
 		Object.assign(metadata, rpcMeaning(name, metadata.summary));
 		if (requestFields[name] && !name.startsWith('controller.osd.')) metadata.request_fields = requestFields[name];
 		Object.assign(metadata,rpcWireDocumentation(name,requestFields));
+		if (name === 'controller.mqtt.config.set') {
+			metadata.request_fields = {
+				type:'object',required:['enabled'],additionalProperties:false,
+				properties:{
+					enabled:{type:'boolean',description:'Enable or stop the outbound MQTT broker session.'},
+					broker:{type:'string',description:'mqtts://HOST[:PORT], or mqtt:// with a literal loopback IP. No credentials in the URL.'},
+					topic:{type:'string',description:'Unique per-device prefix for command, event, status and availability.'},
+					username:{type:'string',description:'Optional broker username.'},
+					password_ref:{type:'string',description:'Optional os: or env: reference. Omit to clear; never send the password here.'},
+					ca_file:{type:'string',description:'Optional local PEM bundle to add to system trust roots.'},
+					telemetry_seconds:{type:'integer',minimum:0,maximum:3600,description:'Periodic status interval; zero uses the default of five seconds.'},
+					allow_commands:{type:'boolean',description:'Explicitly grant broker command-topic writers the bounded board command set; defaults to false.'},
+				},
+			};
+			metadata.request_template = {enabled:true,broker:'mqtts://broker.example:8883',topic:'pccontroller/cinema',telemetry_seconds:5,allow_commands:false};
+		}
 		if (name === 'controller.subscribe') {
 			metadata.params_schema = { $ref: '#/$defs/Subscription' };
 			metadata.request_template = subscriptionSchema.examples[0];

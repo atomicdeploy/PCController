@@ -29,6 +29,14 @@ test('host update staging is explicit and leaves publication to the coordinator'
 	assert.throws(() => parseArguments(['--firmware-only', '--stage-only']), /requires --host-only/)
 })
 
+test('MQTT can be omitted from both host and C ABI packages', () => {
+	const selected = parseArguments(['--host-only', '--no-mqtt'])
+	const plan = createPlan(selected, resolveBuildIdentity(selected, {}), 'win32')
+	const host = plan.actions.find(action => action.id === 'host-build')
+	assert.ok(host.command.args.some(argument => argument.split(',').includes('no_mqtt')))
+	assert.ok(plan.actions.some(action => action.command?.args.some(argument => argument.includes('controllerlib') && argument.includes('no_mqtt'))))
+})
+
 test('build helper executables use stable product paths, never Go temporary paths', () => {
 	const env = { LOCALAPPDATA: join(tmpdir(), 'local-app-data') }
 	assert.equal(goBuildHelperPath('generate-icon', env, 'win32'), join(env.LOCALAPPDATA, 'PCController', 'build-programs', 'generate-icon.exe'))

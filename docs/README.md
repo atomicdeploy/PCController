@@ -17,6 +17,7 @@ host-owned JSON configuration are documented separately on purpose.
 | Coordinate issues, pull requests, WIP, and machine handoffs | [GitHub Collaboration and Handoffs](GitHub-Collaboration-and-Handoffs.md) |
 | Understand the physical panel | [Front Panel and Menus](Front-Panel-and-Menus.md) |
 | Configure the host, WebUI, hotkeys, notifications, or integrations | [Host Configuration and Integrations](Host-Configuration-and-Integrations.md) |
+| Connect an MQTT broker for state and optional board control | [MQTT](MQTT.md) |
 | Present timed Windows desktop overlays with actions and event automation | [Desktop OSD](DESKTOP-OSD.md) |
 | Read PC temperature, voltage, current, power and fan measurements | [PC hardware sensors](HOST-SENSORS.md) |
 | Export PCB temperatures, voltage, current and power to system monitors | [Board sensor exports: Linux hwmon and Windows monitoring](BOARD-SENSOR-EXPORTS.md) |

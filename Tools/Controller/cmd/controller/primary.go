@@ -541,8 +541,12 @@ func startPrimaryIPCAtWithIdentity(
 		service.ReleaseDiscovery = releaseDiscovery
 	}
 	service.InitializeAutomationActions()
+	mqttDone := service.StartMQTT(ctx)
 	go func() {
-		server.done <- ipcjson.Serve(ctx, listener, service)
+		err := ipcjson.Serve(ctx, listener, service)
+		cancel()
+		<-mqttDone
+		server.done <- err
 		close(server.done)
 	}()
 	return server, nil

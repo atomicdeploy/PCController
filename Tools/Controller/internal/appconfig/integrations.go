@@ -15,6 +15,7 @@ import (
 	"pccontroller.local/controller/internal/fleet"
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/integrationproxy"
+	"pccontroller.local/controller/internal/mqttbridge"
 	"pccontroller.local/controller/internal/netpolicy"
 	"pccontroller.local/controller/internal/secretstore"
 )
@@ -23,6 +24,7 @@ import (
 // explicit exception that may reconcile the MCU Silent bit through the owning
 // runtime; no other integration value is mirrored into EEPROM.
 type Integrations struct {
+	MQTT                   mqttbridge.Config  `json:"mqtt,omitzero"`
 	Hotkeys                []Hotkey           `json:"hotkeys,omitempty"`
 	Keyboard               KeyboardControl    `json:"keyboard_control"`
 	Lifecycle              LifecycleSafety    `json:"lifecycle_safety"`
@@ -300,6 +302,14 @@ type TextMapping struct {
 }
 
 func (value Config) validateIntegrations() error {
+	if err := value.Integrations.MQTT.Validate(); err != nil {
+		return fmt.Errorf("integrations.mqtt: %w", err)
+	}
+	if ref := value.Integrations.MQTT.PasswordRef; ref != "" {
+		if _, _, err := secretstore.ParseReference(ref); err != nil {
+			return fmt.Errorf("integrations.mqtt.password_ref: %w", err)
+		}
+	}
 	if err := value.Integrations.BoardMirror.Validate(); err != nil {
 		return fmt.Errorf("integrations.board_mirror: %w", err)
 	}
