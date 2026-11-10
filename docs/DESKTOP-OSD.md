@@ -12,9 +12,16 @@ may cover ordinary desktop windows.
   antialiased rounded edges, DPI-sized system text and original-aspect artwork.
 - Typography uses a true Segoe UI Semibold (600) face for the 16-DIP heading,
   Regular (400) at 14 DIP for body/actions, and Regular for the close glyph.
-  GDI's selected heading weight is measured; if the Semibold face is unavailable,
-  it falls back to Regular rather than silently substituting Bold. Transparent
-  compositing uses grayscale antialiasing, not colored ClearType subpixels.
+  On Windows x64, DirectWrite supplies fractional-size layout, shaping and font
+  fallback; Direct2D renders actual coverage into a premultiplied-alpha surface.
+  The primary-family weight is measured, not assumed from the request. Missing
+  Semibold falls back to Regular rather than silently substituting Bold.
+  Transparent compositing deliberately uses grayscale antialiasing, not colored
+  ClearType subpixels. This is native DirectWrite rasterization, not a GDI mask
+  or a supersampled image scaled back down.
+  The existing GDI path remains an automatic whole-card fallback for unsupported
+  APIs/architectures, target loss or text exceeding Direct2D surface limits.
+  `text_renderer` in OSD status reports `directwrite` or `gdi` for that presentation.
 - A short cubic fade/slide at entrance and dismissal. Long headings/body text
   scroll at a fixed speed with pauses at both ends, independently of frame rate.
 - Clicking ×, choosing an action and API dismissal share the same short downward

@@ -107,7 +107,7 @@ func newTextFont(size int, semibold bool) (win.HFONT, error) {
 	return f, nil
 }
 
-func textImage(text string, size int, semibold bool, c color.RGBA) (*image.RGBA, error) {
+func gdiTextImage(text string, size int, semibold bool, c color.RGBA) (*image.RGBA, error) {
 	text = strings.Join(strings.Fields(text), " ")
 	if text == "" {
 		return image.NewRGBA(image.Rect(0, 0, 1, max(1, size))), nil
@@ -188,6 +188,7 @@ func trimGlyph(img *image.RGBA) *image.RGBA {
 }
 
 type rendering struct {
+	textBackend          string
 	base, frame          *image.RGBA
 	surface              *dib
 	title                *image.RGBA
@@ -247,7 +248,7 @@ func paintRounded(img *image.RGBA, r image.Rectangle, radius, stroke float64, c 
 	}
 }
 
-func prepare(req Request, dpi, width int, icon image.Image, dark bool) (*rendering, error) {
+func prepareWithText(req Request, dpi, width int, icon image.Image, dark bool, text textRasterizer) (*rendering, error) {
 	s := float64(dpi) / 96
 	px := func(v int) int { return int(math.Round(float64(v) * s)) }
 	width = min(px(540), width-px(32))
@@ -261,7 +262,7 @@ func prepare(req Request, dpi, width int, icon image.Image, dark bool) (*renderi
 	if rows > 0 {
 		height += px(rows*40 + 4)
 	}
-	r := &rendering{scale: s, base: image.NewRGBA(image.Rect(0, 0, width, height))}
+	r := &rendering{scale: s, textBackend: text.name(), base: image.NewRGBA(image.Rect(0, 0, width, height))}
 	tokens := design.ControllerTokens().Colors.Dark
 	if !dark {
 		tokens = design.ControllerTokens().Colors.Light
@@ -325,7 +326,7 @@ func prepare(req Request, dpi, width int, icon image.Image, dark bool) (*renderi
 	closeSize := px(28)
 	r.closeRect = image.Rect(width-px(17)-closeSize, px(15), width-px(17), px(15)+closeSize)
 	// Close glyph remains subordinate to the semantic icon, not stretched to fill.
-	closeText, err := textImage("×", px(20), false, r.muted)
+	closeText, err := text.image("×", float32(20*s), false, r.muted)
 	if err != nil {
 		return nil, err
 	}
@@ -335,7 +336,7 @@ func prepare(req Request, dpi, width int, icon image.Image, dark bool) (*renderi
 		r.closeRect.Min.Y+(r.closeRect.Dy()-r.closeGlyph.Bounds().Dy())/2,
 	)
 	r.titleRect = image.Rect(px(88), px(23), width-px(58), px(48))
-	r.title, err = textImage(req.Title, px(16), true, r.ink)
+	r.title, err = text.image(req.Title, float32(16*s), true, r.ink)
 	if err != nil {
 		return nil, err
 	}
@@ -343,7 +344,7 @@ func prepare(req Request, dpi, width int, icon image.Image, dark bool) (*renderi
 		r.titleShadow = textShadow(r.title, dark)
 	}
 	for i, line := range lines {
-		body, bodyErr := textImage(line, px(14), false, r.muted)
+		body, bodyErr := text.image(line, float32(14*s), false, r.muted)
 		if bodyErr != nil {
 			return nil, bodyErr
 		}
@@ -364,7 +365,7 @@ func prepare(req Request, dpi, width int, icon image.Image, dark bool) (*renderi
 			label := req.Actions[index].Label
 			var im *image.RGBA
 			for {
-				im, err = textImage(label, px(14), false, r.ink)
+				im, err = text.image(label, float32(14*s), false, r.ink)
 				if err != nil {
 					return nil, err
 				}

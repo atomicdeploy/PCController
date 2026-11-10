@@ -30,6 +30,16 @@ func TestInputLeaveIsScopedAndHoverReversesWithoutJump(t *testing.T) {
 	}
 }
 
+func TestReplacedReceiptKeepsOriginalRendererAndDimensions(t *testing.T) {
+	previous := Status{ID: "previous", Active: true, TextRenderer: "directwrite", DPI: 144, PixelWidth: 810}
+	p := newWindowPresenter(Options{})
+	p.state = Status{ID: "next", Active: true, TextRenderer: "gdi", DPI: 192, PixelWidth: 1080}
+	p.rememberStatusLocked(previous, "replaced")
+	if len(p.history) != 1 || p.history[0].Active || p.history[0].Dismissal != "replaced" || p.history[0].TextRenderer != previous.TextRenderer || p.history[0].DPI != previous.DPI || p.history[0].PixelWidth != previous.PixelWidth || p.state.TextRenderer != "gdi" {
+		t.Fatal("replacement receipt acquired the new presentation's renderer or dimensions", p.history, p.state)
+	}
+}
+
 func TestHoverFramesNeverAccumulatePaint(t *testing.T) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()

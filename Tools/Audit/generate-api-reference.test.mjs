@@ -212,6 +212,7 @@ test('explorer includes complete protocol catalogs and source-derived JSON field
 	assert.ok(rpc.$defs.OSDRequest.properties.sound.enum.includes('warning'));
 	assert.equal(rpc.$defs.OSDRequest.properties.flash_taskbar.default,false);
 	assert.ok(rpc.$defs.OSDStatus.properties.attention.properties.taskbar.enum.includes('no-window'));
+	assert.deepEqual(rpc.$defs.OSDStatus.properties.text_renderer.enum, ['directwrite', 'gdi']);
   assert.equal(openapi.paths['/api/osd'].post.requestBody.content['application/json'].schema.$ref,'#/components/schemas/OSDRequest');
   assert.ok(openapi.paths['/api/osd'].delete);
   for(const method of Object.keys(rpc['x-methods'])) assert.ok(page.includes(method),method);

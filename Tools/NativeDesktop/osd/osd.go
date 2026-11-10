@@ -60,6 +60,7 @@ type Status struct {
 	PixelWidth   int              `json:"pixel_width,omitempty"`
 	PixelHeight  int              `json:"pixel_height,omitempty"`
 	Background   string           `json:"background,omitempty"`
+	TextRenderer string           `json:"text_renderer,omitempty"`
 	Attention    *AttentionStatus `json:"attention,omitempty"`
 }
 
