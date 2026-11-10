@@ -68,6 +68,7 @@ func (s *Service) desktopOSDCall(ctx context.Context, request Request) (any, err
 			if config.UI.Appearance.ReduceMotion {
 				params.ReduceMotion = true
 			}
+			params.SoundSuppressed = config.UI.Appearance.AudioMuted || config.UI.Appearance.AudioVolume <= 0
 		}
 		params, err := hostui.ValidateOSD(params)
 		if err != nil {

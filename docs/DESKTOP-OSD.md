@@ -88,6 +88,38 @@ Icons: `app`, `info`, `success`, `warning`, `error`, `door`, `hot`,
 `--position top-left|top-center|top-right|center|bottom-left|bottom-center|bottom-right`
 are also available.
 
+### Optional sound effects and taskbar attention
+
+```powershell
+& $controller osd show --title 'Download complete' --text 'Your package is ready' `
+  --icon success --sound success --flash-taskbar
+```
+
+Both options are off by default and work with stacking, replacement, actions and
+`--wait`. HTTP/JSON-RPC use `"sound":"success","flash_taskbar":true` in the show
+request. Sounds: `none`, `select`, `success`, `warning`, `error`, `connect`,
+`disconnect`. These are asynchronous Windows system sound cues, honoring the
+Windows sound scheme/volume and host mute or zero-volume policy. They do not
+drive the board buzzer, read arbitrary files or download audio. Standalone mode
+reads existing host audio preferences without creating or changing configuration.
+
+Taskbar attention requests three flashes, without foreground activation or
+caption flashing. It targets only this process's registered, visible primary
+GUI, or its own visible classic console. A tray-only/background process, hidden
+console or Windows Terminal pseudoconsole has no eligible taskbar window: no
+unrelated window is flashed. An already foreground window needs no flash.
+
+The per-ID `attention` receipt reports `sound: requested|suppressed|failed` and
+`taskbar: requested|foreground|no-window|unavailable`, with an optional `error`.
+`requested` means Windows received the request, not proof of audible output or
+human attention. Attention errors do not cancel the displayed OSD; do not retry
+the show mutation to repair them. Status reads, reflow and repaint never replay
+attention effects. Each successfully admitted stacked/replacement OSD can request
+its own cue.
+
+See Microsoft's [system sound behavior](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-messagebeep)
+and [non-activating window flash API](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-flashwindowex).
+
 ### Stacking and backgrounds
 
 ```powershell
@@ -150,7 +182,7 @@ OSD instead of native toasts. Merge these fields into the existing
 other rules/actions:
 
 ```json
-{"presentation":"osd","osd_duration_ms":7000,"osd_position":"bottom-center","osd_behavior":"replace","osd_background":"current"}
+{"presentation":"osd","osd_duration_ms":7000,"osd_position":"bottom-center","osd_behavior":"replace","osd_background":"current","osd_flash_taskbar":true}
 ```
 
 The default is unchanged (`native`). Existing enable/important-kind filters,
@@ -158,6 +190,9 @@ door safety rules, semantic icons, configured actions and audio preferences
 still apply. Configuration reload is hot-applied; no output is actuated to
 preview this setting. Scheduled tasks and external automation can also call the
 same CLI/API explicitly.
+`osd_flash_taskbar` defaults to false and applies only to these autonomous OSD
+alerts. Their existing configured audio cue is played once by the notification
+worker, not duplicated by the OSD sound option.
 Position, behavior and background preferences also apply to API/CLI requests
 that omit those fields; explicitly supplied values override them.
 

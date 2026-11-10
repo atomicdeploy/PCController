@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/ipcjson"
 )
@@ -60,6 +61,8 @@ func runOSD(args []string, stdout, stderr io.Writer) error {
 	position := f.String("position", "", "top/bottom-left/center/right or center; default bottom-center")
 	behavior := f.String("behavior", "", "replace (default) or stack")
 	background := f.String("background", "", "current (default), transparent, acrylic or blur")
+	sound := f.String("sound", "none", "Optional host SFX: none, select, success, warning, error, connect or disconnect")
+	flash := f.Bool("flash-taskbar", false, "Flash PCController's own visible taskbar button three times, without activating it")
 	theme := f.String("theme", "system", "system, dark or light")
 	reduced := f.Bool("reduce-motion", false, "Disable transitions and automatic scrolling")
 	var actions osdActions
@@ -83,6 +86,7 @@ func runOSD(args []string, stdout, stderr io.Writer) error {
 		return errors.New("--wait supports osd show only")
 	}
 	request := hostui.OSDRequest{ID: *id, Title: *title, Text: *text, Icon: *icon, Severity: *severity, DurationMS: int(duration.Milliseconds()), Position: *position, Theme: *theme, Behavior: *behavior, Background: *background, ReduceMotion: *reduced, Actions: actions}
+	request.Sound, request.FlashTaskbar = *sound, *flash
 	if verb == "show" {
 		if *duration < 500*time.Millisecond || *duration > 2*time.Minute {
 			return errors.New("OSD duration must be 500ms..2m")
@@ -98,6 +102,19 @@ func runOSD(args []string, stdout, stderr io.Writer) error {
 	if *standalone {
 		if verb != "show" {
 			return errors.New("--standalone supports osd show only")
+		}
+		if request.Sound != "" && request.Sound != "none" {
+			path, err := appconfig.ResolvePath("")
+			if err != nil {
+				return err
+			}
+			config, _, err := appconfig.Load(path)
+			if err != nil && !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("read OSD audio preferences: %w", err)
+			}
+			if err == nil {
+				request.SoundSuppressed = config.UI.Appearance.AudioMuted || config.UI.Appearance.AudioVolume <= 0
+			}
 		}
 		defer hostui.CloseDesktopOSD()
 		status, err := hostui.ShowOSD(ctx, request)

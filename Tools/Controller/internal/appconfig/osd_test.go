@@ -4,7 +4,7 @@ import "testing"
 
 func TestOSDNotificationPreferencesValidateWithoutChangingDefaults(t *testing.T) {
 	c := Defaults()
-	if c.Integrations.Notifications.Presentation != "" {
+	if c.Integrations.Notifications.Presentation != "" || c.Integrations.Notifications.OSDFlashTaskbar {
 		t.Fatal("default notification behavior changed")
 	}
 	c.Integrations.Notifications.Presentation = "osd"
@@ -12,6 +12,7 @@ func TestOSDNotificationPreferencesValidateWithoutChangingDefaults(t *testing.T)
 	c.Integrations.Notifications.OSDBehavior = "stack"
 	c.Integrations.Notifications.OSDPosition = "bottom-left"
 	c.Integrations.Notifications.OSDBackground = "acrylic"
+	c.Integrations.Notifications.OSDFlashTaskbar = true
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}

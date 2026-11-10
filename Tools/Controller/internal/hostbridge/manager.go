@@ -1301,6 +1301,7 @@ func (manager *Manager) notificationLoop() {
 			request.Position = config.Integrations.Notifications.OSDPosition
 			request.Behavior = config.Integrations.Notifications.OSDBehavior
 			request.Background = config.Integrations.Notifications.OSDBackground
+			request.FlashTaskbar = config.Integrations.Notifications.OSDFlashTaskbar
 			request.ReduceMotion = config.UI.Appearance.ReduceMotion
 			_, err = hostui.ShowOSD(ctx, request)
 			if err != nil {

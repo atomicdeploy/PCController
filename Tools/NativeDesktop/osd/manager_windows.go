@@ -17,9 +17,10 @@ import (
 const maxStackedOSDs = 6
 
 type overlay struct {
-	window   *presenter
-	position string
-	serial   uint64
+	window    *presenter
+	position  string
+	serial    uint64
+	attention *AttentionStatus
 }
 
 // manager serializes admissions but leaves each overlay's window, animation and
@@ -62,7 +63,15 @@ func (m *manager) worker() {
 	}
 }
 
-func (e *overlay) status() Status { s := e.window.Status(); s.Accepted = e.serial; return s }
+func (e *overlay) status() Status {
+	s := e.window.Status()
+	s.Accepted = e.serial
+	if e.attention != nil {
+		copy := *e.attention
+		s.Attention = &copy
+	}
+	return s
+}
 func (m *manager) rememberLocked(s Status) {
 	s.Items = nil
 	s.ActiveCount = 0
@@ -227,6 +236,14 @@ func (m *manager) Show(ctx context.Context, r Request) (Status, error) {
 		next.Close()
 		return m.statusLocked(), err
 	}
+	var attention *AttentionStatus
+	if (r.Sound != "" && r.Sound != "none") || r.FlashTaskbar {
+		result := AttentionStatus{Error: "OSD attention is unavailable in this presenter"}
+		if m.options.Attention != nil {
+			result = m.options.Attention(r)
+		}
+		attention = &result
+	}
 	// Retire replacements only after the new surface has been admitted. A failed
 	// render never destroys the user's existing notification or script choice.
 	for _, e := range m.active {
@@ -246,7 +263,7 @@ func (m *manager) Show(ctx context.Context, r Request) (Status, error) {
 		}
 	}
 	m.serial++
-	entry := &overlay{window: next, position: r.Position, serial: m.serial}
+	entry := &overlay{window: next, position: r.Position, serial: m.serial, attention: attention}
 	m.active = append(survivors, entry)
 	m.layoutLocked()
 	result := entry.status()
@@ -265,9 +282,8 @@ func (m *manager) Dismiss(ctx context.Context, id string) (Status, error) {
 	for i := len(m.active) - 1; i >= 0; i-- {
 		e := m.active[i]
 		if id == "" || e.status().ID == id {
-			s, err := e.window.Dismiss(ctx, e.status().ID)
-			s.Accepted = e.serial
-			return s, err
+			_, err := e.window.Dismiss(ctx, e.status().ID)
+			return e.status(), err
 		}
 	}
 	if id == "" {

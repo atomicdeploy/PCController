@@ -4634,6 +4634,24 @@
             ],
             "default": "current"
           },
+          "sound": {
+            "enum": [
+              "none",
+              "select",
+              "success",
+              "warning",
+              "error",
+              "connect",
+              "disconnect"
+            ],
+            "default": "none",
+            "description": "Optional Windows system sound cue. Host mute/zero-volume policy applies; never uses the board buzzer or loads remote files."
+          },
+          "flash_taskbar": {
+            "type": "boolean",
+            "default": false,
+            "description": "Request three flashes of this process's visible PCController taskbar button without activating it; no-window when none exists."
+          },
           "actions": {
             "type": "array",
             "maxItems": 5,
@@ -4719,6 +4737,29 @@
               "acrylic",
               "blur"
             ]
+          },
+          "attention": {
+            "type": "object",
+            "properties": {
+              "sound": {
+                "enum": [
+                  "requested",
+                  "suppressed",
+                  "failed"
+                ]
+              },
+              "taskbar": {
+                "enum": [
+                  "requested",
+                  "foreground",
+                  "no-window",
+                  "unavailable"
+                ]
+              },
+              "error": {
+                "type": "string"
+              }
+            }
           }
         }
       },

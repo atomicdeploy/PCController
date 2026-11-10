@@ -24,7 +24,7 @@ func osdPresenter() osd.Presenter {
 	desktopOSD.Lock()
 	defer desktopOSD.Unlock()
 	if desktopOSD.presenter == nil {
-		desktopOSD.presenter = osd.New(osd.Options{Icon: loadOSDIcon, Activate: activateOSDAction})
+		desktopOSD.presenter = osd.New(osd.Options{Icon: loadOSDIcon, Activate: activateOSDAction, Attention: osdAttention})
 	}
 	return desktopOSD.presenter
 }
