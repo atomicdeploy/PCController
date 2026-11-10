@@ -13,6 +13,15 @@ func TestWinRing0IOCTLValuesMatchOpenLibSys(t *testing.T) {
 	}
 }
 
+func TestWinRing0ReadPortByteUsesFullPortNumber(t *testing.T) {
+	for _, port := range []uint16{0, 0x61, 0xffff} {
+		input := winRing0ReadPortByteInput(port)
+		if len(input) != 4 || binary.LittleEndian.Uint32(input) != uint32(port) {
+			t.Fatalf("read input=%x want four-byte port %#x", input, port)
+		}
+	}
+}
+
 func TestWinRing0WritePortByteUsesFullAlignedInputStructure(t *testing.T) {
 	input := winRing0WritePortByteInput(0x61, 0x03)
 	if len(input) != 8 {

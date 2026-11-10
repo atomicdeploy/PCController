@@ -117,7 +117,8 @@ struct HostPeripherals::Impl {
   }
   bool portRead(uint32_t port,uint8_t &value) {
     uint32_t output=0; DWORD returned=0;
-    uint16_t input=static_cast<uint16_t>(port);
+    // OpenLibSys ReadIoPort dereferences ULONG, even for the byte IOCTL.
+    uint32_t input=port;
     if(!DeviceIoControl(winSpeaker,(40000UL<<16)|(1UL<<14)|(0x833UL<<2),&input,sizeof(input),&output,sizeof(output),&returned,nullptr) || returned<1) return false;
     value=static_cast<uint8_t>(output); return true;
   }
