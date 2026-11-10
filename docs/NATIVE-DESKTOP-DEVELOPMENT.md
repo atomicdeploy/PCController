@@ -84,10 +84,18 @@ Measured on this Windows workstation (GTX 1080, DirectX/DirectComposition), usin
 | Go allocation per step | 19.54 MiB | approximately 2.67 MiB |
 | Presentations for one completed resized frame | two | one |
 
-These timings are not a 60 FPS guarantee or human acceptance. The renderer still
-has a substantial CPU/GDI full-frame cost. No controller commands, event timing,
-telemetry throttles or safety policies are changed by this work. Storage grows
-with 25% spare capacity, releases a shrink beyond 2:1 and is disposed when hidden.
+The next pass divides large glass surfaces into independent scanline bands,
+reuses button rasters across size changes, and blends recovered GDI foreground
+pixels directly where their coverage is fully opaque or transparent. Edges keep
+the original coverage and rounding. In five 24-step runs of the same
+DirectComposition fixture, the median-of-run-medians fell from 57.7 to 31.2 ms,
+the median run p95 fell from 66.9 to 37.3 ms, and Go allocation fell from
+2.67 to 1.00 MiB per step.
+
+These are app redraw timings. The renderer still has a CPU/GDI full-frame cost
+and the measurements do not establish sustained 60 Hz or human acceptance.
+Storage grows with 25% spare capacity, releases a shrink beyond 2:1 and is
+disposed when hidden.
 
 The original material SHA-256 is retained in `TestGlassResizeMaterialDigest`;
 additional tests cover exact signed-distance results, dark/light hover pixels,

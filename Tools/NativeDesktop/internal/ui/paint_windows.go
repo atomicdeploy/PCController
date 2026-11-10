@@ -506,38 +506,24 @@ func foregroundFromDualBackgroundInto(
 		result.Bounds() != black.Bounds() {
 		return nil
 	}
-	for y := black.Bounds().Min.Y; y < black.Bounds().Max.Y; y++ {
-		for x := black.Bounds().Min.X; x < black.Bounds().Max.X; x++ {
-			blackOffset := black.PixOffset(x, y)
-			whiteOffset := white.PixOffset(x, y)
-			resultOffset := result.PixOffset(x, y)
-
-			delta := 0
-			for channel := 0; channel < 3; channel++ {
-				difference := int(white.Pix[whiteOffset+channel]) -
-					int(black.Pix[blackOffset+channel])
-				if difference < 0 {
-					difference = 0
-				} else if difference > 255 {
-					difference = 255
-				}
-				delta += difference
-			}
-			alpha := 255 - (delta+1)/3
-			for channel := 0; channel < 3; channel++ {
-				value := int(black.Pix[blackOffset+channel])
-				if value > alpha {
-					alpha = value
-				}
-				result.Pix[resultOffset+channel] = byte(value)
-			}
-			if alpha == 0 && interactive {
-				// Fully transparent layered pixels are skipped before Windows
-				// dispatches WM_NCHITTEST. Alpha 1 is visually negligible and
-				// keeps the native move/resize/context-menu plane reachable.
-				alpha = 1
-			}
-			result.Pix[resultOffset+3] = byte(alpha)
+	minimumAlpha := 0
+	if interactive {
+		// Alpha 1 keeps the layered window's native hit-test plane reachable.
+		minimumAlpha = 1
+	}
+	rowBytes := black.Rect.Dx() * 4
+	for y := 0; y < black.Rect.Dy(); y++ {
+		dark := black.Pix[y*black.Stride : y*black.Stride+rowBytes]
+		light := white.Pix[y*white.Stride : y*white.Stride+rowBytes]
+		target := result.Pix[y*result.Stride : y*result.Stride+rowBytes]
+		for i := 0; i < rowBytes; i += 4 {
+			d := dark[i : i+4 : i+4]
+			l := light[i : i+4 : i+4]
+			out := target[i : i+4 : i+4]
+			r, g, b := int(d[0]), int(d[1]), int(d[2])
+			delta := max(0, int(l[0])-r) + max(0, int(l[1])-g) + max(0, int(l[2])-b)
+			alpha := max(255-(delta+1)/3, r, g, b, minimumAlpha)
+			out[0], out[1], out[2], out[3] = d[0], d[1], d[2], byte(alpha)
 		}
 	}
 	return result
@@ -661,8 +647,34 @@ func (s *Shell) composeGlassControls(foreground *image.RGBA) *image.RGBA {
 	if s.controller == nil || s.Config().UI.ControllerChrome != "windows" {
 		s.drawTrafficLightsRGBA(glass)
 	}
-	draw.Draw(glass, glass.Bounds(), foreground, foreground.Bounds().Min, draw.Over)
+	compositeRecoveredForeground(glass, foreground)
 	return glass
+}
+
+// The recovery surface is premultiplied and matches the glass bounds. Most
+// pixels are fully opaque or empty. Blend only partial coverage using the same
+// 16-bit rounding as image/draw's RGBA Over operation.
+func compositeRecoveredForeground(glass, foreground *image.RGBA) {
+	rowBytes := glass.Rect.Dx() * 4
+	for y := 0; y < glass.Rect.Dy(); y++ {
+		dst := glass.Pix[y*glass.Stride : y*glass.Stride+rowBytes]
+		src := foreground.Pix[y*foreground.Stride : y*foreground.Stride+rowBytes]
+		for i := 0; i < rowBytes; i += 4 {
+			s := src[i : i+4 : i+4]
+			switch s[3] {
+			case 0:
+				continue
+			case 255:
+				copy(dst[i:i+4], s)
+			default:
+				d := dst[i : i+4 : i+4]
+				inverse := (255 - uint32(s[3])) * 257
+				for channel := range 4 {
+					d[channel] = byte((uint32(d[channel])*inverse/255 + uint32(s[channel])*257) >> 8)
+				}
+			}
+		}
+	}
 }
 
 type glassStyle struct {
@@ -815,6 +827,7 @@ func drawGlassRoundedRectLayers(
 	halfHeight := float64(rect.Height) / 2
 	radius = math.Min(radius, math.Min(halfWidth, halfHeight))
 	revealRadius := clampFloat(float64(rect.Height)*2.35, 56, 112)
+	staticPanel := style.Panel && drawBody && hover == 0 && !style.Pending
 	for y := top; y < bottom; y++ {
 		py := float64(y) + 0.5
 		vertical := clampFloat((py-float64(rect.Y))/math.Max(float64(rect.Height), 1), 0, 1)
@@ -826,7 +839,29 @@ func drawGlassRoundedRectLayers(
 		rowR := (fillR + (255-fillR)*topLight) * (1 - bottomShade)
 		rowG := (fillG + (255-fillG)*topLight) * (1 - bottomShade)
 		rowB := (fillB + (255-fillB)*topLight) * (1 - bottomShade)
+		interiorLeft, interiorRight := right, right
+		if staticPanel && y >= rect.Y+3 && y < rect.Y+rect.Height-3 {
+			// Beyond three pixels the fill has full coverage and the rim
+			// contributes nothing. In the corner rows stay within the
+			// straight horizontal span so the rounded silhouette is untouched.
+			inset := 3
+			if math.Abs(py-cy) > halfHeight-radius {
+				inset = max(inset, int(math.Ceil(radius)))
+			}
+			start := max(left, rect.X+inset)
+			end := min(right, rect.X+rect.Width-inset)
+			if start < end {
+				interiorLeft, interiorRight = start, end
+			}
+		}
 		for x := left; x < right; x++ {
+			if x == interiorLeft {
+				offset := target.PixOffset(x, y)
+				row := target.Pix[offset : offset+4*(interiorRight-x)]
+				drawGlassPanelInterior(row, x, y, rowR, rowG, rowB, fillAlpha)
+				x = interiorRight - 1
+				continue
+			}
 			px := float64(x) + 0.5
 			distance := roundedRectDistance(
 				px,
@@ -1071,6 +1106,20 @@ func drawGlassRoundedRectLayers(
 				}
 			}
 		}
+	}
+}
+
+func drawGlassPanelInterior(row []byte, x, y int, r, g, b, fillAlpha float64) {
+	for i := 0; i < len(row); i += 4 {
+		pixel := row[i : i+4]
+		alpha := clampFloat(fillAlpha+(glassNoise(x, y)-0.5)*5.5, 0, 255)
+		sourceAlpha := alpha / 255
+		inverse := 1 - sourceAlpha
+		pixel[0] = byte(r*sourceAlpha + float64(pixel[0])*inverse)
+		pixel[1] = byte(g*sourceAlpha + float64(pixel[1])*inverse)
+		pixel[2] = byte(b*sourceAlpha + float64(pixel[2])*inverse)
+		pixel[3] = byte(alpha + float64(pixel[3])*inverse)
+		x++
 	}
 }
 

@@ -5,6 +5,7 @@ package ui
 import (
 	"bytes"
 	"image"
+	"image/color"
 	"image/draw"
 	"testing"
 
@@ -413,12 +414,39 @@ func TestRecoveredForegroundComposesOverGlass(t *testing.T) {
 	compositeStraightPixel(glass, 0, 0, 0, 0, 255, 128)
 	foreground := image.NewRGBA(image.Rect(0, 0, 1, 1))
 	foreground.Pix = []byte{128, 0, 0, 128}
-	draw.Draw(glass, glass.Bounds(), foreground, image.Point{}, draw.Over)
+	compositeRecoveredForeground(glass, foreground)
 
 	got := glass.RGBAAt(0, 0)
 	want := [4]uint8{128, 0, 63, 192}
 	if [4]uint8{got.R, got.G, got.B, got.A} != want {
 		t.Fatalf("foreground over glass = %#v, want %#v", got, want)
+	}
+}
+
+func TestRecoveredForegroundBlendMatchesImageDraw(t *testing.T) {
+	t.Parallel()
+	// Use a clipped image to cover nonzero origins and different row strides.
+	bounds := image.Rect(11, 3, 267, 5)
+	source := image.NewRGBA(bounds.Inset(-2)).SubImage(bounds).(*image.RGBA)
+	got := image.NewRGBA(bounds.Inset(-7)).SubImage(bounds).(*image.RGBA)
+	want := image.NewRGBA(bounds)
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			a := uint8(x - bounds.Min.X)
+			source.SetRGBA(x, y, color.RGBA{R: a, G: a / 2, B: a / 5, A: a})
+			backdrop := color.RGBA{R: 136, G: a / 2, B: 83, A: 180}
+			got.SetRGBA(x, y, backdrop)
+			want.SetRGBA(x, y, backdrop)
+		}
+	}
+	draw.Draw(want, bounds, source, bounds.Min, draw.Over)
+	compositeRecoveredForeground(got, source)
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			if got.RGBAAt(x, y) != want.RGBAAt(x, y) {
+				t.Fatalf("foreground blend at %d,%d = %v, want %v", x, y, got.RGBAAt(x, y), want.RGBAAt(x, y))
+			}
+		}
 	}
 }
 
