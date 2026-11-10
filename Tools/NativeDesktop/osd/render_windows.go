@@ -65,22 +65,56 @@ func (d *dib) close() {
 	d.bitmap = 0
 }
 
-func textImage(text string, size int, bold bool, c color.RGBA) (*image.RGBA, error) {
+func newTextFont(size int, semibold bool) (win.HFONT, error) {
+	var lf win.LOGFONT
+	lf.LfHeight = -int32(size)
+	lf.LfWeight = win.FW_NORMAL
+	family := "Segoe UI"
+	if semibold {
+		lf.LfWeight = win.FW_SEMIBOLD
+		// Generic Segoe UI + weight 600 maps to the Bold (700) style on GDI.
+		// The distinct Semibold face must be selected explicitly.
+		family = "Segoe UI Semibold"
+	}
+	lf.LfQuality = win.ANTIALIASED_QUALITY
+	copy(lf.LfFaceName[:], windows.StringToUTF16(family))
+	f := win.CreateFontIndirect(&lf)
+	if f == 0 {
+		return 0, errors.New("OSD font creation failed")
+	}
+	if semibold {
+		dc := win.CreateCompatibleDC(0)
+		if dc == 0 {
+			win.DeleteObject(win.HGDIOBJ(f))
+			return 0, errors.New("OSD font verification DC failed")
+		}
+		old := win.SelectObject(dc, win.HGDIOBJ(f))
+		var metrics win.TEXTMETRIC
+		ok := win.GetTextMetrics(dc, &metrics)
+		win.SelectObject(dc, old)
+		win.DeleteDC(dc)
+		if !ok {
+			win.DeleteObject(win.HGDIOBJ(f))
+			return 0, errors.New("OSD font weight verification failed")
+		}
+		if metrics.TmWeight != win.FW_SEMIBOLD {
+			// Older/missing-font installations get legible Regular, never an
+			// unintended Bold substitution masquerading as Semibold.
+			win.DeleteObject(win.HGDIOBJ(f))
+			return newTextFont(size, false)
+		}
+	}
+	return f, nil
+}
+
+func textImage(text string, size int, semibold bool, c color.RGBA) (*image.RGBA, error) {
 	text = strings.Join(strings.Fields(text), " ")
 	if text == "" {
 		return image.NewRGBA(image.Rect(0, 0, 1, max(1, size))), nil
 	}
-	var lf win.LOGFONT
-	lf.LfHeight = -int32(size)
-	lf.LfWeight = win.FW_NORMAL
-	if bold {
-		lf.LfWeight = win.FW_SEMIBOLD
-	}
-	lf.LfQuality = win.ANTIALIASED_QUALITY
-	copy(lf.LfFaceName[:], windows.StringToUTF16("Segoe UI"))
-	f := win.CreateFontIndirect(&lf)
-	if f == 0 {
-		return nil, errors.New("OSD font creation failed")
+	f, err := newTextFont(size, semibold)
+	if err != nil {
+		return nil, err
 	}
 	defer win.DeleteObject(win.HGDIOBJ(f))
 	dc := win.CreateCompatibleDC(0)
@@ -330,7 +364,7 @@ func prepare(req Request, dpi, width int, icon image.Image, dark bool) (*renderi
 			label := req.Actions[index].Label
 			var im *image.RGBA
 			for {
-				im, err = textImage(label, px(13), true, r.ink)
+				im, err = textImage(label, px(14), false, r.ink)
 				if err != nil {
 					return nil, err
 				}

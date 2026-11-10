@@ -118,6 +118,43 @@ func TestCloseGlyphInkIsCenteredAtEveryDPIScale(t *testing.T) {
 	}
 }
 
+func TestOSDFontsUseMeasuredWeightsRatherThanRequestedSubstitutions(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	for _, role := range []struct {
+		name     string
+		size     int
+		semibold bool
+	}{{"title", 24, true}, {"body", 21, false}, {"buttons", 21, false}, {"close", 30, false}} {
+		font, err := newTextFont(role.size, role.semibold)
+		if err != nil {
+			t.Fatal(role.name, err)
+		}
+		dc := win.CreateCompatibleDC(0)
+		if dc == 0 {
+			win.DeleteObject(win.HGDIOBJ(font))
+			t.Fatal("font audit DC")
+		}
+		old := win.SelectObject(dc, win.HGDIOBJ(font))
+		var metrics win.TEXTMETRIC
+		ok := win.GetTextMetrics(dc, &metrics)
+		win.SelectObject(dc, old)
+		win.DeleteDC(dc)
+		win.DeleteObject(win.HGDIOBJ(font))
+		if !ok {
+			t.Fatal("cannot measure selected font", role.name)
+		}
+		t.Logf("%s actual weight=%d", role.name, metrics.TmWeight)
+		if role.semibold {
+			if metrics.TmWeight != win.FW_SEMIBOLD && metrics.TmWeight != win.FW_NORMAL {
+				t.Fatal("title was substituted with unintended weight", metrics.TmWeight)
+			}
+		} else if metrics.TmWeight != win.FW_NORMAL {
+			t.Fatal("regular role rendered with unintended weight", role.name, metrics.TmWeight)
+		}
+	}
+}
+
 func TestOSDLiveCloseSlidesBeforeHidingAndDoesNotRestart(t *testing.T) {
 	if os.Getenv("PCCONTROLLER_OSD_LIVE") != "1" {
 		t.Skip("opt-in source-owned input fixture")

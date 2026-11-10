@@ -10,6 +10,11 @@ may cover ordinary desktop windows.
 
 - PCController's native charcoal/violet or light palette, semantic event icons,
   antialiased rounded edges, DPI-sized system text and original-aspect artwork.
+- Typography uses a true Segoe UI Semibold (600) face for the 16-DIP heading,
+  Regular (400) at 14 DIP for body/actions, and Regular for the close glyph.
+  GDI's selected heading weight is measured; if the Semibold face is unavailable,
+  it falls back to Regular rather than silently substituting Bold. Transparent
+  compositing uses grayscale antialiasing, not colored ClearType subpixels.
 - A short cubic fade/slide at entrance and dismissal. Long headings/body text
   scroll at a fixed speed with pauses at both ends, independently of frame rate.
 - Clicking ×, choosing an action and API dismissal share the same short downward
