@@ -228,8 +228,8 @@ func (driver *winRing0Driver) Close() {
 }
 
 func (driver *winRing0Driver) readPortByte(port uint16) (byte, error) {
-	input := []byte{byte(port), byte(port >> 8)}
-	output := make([]byte, 2)
+	input := winRing0ReadPortByteInput(port)
+	output := make([]byte, 4)
 	var returned uint32
 	if err := windows.DeviceIoControl(
 		driver.handle, ioctlReadIOPortByte,
@@ -261,5 +261,14 @@ func winRing0WritePortByteInput(port uint16, value byte) []byte {
 	input := make([]byte, 8)
 	binary.LittleEndian.PutUint32(input[:4], uint32(port))
 	input[4] = value
+	return input
+}
+
+func winRing0ReadPortByteInput(port uint16) []byte {
+	// OpenLibSys ReadIoPort reads an ULONG port number and reports the input
+	// size as returned bytes, even for READ_IO_PORT_BYTE. Keep both buffers
+	// four bytes; a uint16_t port value is not the IOCTL input layout.
+	input := make([]byte, 4)
+	binary.LittleEndian.PutUint32(input, uint32(port))
 	return input
 }

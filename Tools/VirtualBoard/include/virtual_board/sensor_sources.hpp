@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
@@ -14,4 +15,6 @@ void configureSensorSources(const SensorSources &sources);
 bool refreshSensorSources(uint64_t nowUs, bool force = false);
 // Bounded strict parser shared by adapters/tests. Missing data remains unknown.
 bool readSensorInteger(const std::string &path, int64_t &value);
+bool temperatureSourceMapped(std::size_t index);
+bool powerSourceMapped();
 }

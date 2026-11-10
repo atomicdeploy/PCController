@@ -65,6 +65,7 @@ file(GENERATE OUTPUT "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/firmware-adapters.sha256
 
 add_library(native_firmware_objects OBJECT
   src/native_hal.cpp
+  src/host_i2c.cpp
   src/sensor_sources.cpp
   src/native_firmware.cpp
   ../../BoardSupportSources.cpp
@@ -75,7 +76,7 @@ target_include_directories(native_firmware_objects PRIVATE include platform ../.
 target_compile_definitions(native_firmware_objects PRIVATE PCCONTROLLER_NATIVE=1
   PCCONTROLLER_FEATURE_PROFILE=${PCCONTROLLER_FEATURE_PROFILE}
   PCCONTROLLER_BUILD_HASH=0x${PCCONTROLLER_BUILD_HASH}UL)
-add_library(virtual_board_core STATIC src/protocol.cpp $<TARGET_OBJECTS:native_firmware_objects>)
+add_library(virtual_board_core STATIC src/protocol.cpp src/activity.cpp $<TARGET_OBJECTS:native_firmware_objects>)
 target_include_directories(virtual_board_core PUBLIC include)
 target_link_libraries(virtual_board_core PUBLIC Threads::Threads)
 add_library(pccontroller_firmware SHARED src/firmware_c_api.cpp $<TARGET_OBJECTS:native_firmware_objects>)
@@ -86,6 +87,8 @@ target_link_libraries(pccontroller_firmware PRIVATE Threads::Threads)
 add_executable(virtual_board
   src/main.cpp
   src/tcp_server.cpp
+  src/host_peripherals.cpp
+  src/openrgb_sink.cpp
 )
 target_link_libraries(virtual_board PRIVATE virtual_board_core)
 
@@ -136,6 +139,10 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
+  add_executable(firmware_activity_tests tests/activity_test.cpp)
+  target_include_directories(firmware_activity_tests PRIVATE platform)
+  target_link_libraries(firmware_activity_tests PRIVATE virtual_board_core)
+  add_test(NAME firmware_activity_unit COMMAND firmware_activity_tests)
   foreach(profile IN ITEMS default macro_strip)
     add_executable(firmware_${profile}_profile_tests tests/feature_profile_test.cpp)
     target_include_directories(firmware_${profile}_profile_tests PRIVATE ../..)
@@ -301,6 +308,9 @@ if(BUILD_TESTING)
   add_test(NAME firmware_c_api_unit COMMAND firmware_c_api_tests)
   find_program(PCCONTROLLER_NODE node)
   if(PCCONTROLLER_NODE)
+    add_test(NAME firmware_openrgb_integration COMMAND "${PCCONTROLLER_NODE}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/openrgb_integration.test.mjs" $<TARGET_FILE:virtual_board> ${PCCONTROLLER_FEATURE_PROFILE})
+    set_tests_properties(firmware_openrgb_integration PROPERTIES TIMEOUT 20)
     add_test(NAME firmware_transport_integration COMMAND "${PCCONTROLLER_NODE}"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/transport_integration.test.mjs" $<TARGET_FILE:virtual_board>)
     set_tests_properties(firmware_transport_integration PROPERTIES TIMEOUT 60)

@@ -18,6 +18,7 @@ struct OutputSnapshot {
   bool tm1637Detected=false;
   uint16_t buzzerHz=0;
   std::vector<uint8_t> strip;
+  uint8_t stripRedOffset=1,stripGreenOffset=0,stripBlueOffset=2;
 };
 // One firmware instance per process, exactly like one MCU. Multiple boards
 // require isolated processes and EEPROM paths. This never dispatches opcodes.
@@ -33,11 +34,14 @@ public:
   void disconnected();
   void flush();
   ConsoleResult console(const std::string &line);
+  void bindHostInput(uint8_t channel);
+  void observeHostInput(uint8_t channel,bool active);
   std::string describe() const;
   OutputSnapshot outputSnapshot() const;
   bool resetRequested() const;
 private:
   mutable std::mutex mutex_;
   bool resetRequested_=false;
+  uint8_t hostInputMask_=0;
 };
 }
