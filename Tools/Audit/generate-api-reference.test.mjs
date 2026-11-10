@@ -5,6 +5,7 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { createSchemaResolver } from "./explorer/schema-resolver.mjs";
+import { extractRequestShapes } from './explorer/request-shapes.mjs';
 
 import {
   extractGoCaseMethods,
@@ -16,6 +17,86 @@ const directory = dirname(fileURLToPath(import.meta.url));
 const root = resolve(directory, "..", "..");
 const script = join(directory, "generate-api-reference.mjs");
 const outputDirectory = join(root, "Tools", "Controller", "api");
+
+test('all HTTP operations have purpose, response meaning, use cases and described parameters',()=>{
+  const spec=JSON.parse(readFileSync(join(outputDirectory,'openapi.json'),'utf8'));
+  const {expand}=createSchemaResolver(spec);
+  for(const [path,operations] of Object.entries(spec.paths)) for(const [method,operation] of Object.entries(operations)) {
+    assert.notEqual(operation.summary,operation.description,`${method} ${path}`);
+    assert.ok(operation.summary.length<110,`Concise title: ${method} ${path}`);
+    assert.match(operation.description,/Use case:/u);
+    assert.ok(operation['x-use-case']);
+    for(const parameter of operation.parameters??[]) assert.ok(parameter.description,`${path} ${parameter.name}`);
+    for(const [,name] of path.matchAll(/\{([^}]+)\}/gu)) assert.ok(operation.parameters?.some(p=>p.in==='path'&&p.name===name&&p.required),`${path} path.${name}`);
+    for(const response of Object.values(operation.responses)) if(!response.$ref) {
+      assert.ok(response.description);
+      assert.notEqual(response.description,'Accepted response');
+    }
+    const body=expand(operation.requestBody?.content?.['application/json']?.schema);
+    for(const [field,schema] of Object.entries(body?.properties??{})) assert.ok(schema.description,`${method} ${path} request.${field}`);
+  }
+  for(const tag of spec.tags) {assert.ok(tag.description?.length>50,tag.name);assert.ok(tag['x-summary']);}
+  assert.match(spec.info.description,/DS18B20/u);
+  assert.match(spec.info.description,/Idempotency key/u);
+  assert.match(spec.info.description,/RF.*learning/su);
+  const bundle=readFileSync(join(outputDirectory,'assets/scalar.js'),'utf8');
+  assert.match(bundle,/showOperationId: false/u);
+});
+
+test('discovery and programming documentation distinguish inventory, staging, acceptance and file transfer',()=>{
+  const spec=JSON.parse(readFileSync(join(outputDirectory,'openapi.json'),'utf8'));
+  const workflow=spec.paths['/api/discovery/github/workflow'].post;
+  assert.equal(workflow.summary,'Find GitHub Actions build artifacts');
+  assert.match(workflow.description,/does not run a workflow/u);
+  assert.match(workflow.requestBody.content['application/json'].schema.properties.workflow.description,/not the YAML filename/u);
+  assert.equal(workflow.responses['200'].content['application/json'].schema.properties.candidates.items.properties.archive_sha256.description.includes('outer archive'),true);
+  assert.equal(spec.paths['/api/discovery/stage'].post.responses['200'],undefined);
+  assert.ok(spec.paths['/api/discovery/stage'].post.responses['202']);
+  assert.ok(spec.paths['/api/artifacts/upload'].post.responses['201']);
+  assert.ok(spec.paths['/api/artifacts/upload'].post.requestBody.content['application/octet-stream']);
+  assert.ok(spec.paths['/api/board/firmware/download'].get.responses['206']);
+  assert.equal(spec.paths['/api/board/firmware/download'].head.responses['200'].content,undefined);
+  assert.equal(spec.paths['/api/diagnostics/execution-trace'].post.requestBody,undefined);
+  assert.match(spec.paths['/api/diagnostics/execution-trace'].post.responses['200'].description,/not a gzip CPU profile/u);
+  assert.ok(spec.paths['/api/integrations/device/{path}'].get.responses['404']);
+  assert.equal(spec.paths['/api/integrations/device/{path}'].get.responses['200'],undefined);
+  assert.equal(spec.paths['/api/webhooks/inbound'].get['x-idempotency'],'non-idempotent');
+  assert.ok(spec.paths['/api/pwm/channel'].put);
+  assert.equal(spec.paths['/api/pwm/channel'].get['x-required-capability'],'read');
+  const rpc=JSON.parse(readFileSync(join(outputDirectory,'jsonrpc.schema.json'),'utf8'))['x-methods'];
+  assert.match(rpc['controller.discovery.github.workflow'].request_fields.properties.repository.description,/owner\/repository/u);
+  assert.equal(rpc['controller.discovery.github.workflow'].result_schema.properties.candidates.type,'array');
+  assert.equal(rpc['controller.artifact.upload'].request_fields.properties.data.contentEncoding,'base64');
+  assert.equal(rpc['controller.artifact.upload'].request_fields.properties.file,undefined);
+  assert.match(rpc['controller.artifact.upload'].description,/base64-encoded/u);
+  assert.match(rpc['controller.osd.show'].description,/concurrent stack/u);
+});
+
+test('RPC purpose text is distinct from its title and never a mechanical surface label',()=>{
+  const spec=JSON.parse(readFileSync(join(outputDirectory,'jsonrpc.schema.json'),'utf8'));
+  const normalize=s=>s.replace(/[.]/gu,'').trim().toLowerCase();
+  for(const [name,method] of Object.entries(spec['x-methods'])) {
+    assert.ok(method.title,name);assert.ok(method.description,name);
+    assert.notEqual(normalize(method.title),normalize(method.description),name);
+    assert.doesNotMatch(method.description,/^(Read|Invoke) the .* (surface|operation)\.$/u,name);
+  }
+});
+
+test('Go schema extraction separates same-named package types and preserves JSON byte/time encoding',()=>{
+  const shapes=extractRequestShapes(root,[{Name:'alpha.go',Text:'package alpha; type Manifest struct { Data []byte `json:"data"`; Count int `json:"count"` }'},{Name:'beta.go',Text:'package beta; import "time"; type Manifest struct { At time.Time `json:"at"`; Nested alpha.Manifest `json:"nested"` }'}]);
+  assert.equal(shapes.$types['alpha.Manifest'].properties.data.type,'string');
+  assert.equal(shapes.$types['alpha.Manifest'].properties.data.contentEncoding,'base64');
+  assert.equal(shapes.$types['beta.Manifest'].properties.at.format,'date-time');
+  assert.equal(shapes.$types['beta.Manifest'].properties.nested.properties.count.type,'integer');
+  assert.equal(shapes.$types['alpha.Manifest'].required,undefined);
+});
+
+test('request extraction does not confuse shadowed command/application params',()=>{
+  const shapes=extractRequestShapes(root,[{Name:'dispatch.go',Text:'package ipcjson; func dispatch(method string, raw []byte) { switch method {case "controller.example": var params struct { Command string `json:"command"` }; decodeParams(raw, &params); if true { var params struct { Kind string `json:"kind"` }; decodeParams(raw, &params) } } }'}]);
+  assert.deepEqual(Object.keys(shapes['controller.example'].properties),['command']);
+  const rpc=JSON.parse(readFileSync(join(outputDirectory,'jsonrpc.schema.json'),'utf8'));
+  assert.deepEqual(Object.keys(rpc['x-methods']['controller.command.execute'].request_fields.properties),['command']);
+});
 
 test("extracts controller methods from one-line and wrapped Go case clauses", () => {
   const dispatched = extractGoCaseMethods([

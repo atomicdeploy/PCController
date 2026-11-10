@@ -9,6 +9,7 @@ import { loadProjectEnv } from "../Build/env.mjs";
 import { renderExplorer } from "./explorer/render.mjs";
 import { extractRequestShapes } from "./explorer/request-shapes.mjs";
 import { connectionGuides, subscriptionSchema } from "./explorer/websocket-contract.mjs";
+import { groups, introduction, enrichOperation, explainFields, explainContract, rpcMeaning, rpcWireDocumentation } from './explorer/semantics.mjs';
 
 loadProjectEnv();
 
@@ -84,7 +85,7 @@ const readContractSource = (file) => sourceRef
   : readFileSync(resolve(root, file), "utf8");
 const productMetadata = JSON.parse(readFileSync(resolve(root, "Tools", "Controller", "web", "package.json"), "utf8"));
 const product = productIdentity(productMetadata);
-const shapeDirectories = ["Tools/Controller/internal/ipcjson", "Tools/Controller/internal/artifacts", "Tools/Controller/internal/releaseplane", "Tools/Controller/internal/appconfig", "Tools/Controller/internal/native", "Tools/Controller/internal/hostui"];
+const shapeDirectories = ["Tools/Controller/internal/ipcjson", "Tools/Controller/internal/artifacts", "Tools/Controller/internal/releaseplane", "Tools/Controller/internal/appconfig", "Tools/Controller/internal/native", "Tools/Controller/internal/hostui", "Tools/Controller/internal/control", "Tools/Controller/internal/hostos"];
 const shapeFiles = ["Tools/Controller/controller.go", ...shapeDirectories.flatMap(directory => readdirSync(resolve(root,directory)).filter(name=>name.endsWith('.go')&&!name.endsWith('_test.go')).map(name=>`${directory}/${name}`))];
 if (sourceRef) {
   const existing = new Set(execFileSync('git',['ls-tree','-r','--name-only',sourceRef],{cwd:root,encoding:'utf8'}).trim().split(/\r?\n/u));
@@ -190,12 +191,12 @@ const capabilityGroups = {
 };
 
 const methodOverrides = {
-  "controller.osd.show": "Present a non-activating Windows desktop overlay with a bounded lifetime, semantic icon, time-based transitions/marquee and up to five human-activated URI actions. Replaces the current OSD; never executes actions on receipt.",
+  "controller.osd.show": "Present a non-activating Windows desktop overlay with a bounded lifetime, semantic icon, transitions/marquee and up to five human-activated actions. behavior selects replacement or a bounded concurrent stack; actions never execute merely on receipt.",
   "controller.osd.status": "Read desktop OSD support, current presentation identity, expiry and last action/error without creating a window.",
   "controller.osd.dismiss": "Fade out the current OSD. Supply its id to prevent an obsolete dismissal from closing a replacement overlay.",
   "controller.pwm.set": "Set one physical PWM channel (0..15) using either calibrated percent (0..100) or raw_value (0..4095), never both. Supply current snapshot owner/revision fields; the host verifies admission and returns authoritative readback.",
   "controller.pwm.off": "Turn off selected PWM outputs through the current board owner and return authoritative state.",
-  "controller.pwm.values": "Read cached authoritative PWM output values without changing any channel.",
+  "controller.pwm.values": "Read authoritative PWM output registers through the current board owner without changing a channel. During prepared playback the host retains the cached observation and its original generation/revision/time rather than creating polling traffic.",
 	"controller.effects.library.get": "Return the portable effect library and its canonical ETag.",
 	"controller.effects.library.set": "Import or replace an effect library using mandatory if_match, canonical validation and serialized compare-and-swap; does not execute effects.",
 	"controller.automations.get": "Return configured host event/RF rules and their canonical ETag.",
@@ -383,6 +384,7 @@ const routes = [
   { path: "/api/peripherals", methods: ["put"], capability: "host_configuration", summary: "Replace host-owned peripheral names" },
   { path: "/api/pwm", methods: ["get"], capability: "read", summary: "Authoritative PWM state" },
   { path: "/api/pwm", methods: ["put", "delete"], capability: "board_commands", summary: "Mutate PWM state with board readback" },
+  { path: "/api/pwm/channel", methods: ["get", "put"], capability: "host_configuration", summary: "Read or configure host-owned PWM channel behavior" },
   { path: "/api/commands", methods: ["get"], capability: "read", summary: "Shared command catalog" },
   { path: "/api/program-state", methods: ["get"], capability: "read", summary: "Host-owned program state" },
   { path: "/api/program-state", methods: ["put", "post"], capability: "board_commands", summary: "Update host-owned program state" },
@@ -428,7 +430,7 @@ const routes = [
   { path: "/api/discovery/check", methods: ["post"], capability: "read", summary: "Compare candidate and installed identities" },
   { path: "/api/discovery/stage", methods: ["post"], capability: "programming", summary: "Stage a verified candidate without programming" },
   { path: "/api/discovery/status/{id}", methods: ["get"], capability: "read", summary: "Discovery or staging progress" },
-  { path: "/api/webhooks/inbound", methods: ["post"], capability: "messages", summary: "Optional inbound typed webhook" },
+  { path: "/api/webhooks/inbound", methods: ["get", "post", "put", "patch", "delete", "options"], capability: "messages", summary: "Optional inbound typed webhook" },
   { path: "/api/webhooks/outbound/status", methods: ["get"], capability: "read", summary: "Outbound delivery queue and dead-letter status" },
   { path: "/api/webhooks/outbound/pending", methods: ["get"], capability: "read", summary: "Bounded non-secret pending delivery list" },
   { path: "/api/webhooks/outbound/dead", methods: ["get"], capability: "read", summary: "Bounded non-secret dead-letter list" },
@@ -764,7 +766,7 @@ function operationFor(route, method) {
 			description: "Correlated app-action operation identifier.",
 		});
 	}
-  return operation;
+  return enrichOperation(operation, route.path, method, requestFields);
 }
 
 const openAPIPaths = {};
@@ -786,12 +788,15 @@ const openapi = {
     title: product.httpTitle,
 		version: "unversioned",
 		summary: "Unversioned living REST and JSON-RPC surface of the primary controller host.",
-    description: "Loopback is the safe default. Immediate-alpha authentication and authorization are disabled under issue #148. The built-in listener does not terminate TLS.\n\nFor full-duplex JSON-RPC, subscriptions and pushed notifications, open the [WebSocket & events guide](protocols.html#websocket). The [JSON-RPC method catalog](rpc.html) applies to both HTTP and WebSocket. Download the [AsyncAPI contract](asyncapi.json) for channels and message schemas.",
+    description: introduction,
   },
   servers: [{ url: "http://127.0.0.1:8787", description: "Default loopback primary" }],
   security: [],
   paths: openAPIPaths,
-  tags: [...new Set(routes.map(route => route.path.startsWith('/api/') ? route.path.split('/')[2] : 'service'))].sort().map(name => ({ name, description: name === 'sensors' ? 'Read-only PCB measurements for system monitors. Host-computer measurements are separate under os/facts.' : undefined })),
+  tags: [...new Set(routes.map(route => route.path.startsWith('/api/') ? route.path.split('/')[2] : 'service'))].sort().map(name => {
+    if (!groups[name]) throw new Error(`Missing API group description: ${name}`);
+    return { name, 'x-displayName':groups[name][0], 'x-summary':groups[name][0], description:groups[name][1] };
+  }),
   components: {
     securitySchemes: {
       bearerAuth: { type: "http", scheme: "bearer", description: "Durable host access credential for HTTP and non-browser WebSocket clients. Never place it in a URL." },
@@ -927,9 +932,9 @@ const openapi = {
     },
     responses: {
       BadRequest: { description: "Invalid request or parameters", content: { "application/json": { schema: errorSchema } } },
-      Unauthorized: { description: "Authentication required", content: { "application/json": { schema: errorSchema } } },
+      Unauthorized: { description: "Reserved authentication rejection; application authentication is disabled in the current alpha. This is not a board-disconnection signal.", content: { "application/json": { schema: errorSchema } } },
       Forbidden: { description: "Capability or safety policy denied", content: { "application/json": { schema: errorSchema } } },
-      MethodNotAllowed: { description: "Unsupported method", headers: { Allow: { schema: { type: "string" } } }, content: { "application/json": { schema: errorSchema } } },
+      MethodNotAllowed: { description: "The handler does not support this HTTP verb. When present, Allow lists accepted methods. Most handlers return plain text; structured policy handlers may return JSON.", headers: { Allow: { description:'HTTP methods accepted by this handler.',schema: { type: "string" } } }, content: { "text/plain":{schema:{type:'string'}}, "application/json": { schema: errorSchema } } },
     },
   },
   "x-body-limit-bytes": 1048576,
@@ -981,7 +986,9 @@ const rpcSchema = {
     },
   },
 	"x-methods": Object.fromEntries(methods.map(({ name, ...metadata }) => {
+		Object.assign(metadata, rpcMeaning(name, metadata.summary));
 		if (requestFields[name] && !name.startsWith('controller.osd.')) metadata.request_fields = requestFields[name];
+		Object.assign(metadata,rpcWireDocumentation(name,requestFields));
 		if (name === 'controller.subscribe') {
 			metadata.params_schema = { $ref: '#/$defs/Subscription' };
 			metadata.request_template = subscriptionSchema.examples[0];
@@ -1080,6 +1087,10 @@ for (const [key, method, summary] of [
   asyncapi.components.messages[key] = { name: method, summary, payload: { type: 'object', required: ['jsonrpc', 'method', 'params'], properties: { jsonrpc: { const: '2.0' }, method: { const: method }, params: { type: 'object', additionalProperties: true } } } };
   asyncapi['x-socket-io-events'].outgoing.push(method);
 }
+
+for (const [name,schema] of Object.entries(openapi.components.schemas)) explainContract(name,schema);
+for (const [name,schema] of Object.entries(rpcSchema.$defs)) explainContract(name,schema);
+for (const metadata of Object.values(rpcSchema['x-methods'])) explainFields(metadata.request_fields);
 
 const outputs = new Map([
   ["openapi.json", `${JSON.stringify(openapi, null, 2)}\n`],

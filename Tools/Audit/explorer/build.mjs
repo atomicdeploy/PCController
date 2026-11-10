@@ -20,6 +20,9 @@ const bootstrap = `
   const content=JSON.parse(document.getElementById('pccontroller-openapi').textContent);
   // Set only an origin, never a URL containing credentials or query secrets.
   if (location.protocol==='http:' || location.protocol==='https:') content.servers=[{url:location.origin}];
+  for (const path of Object.values(content.paths)) for (const operation of Object.values(path)) {
+    for (const sample of operation['x-codeSamples'] || []) sample.source=sample.source.replaceAll('<HOST_ORIGIN>', content.servers[0].url);
+  }
   window.Scalar.createApiReference('#app', {
     content,
     agent: { disabled: true, hideAddApi: true },
@@ -28,7 +31,7 @@ const bootstrap = `
     hideClientButton: false, hideDownloadButton: false, hideModels: false,
     hideTestRequestButton: true,
     layout: 'modern', orderRequiredPropertiesFirst: true, persistAuth: false,
-    proxyUrl: '', showDeveloperTools: 'never', showOperationId: true,
+    proxyUrl: '', showDeveloperTools: 'never', showOperationId: false,
     telemetry: false, theme: 'kepler', withDefaultFonts: false,
     customCss: 'html .light-mode { --scalar-color-accent: #7855c6 !important; --scalar-background-1: #f9f8fc !important; --scalar-background-2: #ffffff !important; --scalar-background-3: #f0eafa !important; } html .dark-mode { --scalar-color-accent: #bc9df6 !important; --scalar-background-1: #131117 !important; --scalar-background-2: #1b1820 !important; --scalar-background-3: #27222e !important; --scalar-sidebar-background-1: #1b1820 !important; }'
   });

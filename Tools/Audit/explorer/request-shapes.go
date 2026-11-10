@@ -17,8 +17,15 @@ type source struct{ Name, Text string }
 type schema map[string]any
 
 var types = map[string][]ast.Expr{}
+var scope string
 
 func namedShape(name string, depth int) schema {
+	if !strings.Contains(name, ".") {
+		name = scope + "." + name
+	}
+	previous := scope
+	scope = strings.Split(name, ".")[0]
+	defer func() { scope = previous }()
 	var structs []ast.Expr
 	for _, expr := range types[name] {
 		if _, ok := expr.(*ast.StructType); ok {
@@ -26,7 +33,9 @@ func namedShape(name string, depth int) schema {
 		}
 	}
 	if len(structs) == 1 {
-		return shape(structs[0], depth+1)
+		value := shape(structs[0], depth+1)
+		value["x-go-type"] = name
+		return value
 	}
 	if len(types[name]) == 1 {
 		return shape(types[name][0], depth+1)
@@ -42,6 +51,9 @@ func shape(expr ast.Expr, depth int) schema {
 	case *ast.StarExpr:
 		return shape(t.X, depth+1)
 	case *ast.ArrayType:
+		if element, ok := t.Elt.(*ast.Ident); ok && (element.Name == "byte" || element.Name == "uint8") && t.Len == nil {
+			return schema{"type": "string", "contentEncoding": "base64"}
+		}
 		return schema{"type": "array", "items": shape(t.Elt, depth+1)}
 	case *ast.MapType:
 		return schema{"type": "object", "additionalProperties": shape(t.Value, depth+1)}
@@ -86,7 +98,12 @@ func shape(expr ast.Expr, depth int) schema {
 		}
 		return namedShape(t.Name, depth)
 	case *ast.SelectorExpr:
-		return namedShape(t.Sel.Name, depth)
+		if pkg, ok := t.X.(*ast.Ident); ok {
+			if pkg.Name == "time" && t.Sel.Name == "Time" {
+				return schema{"type": "string", "format": "date-time"}
+			}
+			return namedShape(pkg.Name+"."+t.Sel.Name, depth)
+		}
 	}
 	return schema{} // A named/custom payload is not falsely described as a scalar.
 }
@@ -106,6 +123,9 @@ func fields(node ast.Node, helpers map[string]*ast.FuncDecl, depth int) schema {
 	})
 	var found schema
 	ast.Inspect(node, func(n ast.Node) bool {
+		if found != nil {
+			return false
+		}
 		call, ok := n.(*ast.CallExpr)
 		if !ok {
 			return true
@@ -117,10 +137,26 @@ func fields(node ast.Node, helpers map[string]*ast.FuncDecl, depth int) schema {
 		case *ast.SelectorExpr:
 			name = f.Sel.Name
 		}
-		if (name == "decodeParams" || name == "decodeStrictParams" || name == "Unmarshal") && len(call.Args) >= 2 {
-			if address, ok := call.Args[1].(*ast.UnaryExpr); ok {
+		argument := 1
+		if name == "Decode" {
+			argument = 0
+		}
+		if (name == "decodeParams" || name == "decodeStrictParams" || name == "Unmarshal" || name == "Decode" || name == "decodeHTTP" || name == "decodeHTTPJSON") && len(call.Args) > argument {
+			if name == "decodeHTTP" || name == "decodeHTTPJSON" {
+				argument = len(call.Args) - 1
+			}
+			if address, ok := call.Args[argument].(*ast.UnaryExpr); ok {
 				if id, ok := address.X.(*ast.Ident); ok {
-					if expr := vars[id.Name]; expr != nil {
+					expr := vars[id.Name]
+					// The same handler can decode another local `params` in a
+					// nested command branch. Resolve the identifier's declaration,
+					// not the last variable with that spelling in the whole body.
+					if id.Obj != nil {
+						if declaration, ok := id.Obj.Decl.(*ast.ValueSpec); ok {
+							expr = declaration.Type
+						}
+					}
+					if expr != nil {
 						candidate := shape(expr, 0)
 						if props, ok := candidate["properties"].(map[string]schema); ok && len(props) > 0 {
 							found = candidate
@@ -167,7 +203,8 @@ func main() {
 			if group, ok := decl.(*ast.GenDecl); ok && group.Tok == token.TYPE {
 				for _, entry := range group.Specs {
 					if t, ok := entry.(*ast.TypeSpec); ok {
-						types[t.Name.Name] = append(types[t.Name.Name], t.Type)
+						key := file.Name.Name + "." + t.Name.Name
+						types[key] = append(types[key], t.Type)
 					}
 				}
 			}
@@ -177,11 +214,23 @@ func main() {
 		}
 	}
 	result := map[string]schema{}
+	priorities := map[string]int{}
+	httpShapes := map[string]schema{}
 	for _, file := range files {
+		scope = file.Name.Name
 		ast.Inspect(file, func(node ast.Node) bool {
 			var names []string
 			var body ast.Node
 			switch n := node.(type) {
+			case *ast.CallExpr:
+				if selector, ok := n.Fun.(*ast.SelectorExpr); ok && selector.Sel.Name == "HandleFunc" && len(n.Args) == 2 {
+					if path, ok := n.Args[0].(*ast.BasicLit); ok && path.Kind == token.STRING {
+						name, _ := strconv.Unquote(path.Value)
+						if value := fields(n.Args[1], helpers, 0); value != nil {
+							httpShapes[name] = value
+						}
+					}
+				}
 			case *ast.CaseClause:
 				for _, e := range n.List {
 					if lit, ok := e.(*ast.BasicLit); ok && lit.Kind == token.STRING {
@@ -205,15 +254,39 @@ func main() {
 			}
 			if len(names) > 0 {
 				if value := fields(body, helpers, 0); value != nil {
+					priority := 1
+					// Policy classifiers also switch on method names and may
+					// decode a permissive subset. Prefer the actual dispatcher.
+					for _, declaration := range file.Decls {
+						if fn, ok := declaration.(*ast.FuncDecl); ok && fn.Pos() <= node.Pos() && node.End() <= fn.End() {
+							if fn.Name.Name == "dispatch" || fn.Name.Name == "DispatchRPC" {
+								priority = 2
+							}
+							break
+						}
+					}
 					for _, name := range names {
-						if result[name] == nil {
+						if result[name] == nil || priority > priorities[name] {
 							result[name] = value
+							priorities[name] = priority
 						}
 					}
 				}
 			}
 			return true
 		})
+	}
+	named := map[string]schema{}
+	for name := range types {
+		named[name] = namedShape(name, 0)
+	}
+	result["$types"] = schema{}
+	for name, value := range named {
+		result["$types"][name] = value
+	}
+	result["$http"] = schema{}
+	for name, value := range httpShapes {
+		result["$http"][name] = value
 	}
 	if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
 		panic(err)
