@@ -3,6 +3,9 @@
   const root = document.querySelector(".catalog");
   const spec = JSON.parse(document.getElementById("catalog").textContent);
   const streams = root.dataset.mode === "streams";
+  const rpcContract = streams
+    ? JSON.parse(document.getElementById("rpc-contract").textContent)
+    : spec;
   const $ = (id) => document.getElementById(id);
   const el = (tag, text, cls) => {
     const node = document.createElement(tag);
@@ -13,21 +16,25 @@
   const resolve = (value) => {
     let current = value;
     const seen = new Set();
-    while (current?.$ref?.startsWith("#/") && !seen.has(current.$ref)) {
+    while (current?.$ref && !seen.has(current.$ref)) {
+      const ref = current.$ref;
+      const external = ref.startsWith("./jsonrpc.schema.json#/");
+      if (!external && !ref.startsWith("#/")) break;
       seen.add(current.$ref);
-      current = current.$ref
+      const pointer = external ? ref.slice("./jsonrpc.schema.json".length) : ref;
+      current = pointer
         .slice(2)
         .split("/")
         .reduce(
           (v, k) => v?.[k.replaceAll("~1", "/").replaceAll("~0", "~")],
-          spec,
+          external || pointer.startsWith("#/$defs/") ? rpcContract : spec,
         );
     }
     return current ?? value;
   };
   const sample = (schema, depth = 0) => {
     schema = resolve(schema);
-    if (!schema || depth > 8) return {};
+    if (!schema || typeof schema !== "object" || depth > 8) return {};
     if (schema.examples?.length) return schema.examples[0];
     if ("const" in schema) return schema.const;
     if ("default" in schema) return schema.default;
@@ -46,12 +53,14 @@
     return "<value>";
   };
   const items = streams
-    ? Object.entries(spec.channels).flatMap(([channel, c]) =>
+    ? [...(spec["x-connection-guides"] ?? []).map(guide => ({
+        ...guide, capability: "guides", guide: true,
+      })), ...Object.entries(spec.channels).flatMap(([channel, c]) =>
         Object.entries(c.messages ?? {}).map(([name, message]) => {
           const m = resolve(message);
           return {
             id: channel + "." + name,
-            name: m.name ?? name,
+            name: m.name ?? m.payload?.properties?.method?.const ?? name,
             summary: m.summary ?? m.description ?? c.description ?? "",
             capability: channel,
             address: c.address,
@@ -59,7 +68,7 @@
             raw: m,
           };
         }),
-      )
+      )]
     : Object.entries(spec["x-methods"]).map(([name, m]) => ({
         id: name,
         name,
@@ -110,6 +119,15 @@
     details.append(el("pre", JSON.stringify(value, null, 2)));
     return details;
   }
+  function methodLinks(methods) {
+    const links = el("div", undefined, "related-methods");
+    for (const method of methods) {
+      const link = el("a", method);
+      link.href = "rpc.html#" + encodeURIComponent(method);
+      links.append(link);
+    }
+    return links;
+  }
   function show(item) {
     selected = item.id;
     history.replaceState(null, "", "#" + encodeURIComponent(selected));
@@ -130,14 +148,42 @@
       );
     detail.append(badges, el("h1", streams ? item.name : item.id));
     if (item.summary) detail.append(el("p", item.summary, "description"));
-    if (streams) {
+    if (streams && item.guide) {
       detail.append(el("div", item.address, "endpoint"));
+      for (const section of item.sections) {
+        detail.append(el("h2", section.title));
+        if (section.text) detail.append(el("p", section.text));
+        if (section.code) detail.append(code("Copy example", section.code));
+        if (section.schema) detail.append(schemaPanel("Parameter schema", section.schema));
+        if (section.table) {
+          const table = el("table");
+          const header = el("tr");
+          header.append(el("th", "Topic"), el("th", "Notifications"));
+          table.append(header);
+          for (const row of section.table) {
+            const tr = el("tr");
+            tr.append(...row.map(value => el("td", value)));
+            table.append(tr);
+          }
+          detail.append(table);
+        }
+      }
+      if (item.methods) detail.append(el("h2", "Method reference"), methodLinks(item.methods));
+    } else if (streams) {
+      detail.append(el("div", item.address, "endpoint"));
+      for (const example of item.raw.examples ?? [])
+        detail.append(code("Message example", example.payload));
       if (item.schema?.examples?.length)
         detail.append(code("Message example", item.schema.examples[0]));
       detail.append(schemaPanel("Message schema", item.schema ?? item.raw));
-      const examples = spec["x-socket-io"] ?? spec["x-socketio"];
-      if (item.capability === "socketIO" && examples)
-        detail.append(schemaPanel("Socket.IO framing", examples));
+      if (item.capability === "socketIO") {
+        detail.append(schemaPanel("Socket.IO events", spec["x-socket-io-events"]));
+        const link = el("a", "Handshake, heartbeat and packet examples");
+        link.href = "#socketio";
+        detail.append(link);
+      } else {
+        detail.append(methodLinks(["controller.subscribe", "controller.unsubscribe"]));
+      }
     } else {
       detail.append(
         el("div", "HTTP POST /api/rpc · WebSocket /ipc · NDJSON", "endpoint"),
@@ -198,7 +244,7 @@
       (item) =>
         (!caps.value || item.capability === caps.value) &&
         (!query ||
-          [item.id, item.name, item.summary, item.capability]
+          [item.id, item.name, item.summary, item.capability, item.address]
             .join(" ")
             .toLowerCase()
             .includes(query)),
@@ -211,15 +257,21 @@
       button.type = "button";
       button.dataset.id = item.id;
       button.setAttribute("aria-current", String(selected === item.id));
-      button.append(el("span", "", "dot"), el("span", item.id));
+      button.append(el("span", "", "dot"), el("span", streams ? item.name : item.id));
       button.addEventListener("click", () => show(item));
       nav.append(button);
     }
     if (!list.length) nav.append(el("div", "No matching operations", "empty"));
-    if (!items.some((item) => item.id === selected) && list[0]) show(list[0]);
+    if (!list.some((item) => item.id === selected) && list[0]) show(list[0]);
   }
   $("search").addEventListener("input", filter);
   caps.addEventListener("change", filter);
+  window.addEventListener("hashchange", () => {
+    let id;
+    try { id = decodeURIComponent(location.hash.slice(1)); } catch { return; }
+    const item = items.find(value => value.id === id);
+    if (item) show(item);
+  });
   document.addEventListener("keydown", (event) => {
     if ((event.ctrlKey || event.metaKey) && event.key === "k") {
       event.preventDefault();

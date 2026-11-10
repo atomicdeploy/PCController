@@ -1625,11 +1625,90 @@
             "controller.opcode",
             "controller.status",
             "controller.error",
+            "controller.snapshot",
+            "controller.pwm.values",
             "controller.data"
           ]
         },
         "params": true
       }
+    },
+    "Subscription": {
+      "type": "object",
+      "properties": {
+        "topics": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "events",
+              "state",
+              "debug",
+              "status",
+              "opcodes",
+              "telemetry",
+              "opcode"
+            ]
+          },
+          "description": "Defaults to events, or opcodes when an opcode filter is supplied. telemetry aliases status; opcode aliases opcodes."
+        },
+        "opcodes": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 255
+          },
+          "description": "Optional raw-opcode filter; requires the opcodes topic. Zero is reserved."
+        },
+        "interval_ms": {
+          "type": "integer",
+          "anyOf": [
+            {
+              "const": 0
+            },
+            {
+              "minimum": 50,
+              "maximum": 60000
+            }
+          ],
+          "default": 200,
+          "description": "Status cadence only. Omitted/zero selects 200 ms; ignored without status."
+        },
+        "state_interval_ms": {
+          "type": "integer",
+          "anyOf": [
+            {
+              "const": 0
+            },
+            {
+              "minimum": 16,
+              "maximum": 1000
+            }
+          ],
+          "default": 0,
+          "description": "Coalescing budget for high-rate state only; zero delivers immediately. Segment edges remain immediate."
+        },
+        "after_id": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Resume retained event streams after this event ID. Omitted/zero starts at the current cursor. IDs are host-instance scoped, not durable across restarts."
+        },
+        "preserve": {
+          "type": "boolean",
+          "default": false,
+          "description": "False replaces all subscriptions on this connection. True replaces only the named topics, preserving other workers/cursors."
+        }
+      },
+      "examples": [
+        {
+          "topics": [
+            "events",
+            "state",
+            "status"
+          ],
+          "interval_ms": 200
+        }
+      ]
     }
   },
   "x-methods": {
@@ -4782,6 +4861,17 @@
           }
         },
         "type": "object"
+      },
+      "params_schema": {
+        "$ref": "#/$defs/Subscription"
+      },
+      "request_template": {
+        "topics": [
+          "events",
+          "state",
+          "status"
+        ],
+        "interval_ms": 200
       }
     },
     "controller.system.status": {

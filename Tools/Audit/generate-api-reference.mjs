@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { loadProjectEnv } from "../Build/env.mjs";
 import { renderExplorer } from "./explorer/render.mjs";
 import { extractRequestShapes } from "./explorer/request-shapes.mjs";
+import { connectionGuides, subscriptionSchema } from "./explorer/websocket-contract.mjs";
 
 loadProjectEnv();
 
@@ -785,7 +786,7 @@ const openapi = {
     title: product.httpTitle,
 		version: "unversioned",
 		summary: "Unversioned living REST and JSON-RPC surface of the primary controller host.",
-    description: "Loopback is the safe default. Immediate-alpha authentication and authorization are disabled under issue #148. The built-in listener does not terminate TLS.",
+    description: "Loopback is the safe default. Immediate-alpha authentication and authorization are disabled under issue #148. The built-in listener does not terminate TLS.\n\nFor full-duplex JSON-RPC, subscriptions and pushed notifications, open the [WebSocket & events guide](protocols.html#websocket). The [JSON-RPC method catalog](rpc.html) applies to both HTTP and WebSocket. Download the [AsyncAPI contract](asyncapi.json) for channels and message schemas.",
   },
   servers: [{ url: "http://127.0.0.1:8787", description: "Default loopback primary" }],
   security: [],
@@ -975,12 +976,16 @@ const rpcSchema = {
     notification: {
       type: "object", required: ["jsonrpc", "method", "params"], additionalProperties: false,
 		properties: {
-			jsonrpc: { const: "2.0" }, method: { enum: ["controller.event", "controller.state", "controller.debug", "controller.opcode", "controller.status", "controller.error", "controller.data"] }, params: true,
+			jsonrpc: { const: "2.0" }, method: { enum: ["controller.event", "controller.state", "controller.debug", "controller.opcode", "controller.status", "controller.error", "controller.snapshot", "controller.pwm.values", "controller.data"] }, params: true,
       },
     },
   },
 	"x-methods": Object.fromEntries(methods.map(({ name, ...metadata }) => {
 		if (requestFields[name] && !name.startsWith('controller.osd.')) metadata.request_fields = requestFields[name];
+		if (name === 'controller.subscribe') {
+			metadata.params_schema = { $ref: '#/$defs/Subscription' };
+			metadata.request_template = subscriptionSchema.examples[0];
+		}
 		// Examples must not contain mutually exclusive selectors. This remains a
 		// template: owner and revision placeholders must come from a fresh snapshot.
 		if (name === 'controller.pwm.set') metadata.request_template = {
@@ -1004,6 +1009,8 @@ const rpcSchema = {
   },
 };
 
+rpcSchema.$defs.Subscription = subscriptionSchema;
+
 const asyncapi = {
   asyncapi: "3.0.0",
   info: {
@@ -1020,6 +1027,7 @@ const asyncapi = {
   channels: {
     rpc: {
       address: "/ipc",
+      description: "Raw JSON-RPC 2.0 over WebSocket text messages. Requests and notifications share the connection; live streams require controller.subscribe. The path is configurable via websocket_path in /api/ui-config.",
       messages: {
 		request: { $ref: "#/components/messages/JSONRPCRequest" }, response: { $ref: "#/components/messages/JSONRPCResponse" },
 		event: { $ref: "#/components/messages/Event" }, state: { $ref: "#/components/messages/State" }, debug: { $ref: "#/components/messages/Debug" }, opcode: { $ref: "#/components/messages/Opcode" }, status: { $ref: "#/components/messages/Status" }, error: { $ref: "#/components/messages/Error" },
@@ -1045,8 +1053,8 @@ const asyncapi = {
 	  browserTicket: { type: "httpApiKey", in: "header", name: "Sec-WebSocket-Protocol", description: "Browser clients first POST /api/session/ticket with a header credential, then offer pccontroller and pccontroller.ticket.<ticket>. The one-use ticket is Origin, peer, transport, and expiry bound; no credential appears in the URL." },
     },
     messages: {
-      JSONRPCRequest: { payload: { $ref: "./jsonrpc.schema.json#/$defs/request" } },
-      JSONRPCResponse: { payload: { oneOf: [{ $ref: "./jsonrpc.schema.json#/$defs/success" }, { $ref: "./jsonrpc.schema.json#/$defs/error" }] } },
+      JSONRPCRequest: { name: "JSON-RPC request", summary: "Client → host. One object per text message; use a unique id to correlate the reply.", payload: { $ref: "./jsonrpc.schema.json#/$defs/request" }, examples: [{ payload: { jsonrpc: "2.0", id: 1, method: "controller.subscribe", params: subscriptionSchema.examples[0] } }] },
+      JSONRPCResponse: { name: "JSON-RPC response", summary: "Host → client. Matches the request id; result and error are alternatives. Notifications may arrive before this reply.", payload: { oneOf: [{ $ref: "./jsonrpc.schema.json#/$defs/success" }, { $ref: "./jsonrpc.schema.json#/$defs/error" }] }, examples: [{ payload: { jsonrpc: "2.0", id: 3, result: { subscribed: false } } }, { payload: { jsonrpc: "2.0", id: 4, error: { code: -32602, message: 'unknown subscription topic "invalid"' } } }] },
 		Event: { payload: { type: "object", required: ["jsonrpc", "method", "params"], properties: { jsonrpc: { const: "2.0" }, method: { const: "controller.event" }, params: { type: "object", additionalProperties: true } }, examples: [{ jsonrpc: "2.0", method: "controller.event", params: { id: 42, kind: "door", state: "open", source: "board" } }] } },
 		State: { payload: { type: "object", required: ["jsonrpc", "method", "params"], properties: { jsonrpc: { const: "2.0" }, method: { const: "controller.state" }, params: { type: "object", additionalProperties: true } }, examples: [{ jsonrpc: "2.0", method: "controller.state", params: { id: 43, kind: "status_led.changed", stream: "state", source: "board" } }] } },
 		Debug: { payload: { type: "object", required: ["jsonrpc", "method", "params"], properties: { jsonrpc: { const: "2.0" }, method: { const: "controller.debug" }, params: { type: "object", additionalProperties: true } }, examples: [{ jsonrpc: "2.0", method: "controller.debug", params: { id: 44, kind: "rx", stream: "debug", source: "board" } }] } },
@@ -1056,11 +1064,22 @@ const asyncapi = {
       SocketIOPacket: { payload: { type: "string", description: "Engine.IO v4 text packet carrying subscribe, unsubscribe, message, command, or rpc events." } },
     },
   },
+  "x-connection-guides": connectionGuides,
   "x-socket-io-events": {
     incoming: ["subscribe", "unsubscribe", "message", "command", "rpc"],
 		outgoing: ["subscribed", "unsubscribed", "message.accepted", "command.response", "rpc.response", "controller.event", "controller.state", "controller.debug", "controller.opcode", "controller.status", "controller.error", "error"],
   },
 };
+
+for (const [key, method, summary] of [
+  ['snapshot', 'controller.snapshot', 'Complete snapshot sent initially for state subscriptions and after relevant activity/state changes.'],
+  ['pwmValues', 'controller.pwm.values', 'Complete cached PWM values following a pwm.changed event on the state topic, when values are available.'],
+]) {
+  asyncapi.channels.rpc.messages[key] = { $ref: `#/components/messages/${key}` };
+  asyncapi.operations.receiveRPC.messages.push({ $ref: `#/channels/rpc/messages/${key}` });
+  asyncapi.components.messages[key] = { name: method, summary, payload: { type: 'object', required: ['jsonrpc', 'method', 'params'], properties: { jsonrpc: { const: '2.0' }, method: { const: method }, params: { type: 'object', additionalProperties: true } } } };
+  asyncapi['x-socket-io-events'].outgoing.push(method);
+}
 
 const outputs = new Map([
   ["openapi.json", `${JSON.stringify(openapi, null, 2)}\n`],

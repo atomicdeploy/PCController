@@ -227,3 +227,38 @@ test('explorer includes complete protocol catalogs and source-derived JSON field
   const bootstrap=readFileSync(join(outputDirectory,'assets/scalar.js'),'utf8');
   for(const safety of ['hideTestRequestButton: true','persistAuth: false','telemetry: false']) assert.ok(bootstrap.includes(safety),safety);
 });
+
+test('WebSocket explorer exposes connection guides, resolved RPC contracts and every emitted notification', () => {
+  const events = JSON.parse(readFileSync(join(outputDirectory, 'asyncapi.json'), 'utf8'));
+  const rpc = JSON.parse(readFileSync(join(outputDirectory, 'jsonrpc.schema.json'), 'utf8'));
+  const page = readFileSync(join(outputDirectory, 'protocols.html'), 'utf8');
+  const client = readFileSync(join(outputDirectory, 'assets/catalog.js'), 'utf8');
+  for (const name of ['reference.html', 'rpc.html', 'protocols.html']) {
+    const html = readFileSync(join(outputDirectory, name), 'utf8');
+    assert.ok(html.includes('WebSocket &amp; events'), name);
+    assert.ok(html.includes('href="asyncapi.json"'), name);
+  }
+  assert.ok(page.includes('id="rpc-contract"'), 'external RPC references must resolve offline');
+  assert.ok(client.includes('x-socket-io-events'), 'Socket.IO event metadata must use the published extension key');
+  const guides = events['x-connection-guides'];
+  assert.deepEqual(guides.map(guide => guide.id), ['websocket', 'socketio']);
+  const quickstart = guides[0].sections.find(section => section.code).code;
+  for (const method of quickstart.matchAll(/method: '(controller\.[a-z.]+)'/gu)) {
+    assert.ok(rpc['x-methods'][method[1]], method[1]);
+  }
+  assert.ok(quickstart.includes('config.websocket_path'));
+  assert.ok(quickstart.includes("'wss:'"));
+  assert.ok(!quickstart.includes('auth_token'));
+  const subscription = rpc.$defs.Subscription;
+  assert.equal(rpc['x-methods']['controller.subscribe'].params_schema.$ref, '#/$defs/Subscription');
+  const source = readFileSync(join(root, 'Tools/Controller/internal/ipcjson/ipc.go'), 'utf8');
+  const fields = source.match(/type wsSubscription struct \{([\s\S]*?)\n\}/u)[1];
+  for (const match of fields.matchAll(/json:"([^",]+)/gu)) assert.ok(subscription.properties[match[1]], match[1]);
+  const notifications = new Set(Object.values(events.components.messages).map(message => message.payload?.properties?.method?.const).filter(Boolean));
+  for (const match of source.matchAll(/wsNotification\{[\s\S]*?Method:\s*"(controller\.[a-z.]+)"/gu)) {
+    assert.ok(notifications.has(match[1]), `undocumented notification ${match[1]}`);
+    assert.ok(rpc.$defs.notification.properties.method.enum.includes(match[1]), match[1]);
+    assert.ok(events['x-socket-io-events'].outgoing.includes(match[1]), match[1]);
+  }
+  assert.ok(guides[1].sections.some(section => section.code?.startsWith('42["subscribe"')));
+});

@@ -4,7 +4,7 @@
     "title": "PCController HTTP API",
     "version": "unversioned",
     "summary": "Unversioned living REST and JSON-RPC surface of the primary controller host.",
-    "description": "Loopback is the safe default. Immediate-alpha authentication and authorization are disabled under issue #148. The built-in listener does not terminate TLS."
+    "description": "Loopback is the safe default. Immediate-alpha authentication and authorization are disabled under issue #148. The built-in listener does not terminate TLS.\n\nFor full-duplex JSON-RPC, subscriptions and pushed notifications, open the [WebSocket & events guide](protocols.html#websocket). The [JSON-RPC method catalog](rpc.html) applies to both HTTP and WebSocket. Download the [AsyncAPI contract](asyncapi.json) for channels and message schemas."
   },
   "servers": [
     {

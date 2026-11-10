@@ -303,6 +303,25 @@ summary {
   color: var(--muted);
   margin: 6px 0 20px;
 }
+.related-methods {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin: 16px 0;
+}
+article table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+article th, article td {
+  text-align: left;
+  vertical-align: top;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+}
+article th { color: var(--muted); }
+article td:first-child { width: 130px; }
 .scalar-app {
   --scalar-color-accent: var(--accent);
   --scalar-font: "Segoe UI", system-ui, sans-serif;
