@@ -137,6 +137,20 @@ state/geometry checks are not visual proof of the OS transition or human Snap
 Layout acceptance; those still require checking the installed window with the
 user's Windows animation/Snap preferences enabled.
 
+Custom frame activation must not call the normal frame painter. Restoring the
+window-manager caption flags exposed themed NCUAH caption/frame draw messages
+that bypass WM_NCPAINT. These are consumed in custom/none mode, and ordinary
+WM_NCACTIVATE returns TRUE without DefWindowProc. Minimized activation retains
+the documented default-processing path with repaint suppressed. Native-titlebar
+mode is unchanged. The posted border-policy reassertion remains defensive;
+preventing a flash must not depend on that deferred work or a later repaint.
+
+`TestControllerCustomFrameOwnsActivationPaint` guards message ownership and native
+fallback. `TestControllerActivationDoesNotFlashClassicBorder` samples actual
+screen-edge pixels immediately around activation, before forcing a repaint, in
+DirectX and legacy modes and while posted cleanup is blocked. Existing native
+minimize/maximize/restore and Snap hit-testing contracts must still pass.
+
 ## Console / TUI button
 
 The GUI's Console button launches a full TUI client against its exact IPC

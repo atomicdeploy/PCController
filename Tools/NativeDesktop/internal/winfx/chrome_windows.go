@@ -187,7 +187,9 @@ func ClearWindowEdge(hwnd uintptr) error {
 //
 // Captionless resizable windows intentionally retain WS_THICKFRAME. USER32
 // can synthesize WS_EX_WINDOWEDGE from that style, so callers must ALSO
-// suppress captionless WM_NCPAINT and use WM_NCACTIVATE with lParam=-1.
+// suppress captionless WM_NCPAINT and the themed NCUAH draw messages. Custom
+// non-minimized activation returns TRUE without calling DefWindowProc; only
+// minimized activation delegates with lParam=-1 for OS icon bookkeeping.
 // Clearing the bit alone does not suppress the classic GDI frame. This helper
 // separately suppresses Windows 11's DWM-drawn one-pixel outline. DWM may
 // recreate that non-client visual when activation, showing, or a frame change

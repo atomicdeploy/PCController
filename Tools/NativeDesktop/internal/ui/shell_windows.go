@@ -72,6 +72,8 @@ const (
 	wmNCCalcSize                  = 0x0083
 	wmNCHitTest                   = 0x0084
 	wmNCActivate                  = 0x0086
+	wmNCUAHDrawCaption            = 0x00AE // themed non-client painting bypasses WM_NCPAINT
+	wmNCUAHDrawFrame              = 0x00AF
 	wmDisplayChange               = 0x007E
 	wmContextMenu                 = 0x007B
 	wmSizing                      = 0x0214
@@ -1946,7 +1948,7 @@ func (s *Shell) windowMessage(hwnd, message, wParam, lParam uintptr) (uintptr, b
 			return 0, true
 		}
 		return 0, false
-	case win.WM_NCPAINT:
+	case win.WM_NCPAINT, wmNCUAHDrawCaption, wmNCUAHDrawFrame:
 		if effectiveTitleBarMode(s.Config().UI) != config.TitleBarNative {
 			// WS_THICKFRAME is retained for native resizing. USER32 can
 			// synthesize WS_EX_WINDOWEDGE from it even after SetWindowLong
@@ -2158,10 +2160,19 @@ func (s *Shell) windowMessage(hwnd, message, wParam, lParam uintptr) (uintptr, b
 	case wmNCActivate:
 		s.scheduleWindowChromeReassert()
 		if effectiveTitleBarMode(s.Config().UI) != config.TitleBarNative {
-			// Preserve native activation bookkeeping without repainting the
-			// non-client frame. The documented lParam=-1 contract prevents
-			// DefWindowProc from drawing a second captionless border.
-			return win.DefWindowProc(win.HWND(hwnd), uint32(message), wParam, ^uintptr(0)), true
+			if win.IsIconic(win.HWND(hwnd)) {
+				// Windows owns minimized/icon activation bookkeeping. Avoid its
+				// frame repaint while retaining normal minimize/restore behavior.
+				return win.DefWindowProc(win.HWND(hwnd), uint32(message), wParam, ^uintptr(0)), true
+			}
+			// WS_CAPTION is retained for OS transitions/Snap, not for drawing.
+			// DefWindowProc can paint a classic/themed caption synchronously on
+			// activation, before a posted cleanup or client repaint can run.
+			// TRUE allows the focus transition; our compositor owns all pixels.
+			if s.surface != nil {
+				s.surface.Invalidate()
+			}
+			return 1, true
 		}
 		return 0, false
 	case win.WM_KILLFOCUS:
