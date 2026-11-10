@@ -71,6 +71,8 @@ bool readSensorInteger(const std::string &path, int64_t &value) {
   value = parsed;
   return true;
 }
+bool temperatureSourceMapped(size_t index) { return !sources.temperature.at(index).empty(); }
+bool powerSourceMapped() { return !sources.voltage.empty(); }
 void configureSensorSources(const SensorSources &value) {
   if (value.voltage.empty() != value.current.empty())
     throw std::invalid_argument("native power mapping requires both --sensor-voltage and --sensor-current; unknown current is not zero");

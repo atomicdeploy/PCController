@@ -37,6 +37,7 @@ uint8_t i2cEnd();
 uint8_t i2cRead(uint8_t address, uint8_t *values, uint8_t length);
 void showStrip(const uint8_t *values, uint16_t length);
 inline std::array<uint8_t,64> modes{}, levels{};
+inline std::array<int8_t,64> inputLevels=[] { std::array<int8_t,64> values{}; values.fill(-1); return values; }();
 inline std::array<uint8_t,8> portInputs{255,255,255,255,255,255,255,255}, portOutputs{}, portModes{};
 inline uint8_t shiftInput=0xFF, shiftOutput=0xFF;
 inline bool tm1637Present=true, pwmPresent=true;
@@ -60,7 +61,8 @@ inline void digitalWrite(uint8_t pin,uint8_t level) { NativeHal::levels.at(pin)=
 inline int digitalRead(uint8_t pin) {
   // Device-owned ACK slot, not a fabricated sensor measurement.
   if (pin==PIN_PB3 && NativeHal::modes.at(pin)==INPUT) return NativeHal::tm1637Present ? LOW : HIGH;
-  return NativeHal::modes.at(pin)==OUTPUT ? NativeHal::levels.at(pin) : HIGH;
+  return NativeHal::modes.at(pin)==OUTPUT ? NativeHal::levels.at(pin)
+    : (NativeHal::inputLevels.at(pin)<0 ? HIGH : NativeHal::inputLevels.at(pin));
 }
 inline void shiftOut(uint8_t,uint8_t,uint8_t,uint8_t value) { NativeHal::shiftOutput=value; }
 inline uint8_t shiftIn(uint8_t,uint8_t,uint8_t) { return NativeHal::shiftInput; }

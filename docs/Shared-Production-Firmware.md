@@ -37,7 +37,7 @@ through the production owner and retain the richer backend/profile where useful.
 | Native menu directory/order always present while 328P gates off | Existing production rich menu code retained as named expanded profiles | All profiles compile/test; optional hardware/EEPROM commissioning remains separate |
 | Invented INA/temperature defaults, unconditional I2C successes | Removed false sensor defaults; explicit bounded DS fixtures; unknown devices NACK and partial reads fail | Unavailable-sentinel/CRC/I2C tests; live host providers are future commissioned adapters |
 | Own soft reset that leaves unrelated C++ state alive | Production SafeReset cue/all-off followed by actual process restart | TCP reconnect, persistent count/cause, RAM-only restart image; C ABI returns RESET_REQUIRED |
-| Relay stdout/demo use | Thin transport observes production relay outputs; ON:n/OFF:n retained | Real TCP conformance; verbose PWM logging opt-in to limit write churn |
+| Relay stdout/demo use | Thin transport observes production relay outputs; Rn:ON/OFF by default, former ON:n/OFF:n retained through --output-format legacy | Real TCP conformance; verbose PWM logging opt-in to limit write churn; see [native adapters](NATIVE-PERIPHERAL-BRIDGE.md) |
 
 Historical tests that asserted invented sensor/default/brightness/menu behavior
 were not used to dictate the constrained hardware contract. Valid scenarios now

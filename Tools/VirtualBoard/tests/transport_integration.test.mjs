@@ -1,4 +1,4 @@
-import { spawn, spawnSync, execFileSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { createConnection, createServer } from 'node:net'
 import { mkdir, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises'
 import { tmpdir, homedir } from 'node:os'
@@ -55,7 +55,7 @@ const sensorState = await mkdtemp(join(sensorRoot, 'conformance-'))
 const children = [], sockets = []
 const pidFile = join(state, 'board.pid')
 function start(args, argv0 = binary) {
-  const child = spawn(binary, args, { argv0, stdio: ['pipe', 'pipe', 'pipe'] }); children.push(child)
+  const child = spawn(binary, ['--no-host-peripherals',...args], { argv0, stdio: ['pipe', 'pipe', 'pipe'] }); children.push(child)
   let diagnostics = ''; child.stderr.on('data', chunk => { diagnostics += chunk })
   child.on('error', error => { diagnostics += error.message })
   child.diagnostics = () => diagnostics
@@ -167,7 +167,7 @@ try {
   socket.write(encode(2, 55)); const reboot = await receive(f => f.opcode === 144 && f.sequence === 55)
   assert.equal(reboot.payload[43], 8); assert.equal(reboot.payload.readUInt32LE(44), before.payload.readUInt32LE(44) + 1)
   assert.equal(reboot.payload[28], 0, 'safe reset must clear and persist relay outputs')
-  assert.match(outputLog, /ON:5/); assert.match(outputLog, /OFF:5/)
+  assert.match(outputLog, /R5:ON/); assert.match(outputLog, /R5:OFF/)
   console.log('production stdio/TCP parity, fragmented reconnect, EEPROM ownership/persistence and real process reset passed')
 } finally {
   for (const socket of sockets) socket.destroy()
@@ -177,11 +177,16 @@ try {
   try {
     const pid = Number(await readFile(pidFile, 'utf8'))
     assert(Number.isSafeInteger(pid) && pid > 0)
-    if (process.platform === 'win32') execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' })
-    else process.kill(pid, 'SIGTERM')
+    // Kill only this fixture's exact restarted PID. A taskkill process-tree
+    // traversal can hang on a busy Windows host even after all assertions pass.
+    process.kill(pid, 'SIGTERM')
+    for(let attempt=0;attempt<30;attempt++) {
+      try { process.kill(pid,0) } catch { break }
+      await new Promise(resolve=>setTimeout(resolve,50))
+    }
   } catch {}
   await new Promise(resolve => setTimeout(resolve, 200))
-  await rm(state, { recursive: true, force: true })
+  await rm(state, { recursive: true, force: true, maxRetries:8, retryDelay:100 })
   assert(sensorState.startsWith(sensorRoot + (process.platform === 'win32' ? '\\' : '/')))
   await rm(sensorState, { recursive: true, force: true })
 }

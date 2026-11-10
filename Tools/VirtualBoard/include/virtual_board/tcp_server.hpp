@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cstdint>
 #include <string>
+#include <functional>
 
 namespace pccontroller::virtual_board {
 
@@ -13,6 +14,9 @@ struct TcpServerOptions {
   std::uint16_t port = 8765;
   bool quiet = false;
   bool logPwm = false; // Procedural status LEDs must not flood disk-backed logs.
+  bool logPeripherals = false;
+  bool legacyOutput = false;
+  std::function<void(const OutputSnapshot &)> observe;
 };
 
 void runTcpServer(VirtualBoard &board, const TcpServerOptions &options,

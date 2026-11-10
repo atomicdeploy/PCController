@@ -84,8 +84,8 @@ async function localBuzzerEvent(endpoint, afterID, frequency) {
 try {
   const [boardPortA, boardPortB, hostPortA, hostPortB] = await Promise.all(Array.from({ length: 4 }, unusedPort))
   endpointA = `http://127.0.0.1:${hostPortA}`; endpointB = `http://127.0.0.1:${hostPortB}`
-  const boardA = launch('firmware-a', firmware, ['--bind', '127.0.0.1', '--port', String(boardPortA), '--memory'])
-  const boardB = launch('firmware-b', firmware, ['--bind', '127.0.0.1', '--port', String(boardPortB), '--memory'])
+  const boardA = launch('firmware-a', firmware, ['--bind', '127.0.0.1', '--port', String(boardPortA), '--memory', '--no-host-peripherals'])
+  const boardB = launch('firmware-b', firmware, ['--bind', '127.0.0.1', '--port', String(boardPortB), '--memory', '--no-host-peripherals'])
   boardA.stdin.write('door closed\n'); boardB.stdin.write('door closed\n')
   for (const [name, hostPort, boardPort, coordinatorSide] of [['a', hostPortA, boardPortA, true], ['b', hostPortB, boardPortB, false]]) {
     const stateRoot = join(root, name); await mkdir(stateRoot)
@@ -138,9 +138,10 @@ try {
   await waitValue(endpointB, 'relay.5', value => value?.active === true)
   await rpc(endpointB, 'controller.command.execute', { command: 'relay 5 off' })
   await waitValue(endpointA, 'relay.5', value => value?.active === false)
-  assert.match(outputs.get('firmware-a'), /ON:5/)
-  assert.match(outputs.get('firmware-b'), /ON:5/)
-  console.log('PASS full-duplex general relay + production stdout ON:5/OFF:5')
+  await eventually('both observed stdout relay edges', () => ['firmware-a','firmware-b'].every(name => /R5:ON/.test(outputs.get(name)) && /R5:OFF/.test(outputs.get(name))))
+  assert.match(outputs.get('firmware-a'), /R5:ON/)
+  assert.match(outputs.get('firmware-b'), /R5:ON/)
+  console.log('PASS full-duplex general relay + production stdout R5:ON/R5:OFF')
 
   await rpc(endpointA, 'controller.menu.page', { page: '1' })
   await waitValue(endpointB, 'menu', value => value?.page === 1)

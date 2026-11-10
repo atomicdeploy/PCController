@@ -74,14 +74,22 @@ RAM-only EEPROM survives protocol reset via an explicit restart image, without
 SSD writes. Process reset clears all firmware globals/function statics, not just
 calling `setup()` again. Persistent reset cause/count come from shared firmware.
 
-TCP mode prints actual relay changes as `ON:n` / `OFF:n` on stdout, compatible
-with simple Pealayer/demo log consumers. `--quiet` disables these and connection
-messages. `--log-pwm` explicitly enables verbose PWM logs; procedural status LED
+TCP mode prints observed relay changes as `Rn:ON` / `Rn:OFF` on stdout.
+`--output-format legacy` retains `ON:n` / `OFF:n` for old diagnostic consumers.
+`--quiet` disables these and connection messages. `--log-pwm` explicitly enables
+`Pn:0..4095` logs; procedural status LED
 changes do not flood default disk-backed logs. No log file is created by default.
 
 `--stdio` runs the same firmware over binary stdin/stdout; diagnostics go to
 stderr. It never intermixes relay text with binary frames. `--pid-file FILE` is an
 explicit process-management artifact useful for tracing Windows process reset.
+
+The shared firmware now has a host-peripheral adapter: dedicated PC speaker and
+Raspberry Pi PCA9685 I2C default to `auto`; GPIO, keyboard LEDs, optical trays,
+parallel-port data lines and OpenRGB strip mappings require explicit assignment.
+Use `--list-peripherals` for a read-only candidate inventory. See
+[Native peripheral bridge](../../docs/NATIVE-PERIPHERAL-BRIDGE.md) for the full
+format, input grammar, options, ownership, safety and acceptance boundaries.
 
 ## Truthful inputs and live values
 
@@ -90,8 +98,8 @@ There is no electrical waveform, physical motion or AVR interrupt-fidelity claim
 INA219 and DS18B20 values are unavailable by default, not synthetic 12 V/25 C.
 CPU temperature is **not** mislabeled as LED/BT temperature. Native HELLO feature
 `0x80` marks mapped/fixture inputs; the host supplies renamable Native sensor
-defaults without overwriting operator/profile titles. A future commissioned
-Linux/Raspberry Pi GPIO/I2C/sensor adapter can use this same production core.
+defaults without overwriting operator/profile titles. Explicit host peripheral
+adapters use this same production core; the native build alone is not wiring proof.
 The existing Linux ARM64 build is the no-hardware/demo adapter, not Pi wiring proof.
 
 ### Pealayer development without hardware

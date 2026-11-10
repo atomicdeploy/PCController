@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <string>
 #include <thread>
+#include "virtual_board/host_i2c.hpp"
 #ifdef _WIN32
 #define NOUSER
 #define WIN32_LEAN_AND_MEAN
@@ -36,14 +37,16 @@ void advance(uint64_t us) {
   else { const auto until=std::chrono::steady_clock::now()+std::chrono::microseconds(us); while(std::chrono::steady_clock::now()<until) {} }
 }
 [[noreturn]] void requestReset() { throw ResetRequested{}; }
-uint8_t i2cBegin(uint8_t a) { address=a; firstByte=true; return a==0x41 && pwmPresent ? 0 : 2; }
+uint8_t i2cBegin(uint8_t a) { if(hostI2cEnabled()) return hostI2cBegin(a); address=a; firstByte=true; return a==0x41 && pwmPresent ? 0 : 2; }
 bool i2cWrite(uint8_t v) {
+  if(hostI2cEnabled()) return hostI2cWrite(v);
   if(address!=0x41 || !pwmPresent) return false;
   if(firstByte) { cursor=v; firstByte=false; } else pwmRegisters[cursor++]=v;
   return true;
 }
-uint8_t i2cEnd() { return address==0x41 && pwmPresent ? 0 : 2; }
+uint8_t i2cEnd() { if(hostI2cEnabled()) return hostI2cEnd(); return address==0x41 && pwmPresent ? 0 : 2; }
 uint8_t i2cRead(uint8_t a,uint8_t *v,uint8_t n) {
+  if(hostI2cEnabled()) return hostI2cRead(a,v,n);
   if(a!=0x41 || !pwmPresent) return 0;
   for(uint8_t i=0;i<n;++i) v[i]=pwmRegisters[cursor++];
   return n;
