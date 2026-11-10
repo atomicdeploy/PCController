@@ -255,6 +255,7 @@ func TestNativeConsolePackagedTUI(t *testing.T) {
 		return process, err
 	}
 	var ownedWindow uintptr
+	var ownedPID uint32
 	t.Cleanup(func() {
 		if ownedWindow != 0 {
 			windows.NewLazySystemDLL("user32.dll").NewProc("PostMessageW").Call(ownedWindow, 0x0010, 0, 0)
@@ -268,13 +269,28 @@ func TestNativeConsolePackagedTUI(t *testing.T) {
 	if err := console.toggle(); err != nil {
 		t.Fatal(err)
 	}
+	// Windows may attribute ConsoleWindowClass to its console client rather
+	// than conhost. Admit only this freshly created host and its exact child.
+	ownedProcesses := map[uint32]bool{uint32(process.Pid): true}
+	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := windows.ProcessEntry32{Size: uint32(unsafe.Sizeof(windows.ProcessEntry32{}))}
+	for err := windows.Process32First(snapshot, &entry); err == nil; err = windows.Process32Next(snapshot, &entry) {
+		if entry.ParentProcessID == uint32(process.Pid) && strings.EqualFold(windows.UTF16ToString(entry.ExeFile[:]), filepath.Base(executable)) {
+			ownedProcesses[entry.ProcessID] = true
+		}
+	}
+	windows.CloseHandle(snapshot)
 	user32 := windows.NewLazySystemDLL("user32.dll")
 	callback := syscall.NewCallback(func(hwnd, unused uintptr) uintptr {
 		var pid uint32
 		user32.NewProc("GetWindowThreadProcessId").Call(hwnd, uintptr(unsafe.Pointer(&pid)))
 		visible, _, _ := user32.NewProc("IsWindowVisible").Call(hwnd)
-		if int(pid) == process.Pid && visible != 0 {
+		if ownedProcesses[pid] && visible != 0 {
 			ownedWindow = hwnd
+			ownedPID = pid
 			return 0
 		}
 		return 1
@@ -290,7 +306,7 @@ func TestNativeConsolePackagedTUI(t *testing.T) {
 	case <-time.After(3 * time.Second):
 	}
 	if tool, screenshot := os.Getenv("PCCONTROLLER_DESKTOP_CAPTURE_TOOL"), os.Getenv("PCCONTROLLER_CONSOLE_SMOKE_SCREENSHOT"); tool != "" && screenshot != "" {
-		if output, err := exec.Command(tool, strconv.Itoa(process.Pid), screenshot, "PCController", "print", "0").CombinedOutput(); err != nil {
+		if output, err := exec.Command(tool, strconv.Itoa(int(ownedPID)), screenshot, "PCController", "print", "0").CombinedOutput(); err != nil {
 			t.Fatalf("capture: %v: %s", err, output)
 		}
 	}
