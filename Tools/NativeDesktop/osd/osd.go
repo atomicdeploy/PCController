@@ -14,6 +14,10 @@ import (
 
 var ErrUnsupported = errors.New("desktop OSD requires an interactive Windows session")
 
+// TaskbarOwnerProperty is independent of the legacy WM_COPYDATA primary marker:
+// controller-backed GUI windows deliberately do not own that legacy IPC route.
+const TaskbarOwnerProperty = "PCControllerDesktop.TaskbarOwner.{66F0C709-6E91-45BE-9013-5A96219E6D3D}"
+
 type Action struct {
 	ID    string `json:"id,omitempty"`
 	Label string `json:"label"`
@@ -21,37 +25,50 @@ type Action struct {
 }
 
 type Request struct {
-	ID           string   `json:"id,omitempty"`
-	Title        string   `json:"title,omitempty"`
-	Text         string   `json:"text"`
-	Icon         string   `json:"icon,omitempty"`
-	Severity     string   `json:"severity,omitempty"`
-	DurationMS   int      `json:"duration_ms,omitempty"`
-	Position     string   `json:"position,omitempty"`
-	Theme        string   `json:"theme,omitempty"`
-	Behavior     string   `json:"behavior,omitempty"`
-	Background   string   `json:"background,omitempty"`
-	ReduceMotion bool     `json:"reduce_motion,omitempty"`
-	Actions      []Action `json:"actions,omitempty"`
+	ID           string `json:"id,omitempty"`
+	Title        string `json:"title,omitempty"`
+	Text         string `json:"text"`
+	Icon         string `json:"icon,omitempty"`
+	Severity     string `json:"severity,omitempty"`
+	DurationMS   int    `json:"duration_ms,omitempty"`
+	Position     string `json:"position,omitempty"`
+	Theme        string `json:"theme,omitempty"`
+	Behavior     string `json:"behavior,omitempty"`
+	Background   string `json:"background,omitempty"`
+	Sound        string `json:"sound,omitempty"`
+	FlashTaskbar bool   `json:"flash_taskbar,omitempty"`
+	// SoundSuppressed is host policy, never accepted from remote callers.
+	SoundSuppressed bool     `json:"-"`
+	ReduceMotion    bool     `json:"reduce_motion,omitempty"`
+	Actions         []Action `json:"actions,omitempty"`
 }
 
 type Status struct {
-	Supported    bool      `json:"supported"`
-	Active       bool      `json:"active"`
-	ID           string    `json:"id,omitempty"`
-	ShownAt      time.Time `json:"shown_at,omitempty"`
-	ExpiresAt    time.Time `json:"expires_at,omitempty"`
-	Accepted     uint64    `json:"accepted"`
-	LastAction   string    `json:"last_action,omitempty"`
-	LastActionID string    `json:"last_action_id,omitempty"`
-	Dismissal    string    `json:"dismissal,omitempty"`
-	LastError    string    `json:"last_error,omitempty"`
-	ActiveCount  int       `json:"active_count,omitempty"`
-	Items        []Status  `json:"items,omitempty"`
-	DPI          int       `json:"dpi,omitempty"`
-	PixelWidth   int       `json:"pixel_width,omitempty"`
-	PixelHeight  int       `json:"pixel_height,omitempty"`
-	Background   string    `json:"background,omitempty"`
+	Supported    bool             `json:"supported"`
+	Active       bool             `json:"active"`
+	ID           string           `json:"id,omitempty"`
+	ShownAt      time.Time        `json:"shown_at,omitempty"`
+	ExpiresAt    time.Time        `json:"expires_at,omitempty"`
+	Accepted     uint64           `json:"accepted"`
+	LastAction   string           `json:"last_action,omitempty"`
+	LastActionID string           `json:"last_action_id,omitempty"`
+	Dismissal    string           `json:"dismissal,omitempty"`
+	LastError    string           `json:"last_error,omitempty"`
+	ActiveCount  int              `json:"active_count,omitempty"`
+	Items        []Status         `json:"items,omitempty"`
+	DPI          int              `json:"dpi,omitempty"`
+	PixelWidth   int              `json:"pixel_width,omitempty"`
+	PixelHeight  int              `json:"pixel_height,omitempty"`
+	Background   string           `json:"background,omitempty"`
+	Attention    *AttentionStatus `json:"attention,omitempty"`
+}
+
+// AttentionStatus reports OS requests, not proof that a person heard or saw them.
+// Attention failures never invalidate an already displayed overlay.
+type AttentionStatus struct {
+	Sound   string `json:"sound,omitempty"`
+	Taskbar string `json:"taskbar,omitempty"`
+	Error   string `json:"error,omitempty"`
 }
 
 type Presenter interface {
@@ -66,6 +83,8 @@ type Options struct {
 	Icon func(string) (image.Image, error)
 	// Activate runs only after an explicit click; the caller owns URI admission.
 	Activate func(string) error
+	// Attention runs once, after successful admission, never during repaint/reflow.
+	Attention func(Request) AttentionStatus
 }
 
 func New(options Options) Presenter { return newPresenter(options) }
@@ -126,6 +145,11 @@ func Normalize(r Request) (Request, error) {
 	}
 	if r.Theme == "" {
 		r.Theme = "system"
+	}
+	switch r.Sound {
+	case "", "none", "select", "success", "warning", "error", "connect", "disconnect":
+	default:
+		return r, errors.New("OSD sound must be none, select, success, warning, error, connect or disconnect")
 	}
 	switch r.Theme {
 	case "system", "light", "dark":

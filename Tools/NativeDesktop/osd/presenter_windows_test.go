@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unsafe"
 )
 
 func TestOSDLiveWindowUsesNativeDPI(t *testing.T) {
@@ -36,6 +37,18 @@ func TestOSDLiveWindowUsesNativeDPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := win.HWND(p.hwnd.Load())
+	if err := RegisterTaskbarWindow(uintptr(h)); err != nil {
+		t.Fatal(err)
+	}
+	marker, _, _ := osdUser.NewProc("GetPropW").Call(uintptr(h), uintptr(unsafe.Pointer(taskbarOwnerProperty)))
+	if marker == 0 {
+		t.Fatal("taskbar owner not registered")
+	}
+	UnregisterTaskbarWindow(uintptr(h))
+	marker, _, _ = osdUser.NewProc("GetPropW").Call(uintptr(h), uintptr(unsafe.Pointer(taskbarOwnerProperty)))
+	if marker != 0 {
+		t.Fatal("taskbar owner not removed")
+	}
 	windowContext, _, _ := getWindowContext.Call(uintptr(h))
 	awareness, _, _ := getAwareness.Call(windowContext)
 	dpi := win.GetDpiForWindow(h)
@@ -61,6 +74,9 @@ func TestOSDLiveWindowUsesNativeDPI(t *testing.T) {
 }
 
 func TestOSDDPIContextIsScopedAndRestored(t *testing.T) {
+	if err := RegisterTaskbarWindow(0); err == nil {
+		t.Fatal("invalid taskbar owner accepted")
+	}
 	getContext := osdUser.NewProc("GetThreadDpiAwarenessContext")
 	getAwareness := osdUser.NewProc("GetAwarenessFromDpiAwarenessContext")
 	if getContext.Find() != nil || getAwareness.Find() != nil {

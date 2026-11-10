@@ -42,6 +42,7 @@ import (
 	"pccontroller.local/desktop/internal/vector"
 	"pccontroller.local/desktop/internal/winfx"
 	"pccontroller.local/desktop/internal/wmipc"
+	"pccontroller.local/desktop/osd"
 	"pccontroller.local/desktop/presentation"
 )
 
@@ -562,6 +563,7 @@ func (s *Shell) Close() {
 		_ = winfx.RemoveWindowSubclass(uintptr(s.surface.Handle()), surfaceSubclassID)
 	}
 	wmipc.UnregisterPrimary(s.HWND())
+	osd.UnregisterTaskbarWindow(s.HWND())
 	s.dispose()
 }
 
@@ -1339,6 +1341,9 @@ func (s *Shell) installEvents() {
 	)
 	if err := winfx.ReassertWindowChrome(s.HWND(), s.nativeTitleBar); err != nil {
 		s.logf("restore main window frame policy: %v", err)
+	}
+	if err := osd.RegisterTaskbarWindow(s.HWND()); err != nil {
+		s.logf("OSD taskbar registration: %v", err)
 	}
 	if s.controller == nil {
 		if err := wmipc.RegisterPrimary(s.HWND()); err != nil {

@@ -198,6 +198,7 @@ type Notifications struct {
 	OSDPosition      string               `json:"osd_position,omitempty"`
 	OSDBehavior      string               `json:"osd_behavior,omitempty"`
 	OSDBackground    string               `json:"osd_background,omitempty"`
+	OSDFlashTaskbar  bool                 `json:"osd_flash_taskbar,omitempty"`
 	Enabled          bool                 `json:"enabled"`
 	DoorRunningBeep  bool                 `json:"door_running_beep"`
 	DoorRunningToast bool                 `json:"door_running_toast"`

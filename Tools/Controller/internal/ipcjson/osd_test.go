@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/hostui"
 )
 
@@ -19,13 +20,41 @@ type osdFixture struct {
 	request   hostui.OSDRequest
 }
 
+func TestOSDSoundAndTaskbarUseHostPolicyAndStrictAdmission(t *testing.T) {
+	config := appconfig.Defaults()
+	fake := &osdFixture{}
+	service := &Service{DesktopOSD: fake, HostConfig: func() appconfig.Config { return config }}
+	for _, tc := range []struct {
+		muted      bool
+		volume     float64
+		suppressed bool
+	}{
+		{false, 1, false}, {true, 1, true}, {false, 0, true},
+	} {
+		config.UI.Appearance.AudioMuted, config.UI.Appearance.AudioVolume = tc.muted, tc.volume
+		_, err := service.desktopOSDCall(context.Background(), Request{Method: "controller.osd.show", Params: json.RawMessage(`{"text":"Ready","sound":"success","flash_taskbar":true}`)})
+		if err != nil || fake.request.Sound != "success" || !fake.request.FlashTaskbar || fake.request.SoundSuppressed != tc.suppressed {
+			t.Fatal(fake.request, err)
+		}
+	}
+	before := fake.shown
+	for _, raw := range []string{`{"text":"x","sound":"file:///x.wav"}`, `{"text":"x","sound":"warning","SoundSuppressed":false}`} {
+		if _, err := service.desktopOSDCall(context.Background(), Request{Method: "controller.osd.show", Params: json.RawMessage(raw)}); err == nil {
+			t.Fatal("accepted invalid attention", raw)
+		}
+	}
+	if fake.shown != before {
+		t.Fatal("invalid attention reached presenter")
+	}
+}
+
 func TestOSDRPCAcrossNDJSONAndWebSocket(t *testing.T) {
 	service, client := testAuthenticatedService(t)
 	defer client.Shutdown()
 	service.AuthorizationDisabled = true
 	fake := &osdFixture{}
 	service.DesktopOSD = fake
-	request := `{"jsonrpc":"2.0","id":1,"method":"controller.osd.show","params":{"id":"transport-fixture","text":"Ready"}}`
+	request := `{"jsonrpc":"2.0","id":1,"method":"controller.osd.show","params":{"id":"transport-fixture","text":"Ready","sound":"success","flash_taskbar":true}}`
 	var raw bytes.Buffer
 	if err := serveStreams(context.Background(), strings.NewReader(request+"\n"), &raw, service, Access{Transport: "ipc"}); err != nil {
 		t.Fatal(err)
@@ -52,6 +81,9 @@ func TestOSDRPCAcrossNDJSONAndWebSocket(t *testing.T) {
 	}
 	if err = json.Unmarshal(payload, &response); err != nil || response.Error != nil || fake.shown != 2 {
 		t.Fatalf("WebSocket: %s (%v)", payload, err)
+	}
+	if fake.request.Sound != "success" || !fake.request.FlashTaskbar {
+		t.Fatal("attention lost across transport", fake.request)
 	}
 }
 

@@ -23,19 +23,35 @@ func TestOSDLiveStackAndReplaceKeepIndependentReceipts(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer restore()
-	m := newPresenter(Options{}).(*manager)
+	attentionCalls := 0
+	m := newPresenter(Options{Attention: func(r Request) AttentionStatus {
+		attentionCalls++
+		if r.Sound != "success" || !r.FlashTaskbar {
+			t.Fatal(r)
+		}
+		return AttentionStatus{Sound: "requested", Taskbar: "no-window"}
+	}}).(*manager)
 	defer m.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	before := win.GetForegroundWindow()
 	for _, id := range []string{"stack-one", "stack-two"} {
-		if _, err = m.Show(ctx, Request{ID: id, Title: "Stack verification", Text: "Source-owned overlay", Behavior: "stack", DurationMS: 4000}); err != nil {
+		if _, err = m.Show(ctx, Request{ID: id, Title: "Stack verification", Text: "Source-owned overlay", Behavior: "stack", DurationMS: 4000, Sound: "success", FlashTaskbar: true}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	status := m.Status()
 	if status.ActiveCount != 2 || len(status.Items) != 2 {
 		t.Fatal(status)
+	}
+	if attentionCalls != 2 || status.Attention == nil || status.Attention.Sound != "requested" {
+		t.Fatal(attentionCalls, status)
+	}
+	if _, err = m.Show(ctx, Request{Text: "invalid", Sound: "file:///unsafe.wav"}); err == nil {
+		t.Fatal("invalid sound accepted")
+	}
+	if attentionCalls != 2 {
+		t.Fatal("failed admission replayed attention")
 	}
 	m.mu.Lock()
 	var rects [2]win.RECT
@@ -56,7 +72,7 @@ func TestOSDLiveStackAndReplaceKeepIndependentReceipts(t *testing.T) {
 	for m.Status().ActiveCount != 1 && time.Now().Before(deadline) {
 		time.Sleep(20 * time.Millisecond)
 	}
-	if s, ok := m.Result("stack-one"); !ok || s.Active || s.Dismissal != "dismissed" {
+	if s, ok := m.Result("stack-one"); !ok || s.Active || s.Dismissal != "dismissed" || s.Attention == nil || s.Attention.Taskbar != "no-window" {
 		t.Fatal(s, ok)
 	}
 	if _, err = m.Show(ctx, Request{ID: "replacement", Text: "Replacement", DurationMS: 1000}); err != nil {
@@ -67,6 +83,9 @@ func TestOSDLiveStackAndReplaceKeepIndependentReceipts(t *testing.T) {
 	}
 	if s, ok := m.Result("stack-two"); !ok || s.Active || s.Dismissal != "replaced" {
 		t.Fatal(s, ok)
+	}
+	if attentionCalls != 2 {
+		t.Fatal("status, layout, dismissal or silent replacement replayed attention")
 	}
 }
 

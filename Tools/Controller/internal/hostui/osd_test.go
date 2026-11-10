@@ -88,6 +88,8 @@ func TestOSDMultilineAndScriptChoices(t *testing.T) {
 		t.Fatal(r, err)
 	}
 	for _, request := range []OSDRequest{
+		{Text: "x", Sound: "C:/untrusted.mp3"},
+		{Text: "x", Sound: "https://untrusted/sound.wav"},
 		{Text: "x", Behavior: "unlimited"},
 		{Text: "x", Background: "file:///x"},
 		{Text: strings.Repeat("line\n", 6) + "seventh"},
