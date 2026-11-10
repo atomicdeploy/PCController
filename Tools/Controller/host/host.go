@@ -471,6 +471,10 @@ func (host *Host) start(parent context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if host.options.EnableIntegrations {
+		mqttDone := service.StartMQTT(ctx)
+		host.serveWait.Go(func() { <-mqttDone })
+	}
 	return nil
 }
 

@@ -4,6 +4,8 @@ PCController can connect to an MQTT 3.1.1 broker from the primary host. The
 integration is off by default and does not enable the LAN HTTP or IPC listener.
 An unattached board can publish host availability, but cannot accept board
 commands. There is no MQTT broker embedded in PCController.
+Desktop, terminal and headless `ipc serve` owners use the same integration.
+An embedded Go/C host also needs its host-integrations option enabled.
 
 ## Enable it
 

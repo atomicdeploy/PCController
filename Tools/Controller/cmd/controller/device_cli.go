@@ -745,6 +745,9 @@ func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 		}
 		defer releaseDiscovery.Close()
 		service.ReleaseDiscovery = releaseDiscovery
+		mqttCtx, stopMQTT := context.WithCancel(ctx)
+		mqttDone := service.StartMQTT(mqttCtx)
+		defer func() { stopMQTT(); <-mqttDone }()
 		if *stdio {
 			return ipcjson.ServeStreams(ctx, os.Stdin, stdout, service)
 		}
