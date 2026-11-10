@@ -65,6 +65,7 @@ type presenter struct {
 	err      error
 	// Everything below belongs exclusively to the locked window thread.
 	rendering                *rendering
+	text                     textRasterizer
 	request                  Request
 	started                  time.Time
 	duration                 time.Duration
@@ -116,9 +117,17 @@ func (p *presenter) rememberLocked(reason string) {
 	if !p.state.Active {
 		return
 	}
+	p.rememberStatusLocked(p.state, reason)
 	p.state.Active = false
 	p.state.Dismissal = reason
-	p.history = append(p.history, p.state)
+}
+
+func (p *presenter) rememberStatusLocked(state Status, reason string) {
+	if !state.Active {
+		return
+	}
+	state.Active, state.Dismissal = false, reason
+	p.history = append(p.history, state)
 	if len(p.history) > 64 {
 		p.history = p.history[len(p.history)-64:]
 	}
@@ -206,6 +215,12 @@ func (p *presenter) loop() {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	defer close(p.done)
+	defer func() {
+		if p.text != nil {
+			p.text.close()
+			p.text = nil
+		}
+	}()
 	restoreDPI, err := enterNativeDPI()
 	if err != nil {
 		p.mu.Lock()
@@ -324,7 +339,21 @@ func (p *presenter) configure(r Request) error {
 		renderRequest.Background = "current"
 	}
 	effective := renderRequest.Background
-	next, err := prepare(renderRequest, dpi, int(work.Right-work.Left), icon, dark)
+	if p.text == nil {
+		p.text, _ = newDirectWriteRasterizer()
+	}
+	var next *rendering
+	if p.text != nil {
+		next, err = preparePreferredText(renderRequest, dpi, int(work.Right-work.Left), icon, dark, p.text)
+		if err != nil || next.textBackend != p.text.name() {
+			// A failed target is not reused. This presentation remains entirely
+			// GDI; the next request may initialize a fresh Direct2D target.
+			p.text.close()
+			p.text = nil
+		}
+	} else {
+		next, err = prepareWithText(renderRequest, dpi, int(work.Right-work.Left), icon, dark, gdiRasterizer{})
+	}
 	if err != nil {
 		return err
 	}
@@ -379,6 +408,7 @@ func (p *presenter) configure(r Request) error {
 	p.state.PixelWidth = next.base.Bounds().Dx()
 	p.state.PixelHeight = next.base.Bounds().Dy()
 	p.state.Background = effective
+	p.state.TextRenderer = next.textBackend
 	p.mu.Unlock()
 	win.SetWindowPos(h, win.HWND_TOPMOST, int32(x), int32(y), int32(next.base.Bounds().Dx()), int32(next.base.Bounds().Dy()), win.SWP_NOACTIVATE)
 	return nil
@@ -603,6 +633,7 @@ func osdWindowProc(h win.HWND, msg uint32, w, l uintptr) uintptr {
 					return 0
 				}
 				if c.request != nil {
+					previous := p.Status()
 					err = p.configure(*c.request)
 					if err == nil {
 						p.sequence++
@@ -614,7 +645,7 @@ func osdWindowProc(h win.HWND, msg uint32, w, l uintptr) uintptr {
 						p.endReason = "expired"
 						p.duration = time.Duration(p.request.DurationMS) * time.Millisecond
 						p.mu.Lock()
-						p.rememberLocked("replaced")
+						p.rememberStatusLocked(previous, "replaced")
 						p.state.Active = true
 						p.state.ID = p.request.ID
 						p.state.ShownAt = p.started
