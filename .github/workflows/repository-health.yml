@@ -48,6 +48,12 @@ jobs:
       - name: "🧭 Check repository structure and links"
         run: node .github/scripts/repository-check.mjs
 
+      - name: "📖 Verify offline API explorer asset"
+        run: |
+          npm ci --ignore-scripts --prefix Tools/Audit/explorer
+          npm run check --prefix Tools/Audit/explorer
+          node --test Tools/Audit/generate-api-reference.test.mjs
+
       - name: "🧬 Verify complete native donor source preservation"
         run: node Tools/Build/audit-native-donor.mjs
 

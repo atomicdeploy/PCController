@@ -74,6 +74,8 @@ const thirdPartyProvenancePaths = new Set([
   "Tools/Controller/internal/programmer/toolchain.go",
   "Tools/Controller/toolchain-lock.json",
   "Tools/Controller/web/package-lock.json",
+  "Tools/Audit/explorer/package-lock.json",
+  "Tools/Controller/api/THIRD_PARTY_NOTICES.md",
   "Tools/NativeDesktop/webui/package-lock.json",
   "Tools/Controller/web/third-party-notices/victory-vendor.txt",
   "Tools/Dependencies/pr-plan.mjs",

@@ -115,6 +115,15 @@ test("repository URLs have narrow product and provenance allowlists", () => {
   );
 });
 
+test("API explorer dependency provenance does not exempt product source", () => {
+  const context = { repository: "atomicdeploy/PCController" };
+  for (const path of ["Tools/Audit/explorer/package-lock.json", "Tools/Controller/api/THIRD_PARTY_NOTICES.md"]) {
+    assert.deepEqual(privacyFindings(path, "https://github.com/scalar/scalar", context), []);
+    assert.equal(privacyFindings(path, "C:\\Users\\Private\\secret", context)[0].kind, "private path");
+  }
+  assert.equal(privacyFindings("Tools/Audit/explorer/catalog.js", "https://github.com/other/unreviewed", context)[0].kind, "unreviewed repository reference");
+});
+
 test("controller convergence permits only the two reviewed repositories", () => {
   const path = "docs/Controller-Convergence.md";
   const context = { repository: "atomicdeploy/PCController" };

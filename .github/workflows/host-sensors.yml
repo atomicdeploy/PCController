@@ -4,6 +4,10 @@ on:
   pull_request:
     paths:
       - Tools/Controller/internal/hostfacts/**
+      - Tools/Controller/internal/boardsensors/**
+      - Tools/Controller/internal/ipcjson/board_sensors*
+      - Tools/Controller/cmd/controller/sensors*
+      - Tools/Integrations/hwmon/**
       - Tools/Controller/go.mod
       - Tools/Controller/go.sum
       - Tools/Build/go-tests.mjs
@@ -35,4 +39,20 @@ jobs:
           go-version-file: Tools/Controller/go.mod
           cache-dependency-path: Tools/Controller/go.sum
       - name: Verify adapters, bounds, local transport and Linux command fixture
-        run: node Tools/Build/go-tests.mjs --package internal/hostfacts --retest
+        run: node Tools/Build/go-tests.mjs --package internal/hostfacts --package internal/boardsensors --retest
+
+  hwmon-build:
+    name: "🌡️ Linux hwmon module · compile only"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Compile against distribution kernel headers without loading a module
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y linux-headers-generic
+          headers=$(find /usr/src -maxdepth 1 -type d -name 'linux-headers-*-generic' | sort -V | tail -n 1)
+          test -n "$headers"
+          make -C Tools/Integrations/hwmon KDIR="$headers" W=1
+          modinfo Tools/Integrations/hwmon/pccontroller_hwmon.ko

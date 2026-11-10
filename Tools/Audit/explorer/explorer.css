@@ -1,0 +1,367 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f9f8fc;
+  --panel: #fff;
+  --ink: #24212c;
+  --muted: #706a7b;
+  --line: #e6e2ed;
+  --accent: #7855c6;
+  --soft: #f0eafa;
+  font:
+    14px/1.6 "Segoe UI",
+    system-ui,
+    sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #131117;
+    --panel: #1b1820;
+    --ink: #f0ebf8;
+    --muted: #aaa1b6;
+    --line: #35303e;
+    --accent: #bc9df6;
+    --soft: #30263f;
+  }
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+}
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+.catalog button,
+.catalog input,
+.catalog select {
+  font: inherit;
+}
+.catalog button {
+  cursor: pointer;
+}
+.catalog button,
+.catalog input,
+.catalog select {
+  color: inherit;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel);
+}
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 26px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+.identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  white-space: nowrap;
+  color: var(--ink);
+}
+.identity strong {
+  font-size: 16px;
+}
+.identity span {
+  color: var(--muted);
+  border-left: 1px solid var(--line);
+  padding-left: 12px;
+}
+nav {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 18px;
+  font-size: 13px;
+}
+nav a {
+  color: var(--muted);
+}
+nav a:hover {
+  color: var(--accent);
+}
+footer {
+  padding: 16px 26px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+}
+.catalog {
+  display: grid;
+  grid-template-columns: 330px minmax(0, 1fr);
+  min-height: calc(100vh - 130px);
+}
+aside {
+  border-right: 1px solid var(--line);
+  padding: 22px 16px;
+  position: sticky;
+  top: 65px;
+  height: calc(100vh - 65px);
+  overflow: auto;
+}
+h1 {
+  font-size: 23px;
+  line-height: 1.3;
+  letter-spacing: -0.5px;
+  margin: 0 0 22px;
+}
+h2 {
+  font-size: 15px;
+  margin: 26px 0 10px;
+}
+.search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  padding: 7px 10px;
+}
+.search input {
+  border: 0;
+  background: none;
+  width: 100%;
+  min-width: 0;
+  outline: none;
+}
+.filters {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 12px 0 20px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.filters select {
+  max-width: 210px;
+  padding: 5px 8px;
+}
+#operations {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+#operations button {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  border: 0;
+  text-align: left;
+  background: transparent;
+  border-radius: 8px;
+  padding: 9px 10px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+#operations button:hover {
+  background: var(--panel);
+}
+#operations button[aria-current="true"] {
+  background: var(--soft);
+  color: var(--accent);
+}
+.dot {
+  height: 6px;
+  width: 6px;
+  min-width: 6px;
+  display: inline-block;
+  border-radius: 50%;
+  background: var(--accent);
+  align-self: center;
+}
+article {
+  padding: 38px 46px;
+  max-width: 1200px;
+  min-width: 0;
+}
+article h1 {
+  font-size: 27px;
+  overflow-wrap: anywhere;
+  margin: 14px 0 16px;
+}
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.badge {
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--soft);
+  color: var(--accent);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 8px;
+}
+.badge.write {
+  color: #df6d63;
+  background: color-mix(in srgb, #df6d63 9%, var(--panel));
+}
+.badge.safe {
+  color: #418e70;
+  background: color-mix(in srgb, #418e70 8%, var(--panel));
+}
+.description {
+  font-size: 15px;
+  color: var(--muted);
+  max-width: 850px;
+}
+.codebox {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--panel);
+  margin: 10px 0 20px;
+}
+.codehead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+}
+.codehead button {
+  font-size: 12px;
+  padding: 3px 10px;
+}
+.codehead button:hover {
+  background: var(--soft);
+}
+pre {
+  font:
+    12px/1.8 "Cascadia Code",
+    Consolas,
+    ui-monospace,
+    monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+  padding: 17px;
+  color: var(--ink);
+}
+code {
+  font-family: "Cascadia Code", Consolas, monospace;
+}
+details {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  margin: 10px 0;
+  overflow: hidden;
+}
+summary {
+  cursor: pointer;
+  padding: 10px 14px;
+  font-size: 13px;
+  background: var(--panel);
+}
+.empty {
+  padding: 20px;
+  color: var(--muted);
+}
+.note {
+  border-left: 3px solid var(--accent);
+  padding: 8px 14px;
+  color: var(--muted);
+  font-size: 13px;
+  background: var(--panel);
+}
+.endpoint {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 6px 0 20px;
+}
+.scalar-app {
+  --scalar-color-accent: var(--accent);
+  --scalar-font: "Segoe UI", system-ui, sans-serif;
+  --scalar-font-code: "Cascadia Code", Consolas, monospace;
+}
+@media (max-width: 900px) {
+  .topbar {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 12px 18px;
+    gap: 10px;
+  }
+  nav {
+    gap: 14px;
+  }
+  .catalog {
+    grid-template-columns: 260px minmax(0, 1fr);
+  }
+  article {
+    padding: 24px;
+  }
+  aside {
+    top: 110px;
+    height: calc(100vh - 110px);
+  }
+  article h1 {
+    font-size: 21px;
+  }
+}
+@media (max-width: 650px) {
+  .identity span {
+    display: none;
+  }
+  .catalog {
+    display: block;
+  }
+  aside {
+    position: static;
+    height: auto;
+    max-height: 290px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    padding: 18px;
+  }
+  aside h1 {
+    margin-bottom: 12px;
+  }
+  #operations {
+    max-height: 130px;
+    overflow: auto;
+  }
+  article {
+    padding: 25px 18px;
+  }
+  .topbar {
+    position: static;
+  }
+  nav {
+    font-size: 12px;
+    gap: 12px;
+  }
+}

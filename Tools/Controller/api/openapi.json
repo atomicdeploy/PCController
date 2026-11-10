@@ -18,6 +18,7 @@
       "get": {
         "operationId": "get_healthz",
         "summary": "Service liveness and API identity",
+        "description": "Service liveness and API identity",
         "tags": [
           "service"
         ],
@@ -55,6 +56,7 @@
       "get": {
         "operationId": "get_upnp_public_json",
         "summary": "Bounded public host, board, endpoint, health, and telemetry directory",
+        "description": "Bounded public host, board, endpoint, health, and telemetry directory",
         "tags": [
           "service"
         ],
@@ -92,8 +94,9 @@
       "get": {
         "operationId": "get_api_ui_config",
         "summary": "Non-secret browser bootstrap",
+        "description": "Non-secret browser bootstrap",
         "tags": [
-          "service"
+          "ui-config"
         ],
         "x-required-capability": "public",
         "x-idempotency": "safe",
@@ -129,8 +132,9 @@
       "get": {
         "operationId": "get_api_auth_server_proof",
         "summary": "Dormant alpha compatibility endpoint; returns 409 while application authentication is disabled",
+        "description": "Dormant alpha compatibility endpoint; returns 409 while application authentication is disabled",
         "tags": [
-          "server-proof"
+          "auth"
         ],
         "x-required-capability": "public",
         "x-idempotency": "safe",
@@ -171,8 +175,9 @@
       "post": {
         "operationId": "post_api_session_ticket",
         "summary": "Dormant alpha compatibility endpoint; returns 409 while application authentication is disabled",
+        "description": "Dormant alpha compatibility endpoint; returns 409 while application authentication is disabled",
         "tags": [
-          "ticket"
+          "session"
         ],
         "x-required-capability": "session",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -209,8 +214,9 @@
       "post": {
         "operationId": "post_api_rpc",
         "summary": "JSON-RPC 2.0 request",
+        "description": "JSON-RPC 2.0 request",
         "tags": [
-          "service"
+          "rpc"
         ],
         "x-required-capability": "dynamic",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -255,8 +261,9 @@
       "get": {
         "operationId": "get_api_snapshot",
         "summary": "Authoritative cached controller snapshot",
+        "description": "Authoritative cached controller snapshot",
         "tags": [
-          "service"
+          "snapshot"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -287,12 +294,187 @@
         }
       }
     },
+    "/api/sensors/board": {
+      "get": {
+        "operationId": "get_api_sensors_board",
+        "summary": "Export fresh PCB DS18B20 and INA219 measurements, units, availability and original receipt time; never host PC sensors",
+        "description": "Export fresh PCB DS18B20 and INA219 measurements, units, availability and original receipt time; never host PC sensors",
+        "tags": [
+          "sensors"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Observed PCB measurements with null unavailable values; original host receipt time is retained.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoardSensorSnapshot"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/sensors/metrics": {
+      "get": {
+        "operationId": "get_api_sensors_metrics",
+        "summary": "Prometheus PCB sensor gauges; unavailable readings are omitted, never zero-filled",
+        "description": "Prometheus PCB sensor gauges; unavailable readings are omitted, never zero-filled",
+        "tags": [
+          "sensors"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Prometheus text exposition",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/docs/{asset}": {
+      "get": {
+        "operationId": "get_api_docs_asset",
+        "summary": "Offline API explorer and generated HTTP, RPC and event contracts",
+        "description": "Offline API explorer and generated HTTP, RPC and event contracts",
+        "tags": [
+          "docs"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "An embedded API reference asset or contract.",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "text/javascript": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "text/css": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      },
+      "head": {
+        "operationId": "head_api_docs_asset",
+        "summary": "Offline API explorer and generated HTTP, RPC and event contracts",
+        "description": "Offline API explorer and generated HTTP, RPC and event contracts",
+        "tags": [
+          "docs"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "An embedded API reference asset or contract.",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "text/javascript": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "text/css": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
     "/api/diagnostics/cpu-profile": {
       "post": {
         "operationId": "post_api_diagnostics_cpu_profile",
         "summary": "Explicit five-second application CPU profile; loopback callers only, one active capture, no board actions or request body",
+        "description": "Explicit five-second application CPU profile; loopback callers only, one active capture, no board actions or request body",
         "tags": [
-          "cpu-profile"
+          "diagnostics"
         ],
         "x-required-capability": "local-only",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -338,8 +520,9 @@
       "post": {
         "operationId": "post_api_diagnostics_execution_trace",
         "summary": "Explicit five-second Go execution trace; loopback callers only, shared profile capture exclusion, no board actions or request body",
+        "description": "Explicit five-second Go execution trace; loopback callers only, shared profile capture exclusion, no board actions or request body",
         "tags": [
-          "execution-trace"
+          "diagnostics"
         ],
         "x-required-capability": "local-only",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -385,8 +568,9 @@
       "get": {
         "operationId": "get_api_estop",
         "summary": "Authoritative effect and motion interlock state",
+        "description": "Authoritative effect and motion interlock state",
         "tags": [
-          "service"
+          "estop"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -419,8 +603,9 @@
       "put": {
         "operationId": "put_api_estop",
         "summary": "Engage or release the effect and motion interlock",
+        "description": "Engage or release the effect and motion interlock",
         "tags": [
-          "service"
+          "estop"
         ],
         "x-required-capability": "board_commands",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -464,8 +649,9 @@
       "post": {
         "operationId": "post_api_estop",
         "summary": "Engage or release the effect and motion interlock",
+        "description": "Engage or release the effect and motion interlock",
         "tags": [
-          "service"
+          "estop"
         ],
         "x-required-capability": "board_commands",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -511,8 +697,9 @@
       "get": {
         "operationId": "get_api_peripherals",
         "summary": "Peripheral descriptors and host-owned names",
+        "description": "Peripheral descriptors and host-owned names",
         "tags": [
-          "service"
+          "peripherals"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -545,8 +732,9 @@
       "put": {
         "operationId": "put_api_peripherals",
         "summary": "Replace host-owned peripheral names",
+        "description": "Replace host-owned peripheral names",
         "tags": [
-          "service"
+          "peripherals"
         ],
         "x-required-capability": "host_configuration",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -592,8 +780,9 @@
       "get": {
         "operationId": "get_api_pwm",
         "summary": "Authoritative PWM state",
+        "description": "Authoritative PWM state",
         "tags": [
-          "service"
+          "pwm"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -626,8 +815,9 @@
       "put": {
         "operationId": "put_api_pwm",
         "summary": "Mutate PWM state with board readback",
+        "description": "Mutate PWM state with board readback",
         "tags": [
-          "service"
+          "pwm"
         ],
         "x-required-capability": "board_commands",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -671,8 +861,9 @@
       "delete": {
         "operationId": "delete_api_pwm",
         "summary": "Mutate PWM state with board readback",
+        "description": "Mutate PWM state with board readback",
         "tags": [
-          "service"
+          "pwm"
         ],
         "x-required-capability": "board_commands",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -707,8 +898,9 @@
       "get": {
         "operationId": "get_api_commands",
         "summary": "Shared command catalog",
+        "description": "Shared command catalog",
         "tags": [
-          "service"
+          "commands"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -743,8 +935,9 @@
       "get": {
         "operationId": "get_api_program_state",
         "summary": "Host-owned program state",
+        "description": "Host-owned program state",
         "tags": [
-          "service"
+          "program-state"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -777,8 +970,9 @@
       "put": {
         "operationId": "put_api_program_state",
         "summary": "Update host-owned program state",
+        "description": "Update host-owned program state",
         "tags": [
-          "service"
+          "program-state"
         ],
         "x-required-capability": "board_commands",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -822,8 +1016,9 @@
       "post": {
         "operationId": "post_api_program_state",
         "summary": "Update host-owned program state",
+        "description": "Update host-owned program state",
         "tags": [
-          "service"
+          "program-state"
         ],
         "x-required-capability": "board_commands",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -869,8 +1064,9 @@
       "get": {
         "operationId": "get_api_menu_catalog",
         "summary": "Live board menu catalog",
+        "description": "Live board menu catalog",
         "tags": [
-          "catalog"
+          "menu"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -905,8 +1101,9 @@
       "get": {
         "operationId": "get_api_menu_layout",
         "summary": "Live board menu layout",
+        "description": "Live board menu layout",
         "tags": [
-          "layout"
+          "menu"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -939,8 +1136,9 @@
       "put": {
         "operationId": "put_api_menu_layout",
         "summary": "Persist a validated board menu layout",
+        "description": "Persist a validated board menu layout",
         "tags": [
-          "layout"
+          "menu"
         ],
         "x-required-capability": "board_commands",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -984,8 +1182,9 @@
       "post": {
         "operationId": "post_api_menu_layout",
         "summary": "Persist a validated board menu layout",
+        "description": "Persist a validated board menu layout",
         "tags": [
-          "layout"
+          "menu"
         ],
         "x-required-capability": "board_commands",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -1031,8 +1230,9 @@
       "get": {
         "operationId": "get_api_host_menus",
         "summary": "Host-presented menu directory",
+        "description": "Host-presented menu directory",
         "tags": [
-          "service"
+          "host-menus"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -1065,8 +1265,9 @@
       "put": {
         "operationId": "put_api_host_menus",
         "summary": "Replace the host-presented menu directory",
+        "description": "Replace the host-presented menu directory",
         "tags": [
-          "service"
+          "host-menus"
         ],
         "x-required-capability": "host_configuration",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -1110,8 +1311,9 @@
       "post": {
         "operationId": "post_api_host_menus",
         "summary": "Replace the host-presented menu directory",
+        "description": "Replace the host-presented menu directory",
         "tags": [
-          "service"
+          "host-menus"
         ],
         "x-required-capability": "host_configuration",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -1157,8 +1359,9 @@
       "get": {
         "operationId": "get_api_os_status",
         "summary": "Host status and policy",
+        "description": "Host status and policy",
         "tags": [
-          "status"
+          "os"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -1193,8 +1396,9 @@
       "get": {
         "operationId": "get_api_os_facts",
         "summary": "Bounded read-only host facts",
+        "description": "Bounded read-only host facts",
         "tags": [
-          "facts"
+          "os"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -1229,8 +1433,9 @@
       "post": {
         "operationId": "post_api_os_key",
         "summary": "Validated virtual-key action",
+        "description": "Validated virtual-key action",
         "tags": [
-          "key"
+          "os"
         ],
         "x-required-capability": "virtual_keys",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -1276,8 +1481,9 @@
       "post": {
         "operationId": "post_api_os_power",
         "summary": "Confirmed system or display action",
+        "description": "Confirmed system or display action",
         "tags": [
-          "power"
+          "os"
         ],
         "x-required-capability": "power_actions",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -1323,8 +1529,9 @@
       "post": {
         "operationId": "post_api_command",
         "summary": "Shared command dispatcher",
+        "description": "Shared command dispatcher",
         "tags": [
-          "service"
+          "command"
         ],
         "x-required-capability": "dynamic",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -1370,8 +1577,9 @@
       "post": {
         "operationId": "post_api_messages",
         "summary": "Typed source-tagged message",
+        "description": "Typed source-tagged message",
         "tags": [
-          "service"
+          "messages"
         ],
         "x-required-capability": "messages",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -1417,8 +1625,9 @@
       "post": {
         "operationId": "post_api_display",
         "summary": "Present arbitrary seven-segment or LCD text with scroll and repeat timing",
+        "description": "Present arbitrary seven-segment or LCD text with scroll and repeat timing",
         "tags": [
-          "service"
+          "display"
         ],
         "x-required-capability": "board_commands",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -1464,8 +1673,9 @@
       "post": {
         "operationId": "post_api_opcode",
         "summary": "Exchange an opaque versionless UART opcode",
+        "description": "Exchange an opaque versionless UART opcode",
         "tags": [
-          "service"
+          "opcode"
         ],
         "x-required-capability": "board_commands",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -1509,8 +1719,9 @@
       "get": {
         "operationId": "get_api_app_bridge",
         "summary": "Original coordinator bridge instance and process identity",
+        "description": "Original coordinator bridge instance and process identity",
         "tags": [
-          "bridge"
+          "app"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -1544,8 +1755,9 @@
       "get": {
         "operationId": "get_api_app_instances",
         "summary": "List or query live application instances",
+        "description": "List or query live application instances",
         "tags": [
-          "instances"
+          "app"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -1598,8 +1810,9 @@
       "post": {
         "operationId": "post_api_app_instances",
         "summary": "Report or remove one live application instance",
+        "description": "Report or remove one live application instance",
         "tags": [
-          "instances"
+          "app"
         ],
         "x-required-capability": "host_configuration",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -1641,8 +1854,9 @@
       "delete": {
         "operationId": "delete_api_app_instances",
         "summary": "Report or remove one live application instance",
+        "description": "Report or remove one live application instance",
         "tags": [
-          "instances"
+          "app"
         ],
         "x-required-capability": "host_configuration",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -1688,8 +1902,9 @@
       "post": {
         "operationId": "post_api_app_action",
         "summary": "Freeze and route a correlated action to exact live application instances",
+        "description": "Freeze and route a correlated action to exact live application instances",
         "tags": [
-          "action"
+          "app"
         ],
         "x-required-capability": "host_configuration",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -1743,8 +1958,9 @@
       "post": {
         "operationId": "post_api_app_action_ack",
         "summary": "Acknowledge one exact app-action target outcome",
+        "description": "Acknowledge one exact app-action target outcome",
         "tags": [
-          "action"
+          "app"
         ],
         "x-required-capability": "host_configuration",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -1798,8 +2014,9 @@
       "get": {
         "operationId": "get_api_app_action_outcome",
         "summary": "Read one bounded app-action operation outcome",
+        "description": "Read one bounded app-action operation outcome",
         "tags": [
-          "action"
+          "app"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -1855,8 +2072,9 @@
       "post": {
         "operationId": "post_api_app_navigate",
         "summary": "Navigate all, one surface, or one exact application instance",
+        "description": "Navigate all, one surface, or one exact application instance",
         "tags": [
-          "navigate"
+          "app"
         ],
         "x-required-capability": "host_configuration",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -1901,8 +2119,9 @@
       "post": {
         "operationId": "post_api_app_launch",
         "summary": "Ensure, launch, or focus a named TUI or WebUI surface",
+        "description": "Ensure, launch, or focus a named TUI or WebUI surface",
         "tags": [
-          "launch"
+          "app"
         ],
         "x-required-capability": "host_configuration",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -1947,8 +2166,9 @@
       "get": {
         "operationId": "get_api_bridges",
         "summary": "Configured bridge state",
+        "description": "Configured bridge state",
         "tags": [
-          "service"
+          "bridges"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -1983,8 +2203,9 @@
       "post": {
         "operationId": "post_api_bridges_call",
         "summary": "Correlated bridge call",
+        "description": "Correlated bridge call",
         "tags": [
-          "call"
+          "bridges"
         ],
         "x-required-capability": "bridge_calls",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -2030,8 +2251,9 @@
       "get": {
         "operationId": "get_api_artifacts_manifest",
         "summary": "Artifact/default/current manifest",
+        "description": "Artifact/default/current manifest",
         "tags": [
-          "manifest"
+          "artifacts"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -2066,8 +2288,9 @@
       "get": {
         "operationId": "get_api_artifacts",
         "summary": "Content-addressed artifact catalog",
+        "description": "Content-addressed artifact catalog",
         "tags": [
-          "service"
+          "artifacts"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -2102,8 +2325,9 @@
       "post": {
         "operationId": "post_api_artifacts_upload",
         "summary": "Import a verified artifact",
+        "description": "Import a verified artifact",
         "tags": [
-          "upload"
+          "artifacts"
         ],
         "x-required-capability": "programming",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -2149,8 +2373,9 @@
       "post": {
         "operationId": "post_api_artifacts_fetch",
         "summary": "Queue a bounded remote artifact fetch",
+        "description": "Queue a bounded remote artifact fetch",
         "tags": [
-          "fetch"
+          "artifacts"
         ],
         "x-required-capability": "programming",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -2196,8 +2421,9 @@
       "post": {
         "operationId": "post_api_artifacts_capture",
         "summary": "Capture flash or EEPROM explicitly",
+        "description": "Capture flash or EEPROM explicitly",
         "tags": [
-          "capture"
+          "artifacts"
         ],
         "x-required-capability": "programming",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -2243,8 +2469,9 @@
       "get": {
         "operationId": "get_api_artifacts_kind_sha256",
         "summary": "Immutable ranged artifact download",
+        "description": "Immutable ranged artifact download",
         "tags": [
-          "{kind}"
+          "artifacts"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -2297,8 +2524,9 @@
       "head": {
         "operationId": "head_api_artifacts_kind_sha256",
         "summary": "Immutable ranged artifact download",
+        "description": "Immutable ranged artifact download",
         "tags": [
-          "{kind}"
+          "artifacts"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -2353,8 +2581,9 @@
       "get": {
         "operationId": "get_api_artifacts_current_kind",
         "summary": "Latest explicitly captured artifact",
+        "description": "Latest explicitly captured artifact",
         "tags": [
-          "current"
+          "artifacts"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -2398,8 +2627,9 @@
       "head": {
         "operationId": "head_api_artifacts_current_kind",
         "summary": "Latest explicitly captured artifact",
+        "description": "Latest explicitly captured artifact",
         "tags": [
-          "current"
+          "artifacts"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -2445,8 +2675,9 @@
       "post": {
         "operationId": "post_api_board_firmware_upload",
         "summary": "Queue a guarded staged-firmware transfer to the board",
+        "description": "Queue a guarded staged-firmware transfer to the board",
         "tags": [
-          "firmware"
+          "board"
         ],
         "x-required-capability": "programming",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -2492,8 +2723,9 @@
       "get": {
         "operationId": "get_api_board_firmware_download",
         "summary": "Download the latest verified board flash readback",
+        "description": "Download the latest verified board flash readback",
         "tags": [
-          "firmware"
+          "board"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -2526,8 +2758,9 @@
       "head": {
         "operationId": "head_api_board_firmware_download",
         "summary": "Download the latest verified board flash readback",
+        "description": "Download the latest verified board flash readback",
         "tags": [
-          "firmware"
+          "board"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -2560,8 +2793,9 @@
       "post": {
         "operationId": "post_api_board_firmware_download",
         "summary": "Queue a fresh verified board flash readback",
+        "description": "Queue a fresh verified board flash readback",
         "tags": [
-          "firmware"
+          "board"
         ],
         "x-required-capability": "programming",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -2607,8 +2841,9 @@
       "post": {
         "operationId": "post_api_updates_kind",
         "summary": "Queue an explicitly authorized update",
+        "description": "Queue an explicitly authorized update",
         "tags": [
-          "{kind}"
+          "updates"
         ],
         "x-required-capability": "programming",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -2665,8 +2900,9 @@
       "post": {
         "operationId": "post_api_restores_flash",
         "summary": "Queue an explicitly authorized flash restore",
+        "description": "Queue an explicitly authorized flash restore",
         "tags": [
-          "flash"
+          "restores"
         ],
         "x-required-capability": "programming",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -2712,8 +2948,9 @@
       "get": {
         "operationId": "get_api_updates_status_id",
         "summary": "Update operation progress",
+        "description": "Update operation progress",
         "tags": [
-          "status"
+          "updates"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -2759,8 +2996,9 @@
       "post": {
         "operationId": "post_api_discovery_github_workflow",
         "summary": "Discover workflow artifacts",
+        "description": "Discover workflow artifacts",
         "tags": [
-          "github"
+          "discovery"
         ],
         "x-required-capability": "read",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -2806,8 +3044,9 @@
       "post": {
         "operationId": "post_api_discovery_github_release",
         "summary": "Discover release assets",
+        "description": "Discover release assets",
         "tags": [
-          "github"
+          "discovery"
         ],
         "x-required-capability": "read",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -2853,8 +3092,9 @@
       "get": {
         "operationId": "get_api_discovery_manifest",
         "summary": "Serve or validate an update manifest",
+        "description": "Serve or validate an update manifest",
         "tags": [
-          "manifest"
+          "discovery"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -2887,8 +3127,9 @@
       "post": {
         "operationId": "post_api_discovery_manifest",
         "summary": "Serve or validate an update manifest",
+        "description": "Serve or validate an update manifest",
         "tags": [
-          "manifest"
+          "discovery"
         ],
         "x-required-capability": "read",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -2934,8 +3175,9 @@
       "post": {
         "operationId": "post_api_discovery_check",
         "summary": "Compare candidate and installed identities",
+        "description": "Compare candidate and installed identities",
         "tags": [
-          "check"
+          "discovery"
         ],
         "x-required-capability": "read",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -2981,8 +3223,9 @@
       "post": {
         "operationId": "post_api_discovery_stage",
         "summary": "Stage a verified candidate without programming",
+        "description": "Stage a verified candidate without programming",
         "tags": [
-          "stage"
+          "discovery"
         ],
         "x-required-capability": "programming",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -3028,8 +3271,9 @@
       "get": {
         "operationId": "get_api_discovery_status_id",
         "summary": "Discovery or staging progress",
+        "description": "Discovery or staging progress",
         "tags": [
-          "status"
+          "discovery"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -3075,8 +3319,9 @@
       "post": {
         "operationId": "post_api_webhooks_inbound",
         "summary": "Optional inbound typed webhook",
+        "description": "Optional inbound typed webhook",
         "tags": [
-          "inbound"
+          "webhooks"
         ],
         "x-required-capability": "messages",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -3122,8 +3367,9 @@
       "get": {
         "operationId": "get_api_webhooks_outbound_status",
         "summary": "Outbound delivery queue and dead-letter status",
+        "description": "Outbound delivery queue and dead-letter status",
         "tags": [
-          "outbound"
+          "webhooks"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -3158,8 +3404,9 @@
       "get": {
         "operationId": "get_api_webhooks_outbound_pending",
         "summary": "Bounded non-secret pending delivery list",
+        "description": "Bounded non-secret pending delivery list",
         "tags": [
-          "outbound"
+          "webhooks"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -3194,8 +3441,9 @@
       "get": {
         "operationId": "get_api_webhooks_outbound_dead",
         "summary": "Bounded non-secret dead-letter list",
+        "description": "Bounded non-secret dead-letter list",
         "tags": [
-          "outbound"
+          "webhooks"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -3230,8 +3478,9 @@
       "post": {
         "operationId": "post_api_webhooks_outbound_replay",
         "summary": "Replay explicitly selected dead-letter deliveries",
+        "description": "Replay explicitly selected dead-letter deliveries",
         "tags": [
-          "outbound"
+          "webhooks"
         ],
         "x-required-capability": "integrations",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -3277,8 +3526,9 @@
       "post": {
         "operationId": "post_api_webhooks_outbound_clear",
         "summary": "Clear explicitly selected dead-letter deliveries",
+        "description": "Clear explicitly selected dead-letter deliveries",
         "tags": [
-          "outbound"
+          "webhooks"
         ],
         "x-required-capability": "integrations",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -3324,8 +3574,9 @@
       "get": {
         "operationId": "get_api_integrations_status",
         "summary": "Requested and effective buzzer routing and playback state",
+        "description": "Requested and effective buzzer routing and playback state",
         "tags": [
-          "status"
+          "integrations"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -3360,8 +3611,9 @@
       "get": {
         "operationId": "get_api_integrations_datahub_path",
         "summary": "Sanitized loopback data-service proxy",
+        "description": "Sanitized loopback data-service proxy",
         "tags": [
-          "datahub"
+          "integrations"
         ],
         "x-required-capability": "integrations",
         "x-idempotency": "safe",
@@ -3405,8 +3657,9 @@
       "head": {
         "operationId": "head_api_integrations_datahub_path",
         "summary": "Sanitized loopback data-service proxy",
+        "description": "Sanitized loopback data-service proxy",
         "tags": [
-          "datahub"
+          "integrations"
         ],
         "x-required-capability": "integrations",
         "x-idempotency": "safe",
@@ -3450,8 +3703,9 @@
       "post": {
         "operationId": "post_api_integrations_datahub_path",
         "summary": "Sanitized loopback data-service proxy",
+        "description": "Sanitized loopback data-service proxy",
         "tags": [
-          "datahub"
+          "integrations"
         ],
         "x-required-capability": "integrations",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -3506,8 +3760,9 @@
       "put": {
         "operationId": "put_api_integrations_datahub_path",
         "summary": "Sanitized loopback data-service proxy",
+        "description": "Sanitized loopback data-service proxy",
         "tags": [
-          "datahub"
+          "integrations"
         ],
         "x-required-capability": "integrations",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -3562,8 +3817,9 @@
       "patch": {
         "operationId": "patch_api_integrations_datahub_path",
         "summary": "Sanitized loopback data-service proxy",
+        "description": "Sanitized loopback data-service proxy",
         "tags": [
-          "datahub"
+          "integrations"
         ],
         "x-required-capability": "integrations",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -3618,8 +3874,9 @@
       "delete": {
         "operationId": "delete_api_integrations_datahub_path",
         "summary": "Sanitized loopback data-service proxy",
+        "description": "Sanitized loopback data-service proxy",
         "tags": [
-          "datahub"
+          "integrations"
         ],
         "x-required-capability": "integrations",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -3665,8 +3922,9 @@
       "get": {
         "operationId": "get_api_integrations_device_path",
         "summary": "Fail-closed device route; use typed RPC",
+        "description": "Fail-closed device route; use typed RPC",
         "tags": [
-          "device"
+          "integrations"
         ],
         "x-required-capability": "integrations",
         "x-idempotency": "safe",
@@ -3710,8 +3968,9 @@
       "head": {
         "operationId": "head_api_integrations_device_path",
         "summary": "Fail-closed device route; use typed RPC",
+        "description": "Fail-closed device route; use typed RPC",
         "tags": [
-          "device"
+          "integrations"
         ],
         "x-required-capability": "integrations",
         "x-idempotency": "safe",
@@ -3755,8 +4014,9 @@
       "post": {
         "operationId": "post_api_integrations_device_path",
         "summary": "Fail-closed device route; use typed RPC",
+        "description": "Fail-closed device route; use typed RPC",
         "tags": [
-          "device"
+          "integrations"
         ],
         "x-required-capability": "integrations",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -3811,8 +4071,9 @@
       "put": {
         "operationId": "put_api_integrations_device_path",
         "summary": "Fail-closed device route; use typed RPC",
+        "description": "Fail-closed device route; use typed RPC",
         "tags": [
-          "device"
+          "integrations"
         ],
         "x-required-capability": "integrations",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -3867,8 +4128,9 @@
       "patch": {
         "operationId": "patch_api_integrations_device_path",
         "summary": "Fail-closed device route; use typed RPC",
+        "description": "Fail-closed device route; use typed RPC",
         "tags": [
-          "device"
+          "integrations"
         ],
         "x-required-capability": "integrations",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -3923,8 +4185,9 @@
       "delete": {
         "operationId": "delete_api_integrations_device_path",
         "summary": "Fail-closed device route; use typed RPC",
+        "description": "Fail-closed device route; use typed RPC",
         "tags": [
-          "device"
+          "integrations"
         ],
         "x-required-capability": "integrations",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -3967,6 +4230,99 @@
       }
     }
   },
+  "tags": [
+    {
+      "name": "app"
+    },
+    {
+      "name": "artifacts"
+    },
+    {
+      "name": "auth"
+    },
+    {
+      "name": "board"
+    },
+    {
+      "name": "bridges"
+    },
+    {
+      "name": "command"
+    },
+    {
+      "name": "commands"
+    },
+    {
+      "name": "diagnostics"
+    },
+    {
+      "name": "discovery"
+    },
+    {
+      "name": "display"
+    },
+    {
+      "name": "docs"
+    },
+    {
+      "name": "estop"
+    },
+    {
+      "name": "host-menus"
+    },
+    {
+      "name": "integrations"
+    },
+    {
+      "name": "menu"
+    },
+    {
+      "name": "messages"
+    },
+    {
+      "name": "opcode"
+    },
+    {
+      "name": "os"
+    },
+    {
+      "name": "peripherals"
+    },
+    {
+      "name": "program-state"
+    },
+    {
+      "name": "pwm"
+    },
+    {
+      "name": "restores"
+    },
+    {
+      "name": "rpc"
+    },
+    {
+      "name": "sensors",
+      "description": "Read-only PCB measurements for system monitors. Host-computer measurements are separate under os/facts."
+    },
+    {
+      "name": "service"
+    },
+    {
+      "name": "session"
+    },
+    {
+      "name": "snapshot"
+    },
+    {
+      "name": "ui-config"
+    },
+    {
+      "name": "updates"
+    },
+    {
+      "name": "webhooks"
+    }
+  ],
   "components": {
     "securitySchemes": {
       "bearerAuth": {
@@ -3982,6 +4338,102 @@
       }
     },
     "schemas": {
+      "BoardSensorReading": {
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "kind",
+          "unit",
+          "value"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "enum": [
+              "supply",
+              "bus",
+              "current",
+              "power",
+              "temperature_led",
+              "temperature_bt_audio"
+            ]
+          },
+          "label": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "voltage",
+              "current",
+              "power",
+              "temperature"
+            ]
+          },
+          "unit": {
+            "enum": [
+              "V",
+              "A",
+              "W",
+              "C"
+            ]
+          },
+          "value": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Valid fresh reading in the declared unit, or null. Zero and negative readings are not missing."
+          }
+        }
+      },
+      "BoardSensorSnapshot": {
+        "type": "object",
+        "required": [
+          "source",
+          "host_instance_id",
+          "connection_generation",
+          "connected",
+          "fresh",
+          "observed_at",
+          "expires_at",
+          "readings"
+        ],
+        "properties": {
+          "source": {
+            "const": "pccontroller-board-status"
+          },
+          "host_instance_id": {
+            "type": "string"
+          },
+          "connection_generation": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "connected": {
+            "type": "boolean"
+          },
+          "fresh": {
+            "type": "boolean"
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Host receipt time of the original board-status frame, not scrape or per-sensor ADC time."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Five seconds after original receipt. Expired values are null."
+          },
+          "readings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BoardSensorReading"
+            }
+          }
+        }
+      },
       "JSONRPCID": {
         "oneOf": [
           {

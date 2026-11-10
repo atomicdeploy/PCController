@@ -329,6 +329,20 @@ test('native module source and assets invalidate controller package and test ide
 	}
 })
 
+test('embedded API explorer bytes invalidate both host and stable test identities', async t => {
+	const root = await mkdtemp(join(tmpdir(), 'controller-api-identity-'))
+	t.after(() => rm(root, { recursive: true, force: true }))
+	await mkdir(join(root,'api','assets'),{recursive:true})
+	for(const name of ['reference.html','assets/scalar.js','openapi.json']) {
+		await writeFile(join(root,'api',name),'before')
+		const beforePackage=hostSourceIdentity(root)
+		const beforeTest=goTestSourceIdentity(root,'fixture')
+		await writeFile(join(root,'api',name),'after')
+		assert.notEqual(hostSourceIdentity(root).sha256,beforePackage.sha256)
+		assert.notEqual(goTestSourceIdentity(root,'fixture').sha256,beforeTest.sha256)
+	}
+})
+
 test('package publishing tolerates a shell holding the canonical directory', async t => {
         const root = await mkdtemp(join(tmpdir(), 'pccontroller-package-lock-'))
         t.after(() => rm(root, { recursive: true, force: true }))

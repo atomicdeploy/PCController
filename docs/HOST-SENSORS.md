@@ -1,5 +1,8 @@
 # PC hardware sensor diagnostics
 
+For the opposite direction—exporting the PCB's DS18B20/INA219 measurements to
+Linux/Windows monitors—see [Board sensor exports](BOARD-SENSOR-EXPORTS.md).
+
 PCController exposes host-computer measurements separately from physical
 controller-board telemetry. This read-only integration does not map CPU values
 to board lighting/audio probes, change fan settings, run sensor detection,

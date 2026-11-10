@@ -2,10 +2,12 @@
 
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadProjectEnv } from "../Build/env.mjs";
+import { renderExplorer } from "./explorer/render.mjs";
+import { extractRequestShapes } from "./explorer/request-shapes.mjs";
 
 loadProjectEnv();
 
@@ -81,6 +83,13 @@ const readContractSource = (file) => sourceRef
   : readFileSync(resolve(root, file), "utf8");
 const productMetadata = JSON.parse(readFileSync(resolve(root, "Tools", "Controller", "web", "package.json"), "utf8"));
 const product = productIdentity(productMetadata);
+const shapeDirectories = ["Tools/Controller/internal/ipcjson", "Tools/Controller/internal/artifacts", "Tools/Controller/internal/releaseplane", "Tools/Controller/internal/appconfig", "Tools/Controller/internal/native", "Tools/Controller/internal/hostui"];
+const shapeFiles = ["Tools/Controller/controller.go", ...shapeDirectories.flatMap(directory => readdirSync(resolve(root,directory)).filter(name=>name.endsWith('.go')&&!name.endsWith('_test.go')).map(name=>`${directory}/${name}`))];
+if (sourceRef) {
+  const existing = new Set(execFileSync('git',['ls-tree','-r','--name-only',sourceRef],{cwd:root,encoding:'utf8'}).trim().split(/\r?\n/u));
+  for(let i=shapeFiles.length-1;i>=0;i--) if(!existing.has(shapeFiles[i])) shapeFiles.splice(i,1);
+}
+const requestFields = extractRequestShapes(root, shapeFiles.map(Name => ({ Name, Text: readContractSource(Name) })));
 
 const capabilityGroups = {
   events: [
@@ -179,6 +188,9 @@ const capabilityGroups = {
 };
 
 const methodOverrides = {
+  "controller.pwm.set": "Set one physical PWM channel (0..15) using either calibrated percent (0..100) or raw_value (0..4095), never both. Supply current snapshot owner/revision fields; the host verifies admission and returns authoritative readback.",
+  "controller.pwm.off": "Turn off selected PWM outputs through the current board owner and return authoritative state.",
+  "controller.pwm.values": "Read cached authoritative PWM output values without changing any channel.",
 	"controller.effects.library.get": "Return the portable effect library and its canonical ETag.",
 	"controller.effects.library.set": "Import or replace an effect library using mandatory if_match, canonical validation and serialized compare-and-swap; does not execute effects.",
 	"controller.automations.get": "Return configured host event/RF rules and their canonical ETag.",
@@ -317,12 +329,20 @@ const safeCapabilities = new Set(["read", "events"]);
 nonIdempotentMethods.add("controller.channel.set");
 nonIdempotentMethods.add("controller.output.set");
 const methods = [];
+function defaultMethodSummary(name, capability) {
+  const parts = name.replace(/^controller\./u, '').split(/[_.-]+/u);
+  const verbs = { get:'Read', set:'Set', list:'List', configure:'Configure', update:'Update', remove:'Remove', clear:'Clear', start:'Start', stop:'Stop', cancel:'Cancel', open:'Open', close:'Close', reset:'Reset', build:'Build' };
+  const last = parts.at(-1);
+  const verb = verbs[last];
+  const words = (verb ? parts.slice(0,-1) : parts).map(word => ['pwm','rf','lcd','udp','ui','os'].includes(word) ? word.toUpperCase() : word).join(' ');
+  return verb ? `${verb} ${words || 'the controller session'}.` : `${safeCapabilities.has(capability) ? 'Read' : 'Invoke'} the ${words} ${safeCapabilities.has(capability) ? 'surface' : 'operation'}.`;
+}
 for (const [capability, names] of Object.entries(capabilityGroups)) {
   for (const name of names) {
     methods.push({
       name,
       capability,
-      summary: methodOverrides[name] ?? name.replace(/^controller\./u, "").replaceAll(/[_.-]+/gu, " "),
+      summary: methodOverrides[name] ?? defaultMethodSummary(name,capability),
       idempotency: safeCapabilities.has(capability)
         ? "safe"
         : nonIdempotentMethods.has(name)
@@ -344,6 +364,9 @@ const routes = [
   { path: "/api/session/ticket", methods: ["post"], capability: "session", summary: "Dormant alpha compatibility endpoint; returns 409 while application authentication is disabled" },
   { path: "/api/rpc", methods: ["post"], capability: "dynamic", summary: "JSON-RPC 2.0 request" },
   { path: "/api/snapshot", methods: ["get"], capability: "read", summary: "Authoritative cached controller snapshot" },
+  { path: "/api/sensors/board", methods: ["get"], capability: "read", summary: "Export fresh PCB DS18B20 and INA219 measurements, units, availability and original receipt time; never host PC sensors" },
+  { path: "/api/sensors/metrics", methods: ["get"], capability: "read", summary: "Prometheus PCB sensor gauges; unavailable readings are omitted, never zero-filled" },
+  { path: "/api/docs/{asset}", methods: ["get", "head"], capability: "read", summary: "Offline API explorer and generated HTTP, RPC and event contracts" },
   { path: "/api/diagnostics/cpu-profile", methods: ["post"], capability: "local-only", binaryResponse: true, summary: "Explicit five-second application CPU profile; loopback callers only, one active capture, no board actions or request body" },
   { path: "/api/diagnostics/execution-trace", methods: ["post"], capability: "local-only", binaryResponse: true, summary: "Explicit five-second Go execution trace; loopback callers only, shared profile capture exclusion, no board actions or request body" },
   { path: "/api/estop", methods: ["get"], capability: "read", summary: "Authoritative effect and motion interlock state" },
@@ -564,7 +587,8 @@ function operationFor(route, method) {
   const operation = {
     operationId: `${method}_${route.path.replaceAll(/[^a-zA-Z0-9]+/gu, "_").replaceAll(/^_|_$/gu, "")}`,
     summary: route.summary,
-    tags: [route.path.split("/").filter(Boolean)[2] ?? "service"],
+    description: route.summary,
+    tags: [route.path.startsWith('/api/') ? route.path.split('/')[2] : 'service'],
     "x-required-capability": route.capability,
     "x-idempotency": ["get", "head"].includes(method) ? "safe" : "see operation semantics and idempotency keys",
     responses: {
@@ -577,6 +601,11 @@ function operationFor(route, method) {
       "405": { $ref: "#/components/responses/MethodNotAllowed" },
     },
   };
+	if (route.path === "/api/sensors/metrics") {
+		operation.responses["200"] = { description: "Prometheus text exposition", content: { "text/plain": { schema: { type: "string" } } } };
+	}
+	if (route.path === '/api/sensors/board') operation.responses['200'] = { description:'Observed PCB measurements with null unavailable values; original host receipt time is retained.', content:{'application/json':{schema:{$ref:'#/components/schemas/BoardSensorSnapshot'}}} };
+	if (route.path === '/api/docs/{asset}') operation.responses['200'] = { description:'An embedded API reference asset or contract.', content:{'text/html':{schema:{type:'string'}},'application/json':{schema:{type:'object',additionalProperties:true}},'text/javascript':{schema:{type:'string'}},'text/css':{schema:{type:'string'}}} };
   if (route.public) operation.security = [];
 	if (route.path === "/api/session/ticket") {
     delete operation.responses["200"];
@@ -726,12 +755,24 @@ const openapi = {
   servers: [{ url: "http://127.0.0.1:8787", description: "Default loopback primary" }],
   security: [],
   paths: openAPIPaths,
+  tags: [...new Set(routes.map(route => route.path.startsWith('/api/') ? route.path.split('/')[2] : 'service'))].sort().map(name => ({ name, description: name === 'sensors' ? 'Read-only PCB measurements for system monitors. Host-computer measurements are separate under os/facts.' : undefined })),
   components: {
     securitySchemes: {
       bearerAuth: { type: "http", scheme: "bearer", description: "Durable host access credential for HTTP and non-browser WebSocket clients. Never place it in a URL." },
       tokenHeader: { type: "apiKey", in: "header", name: "X-PCController-Token", description: "Header-only compatibility credential." },
     },
     schemas: {
+      BoardSensorReading: { type:'object',required:['id','label','kind','unit','value'],additionalProperties:false,properties:{
+        id:{enum:['supply','bus','current','power','temperature_led','temperature_bt_audio']},label:{type:'string'},
+        kind:{enum:['voltage','current','power','temperature']},unit:{enum:['V','A','W','C']},
+        value:{type:['number','null'],description:'Valid fresh reading in the declared unit, or null. Zero and negative readings are not missing.'},
+      }},
+      BoardSensorSnapshot:{type:'object',required:['source','host_instance_id','connection_generation','connected','fresh','observed_at','expires_at','readings'],properties:{
+        source:{const:'pccontroller-board-status'},host_instance_id:{type:'string'},connection_generation:{type:'integer',minimum:0},connected:{type:'boolean'},fresh:{type:'boolean'},
+        observed_at:{type:'string',format:'date-time',description:'Host receipt time of the original board-status frame, not scrape or per-sensor ADC time.'},
+        expires_at:{type:'string',format:'date-time',description:'Five seconds after original receipt. Expired values are null.'},
+        readings:{type:'array',items:{$ref:'#/components/schemas/BoardSensorReading'}},
+      }},
       JSONRPCID: { oneOf: [{ type: "string" }, { type: "integer" }, { type: "null" }] },
       JSONRPCRequest: {
         type: "object", required: ["jsonrpc", "method"], additionalProperties: false,
@@ -903,6 +944,14 @@ const rpcSchema = {
     },
   },
 	"x-methods": Object.fromEntries(methods.map(({ name, ...metadata }) => {
+		if (requestFields[name]) metadata.request_fields = requestFields[name];
+		// Examples must not contain mutually exclusive selectors. This remains a
+		// template: owner and revision placeholders must come from a fresh snapshot.
+		if (name === 'controller.pwm.set') metadata.request_template = {
+			channel: 0, percent: 50, expected_host_instance_id: '<snapshot host_instance_id>',
+			expected_connection_generation: 0, board_identity: '<snapshot board identity>',
+			expected_revision: '<snapshot revision>', expected_pwm_configuration_revision: '<snapshot PWM configuration revision>',
+		};
 		const contract = rpcActionMethodContracts[name];
 		if (!contract) return [name, metadata];
 		return [name, {
@@ -984,18 +1033,8 @@ const outputs = new Map([
 ]);
 
 const digest = createHash("sha256").update([...outputs.values()].join("\n")).digest("hex");
-const escapeHTML = (value) => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
-const routeRows = routes.flatMap((route) => route.methods.map((method) => `<tr><td><code>${method.toUpperCase()}</code></td><td><code>${escapeHTML(route.path)}</code></td><td>${escapeHTML(route.summary)}</td><td><span>${escapeHTML(route.capability)}</span></td></tr>`)).join("");
-const methodRows = methods.map((method) => `<tr><td><code>${method.name}</code></td><td>${escapeHTML(method.summary)}</td><td><span>${method.capability}</span></td><td>${method.idempotency}</td></tr>`).join("");
-const reference = `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><title>${escapeHTML(product.referenceTitle)}</title>
-<style>:root{font-family:Inter,Segoe UI,system-ui,sans-serif;color-scheme:light dark;--bg:#f6f7fb;--panel:#fff;--text:#172033;--muted:#647087;--line:#dfe3ec;--accent:#6d4aff}@media(prefers-color-scheme:dark){:root{--bg:#11131a;--panel:#191c25;--text:#edf0f7;--muted:#a8b0c2;--line:#303543;--accent:#a995ff}}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text)}main{width:min(1180px,calc(100% - 32px));margin:auto;padding:48px 0 80px}header{display:grid;gap:12px;margin-bottom:34px}h1{font-size:clamp(2rem,5vw,4rem);letter-spacing:-.05em;margin:0}p{color:var(--muted);max-width:76ch;line-height:1.65}.pills{display:flex;flex-wrap:wrap;gap:8px}.pills a,.pills span,td span{border:1px solid var(--line);border-radius:999px;padding:6px 10px;color:var(--text);text-decoration:none;background:color-mix(in srgb,var(--panel) 88%,var(--accent) 12%)}section{margin-top:34px;background:color-mix(in srgb,var(--panel) 92%,transparent);border:1px solid var(--line);border-radius:20px;overflow:hidden;box-shadow:0 18px 55px color-mix(in srgb,var(--text) 8%,transparent)}section>div{padding:22px 24px 6px}h2{margin:0;font-size:1.25rem}table{border-collapse:collapse;width:100%;font-size:.9rem}th,td{text-align:left;padding:13px 16px;border-top:1px solid var(--line);vertical-align:top}th{color:var(--muted);font-weight:600}code{font-family:Cascadia Code,ui-monospace,monospace;color:var(--accent);overflow-wrap:anywhere}@media(max-width:720px){main{width:min(100% - 20px,1180px);padding-top:26px}section{overflow:auto}table{min-width:760px}}</style></head>
-<body><main><header><span>OFFLINE CONTRACT · LIVING API</span><h1>${escapeHTML(product.referenceHeading)}</h1><p>The primary host exposes one unversioned, safety-gated living surface across REST, JSON-RPC, WebSocket, and the bounded Socket.IO adapter. Loopback is the default; immediate-alpha application authentication and authorization are disabled under issue #148.</p><div class="pills"><a href="openapi.json">OpenAPI 3.1</a><a href="asyncapi.json">AsyncAPI 3.0</a><a href="jsonrpc.schema.json">JSON-RPC schema</a><span>${methods.length} RPC methods</span><span>${routes.reduce((count, route) => count + route.methods.length, 0)} HTTP operations</span></div></header>
-<section><div><h2>HTTP operations</h2><p>Canonical routes live directly under <code>/api/</code>. JSON bodies are capped at 1 MiB.</p></div><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th><th>Capability</th></tr></thead><tbody>${routeRows}</tbody></table></section>
-<section><div><h2>JSON-RPC methods</h2><p>Standard JSON-RPC errors are preserved; host extensions use -32001 for authentication, -32003 for capability denial, and -32000 for runtime or device failures.</p></div><table><thead><tr><th>Method</th><th>Purpose</th><th>Capability</th><th>Idempotency</th></tr></thead><tbody>${methodRows}</tbody></table></section>
-<p>Contract digest <code>${digest}</code>. Generated by <code>Tools/Audit/generate-api-reference.mjs</code>.</p></main></body></html>\n`;
-outputs.set("reference.html", reference);
+for (const [name, content] of renderExplorer({ product, openapi, rpcSchema, asyncapi, digest })) outputs.set(name, content);
+outputs.set("assets/icon.svg", readFileSync(resolve(root, "Tools/Controller/web/public/favicon.svg"), "utf8"));
 
 const dispatcherFiles = [
   "Tools/Controller/internal/ipcjson/ipc.go",
@@ -1017,6 +1056,8 @@ validateMethodCatalog({
 const routeSourceFiles = [
   "Tools/Controller/internal/ipcjson/ipc.go",
 	"Tools/Controller/internal/ipcjson/upnp.go",
+	"Tools/Controller/internal/ipcjson/board_sensors.go",
+	"Tools/Controller/internal/ipcjson/api_reference.go",
   "Tools/Controller/internal/ipcjson/artifacts_http.go",
   "Tools/Controller/internal/releaseplane/http.go",
 ];
@@ -1058,7 +1099,10 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     process.stdout.write(`API reference is current: ${methods.length} RPC methods, ${Object.keys(openAPIPaths).length} REST paths, digest ${digest.slice(0, 12)}.\n`);
   } else {
     mkdirSync(outputDirectory, { recursive: true });
-    for (const [name, content] of outputs) writeFileSync(resolve(outputDirectory, name), content, "utf8");
+    for (const [name, content] of outputs) {
+      mkdirSync(dirname(resolve(outputDirectory, name)), { recursive: true });
+      writeFileSync(resolve(outputDirectory, name), content, "utf8");
+    }
     process.stdout.write(`Generated ${outputs.size} API reference files with digest ${digest.slice(0, 12)}.\n`);
   }
 }

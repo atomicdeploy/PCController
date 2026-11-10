@@ -152,6 +152,7 @@ export function goTestSourceIdentity(moduleRoot, goVersion, environment = {}) {
 	walkEmbeddedFiles(join(moduleRoot, 'internal', 'webui', 'dist'), files)
 	walkEmbeddedFiles(join(moduleRoot, 'internal', 'defaultassets', 'assets'), files)
 	walkEmbeddedFiles(join(moduleRoot, 'assets'), files)
+	walkEmbeddedFiles(join(moduleRoot, 'api'), files)
 	const artwork = join(moduleRoot, 'winres')
 	if (existsSync(artwork)) {
 		for (const name of readdirSync(artwork)) {

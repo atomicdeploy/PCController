@@ -7,6 +7,22 @@ relicense any item listed here.
 
 ## Source incorporated in this repository
 
+### Offline API explorer
+
+`Tools/Controller/api/assets/scalar.js` embeds Scalar 1.63.0, under MIT. The
+offline browser setup adapts the MIT-licensed Patris exporter API-reference
+work at commit `ce9ac11e3dc6d0ebdde7cfbc1319be86c6470f7c`.
+Full Scalar, Tailwind and Patris terms and attribution are retained in
+[`Tools/Controller/api/THIRD_PARTY_NOTICES.md`](Tools/Controller/api/THIRD_PARTY_NOTICES.md).
+The pinned npm source and build instructions live in `Tools/Audit/explorer`.
+
+### Optional Linux hwmon facade
+
+`Tools/Integrations/hwmon/pccontroller_hwmon.c` is separately licensed
+`GPL-2.0-only` for compatibility with the Linux kernel API. Its full license is
+shipped as [`Tools/Integrations/hwmon/COPYING`](Tools/Integrations/hwmon/COPYING).
+The PCController host/feeder is not linked into this optional kernel module.
+
 ### RayanLamp native desktop
 
 `Tools/NativeDesktop` preserves the complete RayanLamp source import and its

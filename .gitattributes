@@ -20,3 +20,5 @@ Tools/Bootloader/Urboot-Custom/patches/0001-optional-progress-backend-hook.patch
 Desktop.ini text eol=crlf
 *.ico binary
 *.png binary
+# Preserve upstream JS bytes, including whitespace inside template literals.
+Tools/Controller/api/assets/scalar.js linguist-vendored linguist-generated -whitespace

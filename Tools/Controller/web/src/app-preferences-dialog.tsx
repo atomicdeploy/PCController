@@ -4,6 +4,7 @@ import { Button, RangeField, Segmented, Toggle } from './components'
 import type { Appearance, Locale } from './types'
 import type { QuickHeaderControlID, QuickHeaderPreferences } from './quick-header-preferences'
 import { StartupPreferences } from './startup-preferences'
+import { controllerHTTPURL } from './transport-config'
 
 type PreferenceTab = 'appearance' | 'header'
 
@@ -153,7 +154,7 @@ export function AppPreferencesDialog({
         <Toggle checked={quickHeader.hotkeys} onChange={(value) => setHeaderControl('hotkeys', value)} label={copy('Keyboard guide', 'راهنمای صفحه‌کلید')} />
         <Toggle checked={quickHeader.notifications} onChange={(value) => setHeaderControl('notifications', value)} label={copy('Event notifications', 'اعلان رویدادها')} />
       </div>}
-      <footer>{copy('These preferences affect the host interface only. Controller settings remain on the Settings page.', 'این ترجیحات فقط روی رابط میزبان اثر می‌گذارند. تنظیمات کنترلر در صفحهٔ تنظیمات باقی می‌مانند.')}</footer>
+      <footer>{hostSettingsEnabled && <a href={controllerHTTPURL('/api/docs/')} target="_blank" rel="noreferrer">{copy('API explorer ↗', 'مرورگر API ↗')}</a>}</footer>
     </section>
   </div>
 }
