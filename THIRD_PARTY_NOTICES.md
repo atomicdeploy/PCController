@@ -144,6 +144,11 @@ the generated host binary; that generated directory is excluded from Git.
 
 The resolved module graph was audited in these license groups:
 
+- Eclipse Paho MQTT for Go (`github.com/eclipse/paho.mqtt.golang`):
+  [EPL-2.0 or EDL-1.0](https://github.com/eclipse-paho/paho.mqtt.golang/blob/v1.5.1/NOTICE.md).
+  Used by the optional outbound MQTT transport; upstream notices ship with
+  the Go-module licenses.
+
 `go.bug.st/serial` is resolved from the public
 [`DRSDavidSoft/go-serial`](https://github.com/DRSDavidSoft/go-serial) fork at
 merge commit `fa09c8b9a680de6b432bf437ed15092add910ae1`, based on upstream 1.8.0.

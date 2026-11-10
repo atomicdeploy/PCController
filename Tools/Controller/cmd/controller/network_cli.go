@@ -51,7 +51,8 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 			IPC       appconfig.IPC               `json:"ipc"`
 			Discovery appconfig.Discovery         `json:"discovery"`
 			Peers     []appconfig.WebSocketClient `json:"websocket_clients,omitempty"`
-		}{redacted.IPC, redacted.Integrations.Discovery, redacted.Integrations.WebSocketClients}
+			MQTT      any                         `json:"mqtt"`
+		}{redacted.IPC, redacted.Integrations.Discovery, redacted.Integrations.WebSocketClients, redacted.Integrations.MQTT}
 		encoded, _ := json.MarshalIndent(value, "", "  ")
 		fmt.Fprintln(stdout, string(encoded))
 		return nil

@@ -1253,6 +1253,7 @@
             "controller.board.firmware.upload",
             "controller.bridge.call",
             "controller.bridge.list",
+            "controller.buzzer.tone",
             "controller.channel_routing.get",
             "controller.channel_routing.update",
             "controller.channel.set",
@@ -1333,6 +1334,9 @@
             "controller.motion.hold.release",
             "controller.motion.hold.renew",
             "controller.motion.hold.start",
+            "controller.mqtt.config.get",
+            "controller.mqtt.config.set",
+            "controller.mqtt.status",
             "controller.network.peers.get",
             "controller.network.peers.set",
             "controller.opcode.exchange",
@@ -4368,6 +4372,47 @@
       "description": "List bridge.",
       "use_case": "Choose a named configured peer before a typed relay call.",
       "result_description": "Entries describe configured links; an available bridge does not guarantee the remote board is attached."
+    },
+    "controller.buzzer.tone": {
+      "capability": "board_commands",
+      "summary": "Read buzzer tone",
+      "idempotency": "non-idempotent",
+      "title": "Read buzzer tone",
+      "description": "Send one bounded tone to the board buzzer, replacing any streamed melody. Specify frequency_hz (20–20000) and duration_ms (1–5000); the receipt acknowledges dispatch, not audible output.",
+      "request_fields": {
+        "properties": {
+          "board_identity": {
+            "type": "string",
+            "description": "Exact identity of the attached board used to fence this operation; a renamed channel caption is not a board identity."
+          },
+          "duration_ms": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "expected_connection_generation": {
+            "minimum": 0,
+            "type": "integer",
+            "description": "Current board connection generation from the selected snapshot; fences writes against reconnects."
+          },
+          "expected_host_instance_id": {
+            "type": "string",
+            "description": "Exact current host process identity from the selected snapshot; rejects writes addressed to a replaced host."
+          },
+          "expected_pwm_configuration_revision": {
+            "type": "string",
+            "description": "Opaque current PWM curve/configuration revision; prevents applying a percentage using an obsolete conversion."
+          },
+          "expected_revision": {
+            "type": "string",
+            "description": "Opaque current resource revision from the selected host; stale values reject the change rather than overwrite newer work."
+          },
+          "frequency_hz": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.channel_routing.get": {
       "capability": "read",
@@ -7726,6 +7771,83 @@
         },
         "type": "object"
       }
+    },
+    "controller.mqtt.config.get": {
+      "capability": "host_configuration",
+      "summary": "Read MQTT configuration",
+      "idempotency": "idempotent-with-authoritative-readback",
+      "title": "Read MQTT configuration",
+      "description": "Read the local host’s saved outbound MQTT broker, topic and credential reference together with effective connection status. The password is never returned. This local-only call does not start or stop the transport.",
+      "use_case": "Confirm the configured broker session before relying on retained telemetry.",
+      "result_description": "config is the persisted MQTT configuration without a password. status reports build availability, enabled configuration, acknowledged broker connection and any connection error. Access is local only."
+    },
+    "controller.mqtt.config.set": {
+      "capability": "host_configuration",
+      "summary": "Update MQTT configuration",
+      "idempotency": "idempotent-with-authoritative-readback",
+      "title": "Update MQTT configuration",
+      "description": "Replace the local host’s MQTT configuration and request a hot reload. A successful reply confirms persistence, not broker login; check controller.mqtt.status. Command authority is off unless allow_commands is true.",
+      "use_case": "Enable a unique broker topic in read-only mode before granting board command access.",
+      "result_description": "config is the persisted MQTT configuration without a password. status reports build availability, enabled configuration, acknowledged broker connection and any connection error. Access is local only.",
+      "request_fields": {
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Enable or stop the outbound MQTT broker session."
+          },
+          "broker": {
+            "type": "string",
+            "description": "mqtts://HOST[:PORT], or mqtt:// with a literal loopback IP. No credentials in the URL."
+          },
+          "topic": {
+            "type": "string",
+            "description": "Unique per-device prefix for command, event, status and availability."
+          },
+          "username": {
+            "type": "string",
+            "description": "Optional broker username."
+          },
+          "password_ref": {
+            "type": "string",
+            "description": "Optional os: or env: reference. Omit to clear; never send the password here."
+          },
+          "ca_file": {
+            "type": "string",
+            "description": "Optional local PEM bundle to add to system trust roots."
+          },
+          "telemetry_seconds": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3600,
+            "description": "Periodic status interval; zero uses the default of five seconds."
+          },
+          "allow_commands": {
+            "type": "boolean",
+            "description": "Explicitly grant broker command-topic writers the bounded board command set; defaults to false."
+          }
+        }
+      },
+      "request_template": {
+        "enabled": true,
+        "broker": "mqtts://broker.example:8883",
+        "topic": "pccontroller/cinema",
+        "telemetry_seconds": 5,
+        "allow_commands": false
+      }
+    },
+    "controller.mqtt.status": {
+      "capability": "host_configuration",
+      "summary": "Inspect MQTT",
+      "idempotency": "idempotent-with-authoritative-readback",
+      "title": "Inspect MQTT",
+      "description": "Check whether this build supports MQTT, whether the integration is enabled, and whether the broker acknowledged its session. The result includes the saved configuration and the latest connection error, without secrets.",
+      "use_case": "Confirm the configured broker session before relying on retained telemetry.",
+      "result_description": "config is the persisted MQTT configuration without a password. status reports build availability, enabled configuration, acknowledged broker connection and any connection error. Access is local only."
     },
     "controller.network.peers.get": {
       "capability": "read",

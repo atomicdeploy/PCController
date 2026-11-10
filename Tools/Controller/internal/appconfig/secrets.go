@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"pccontroller.local/controller/internal/mqttbridge"
 	"pccontroller.local/controller/internal/secretstore"
 )
 
@@ -55,6 +56,7 @@ func (store *Store) Redacted() Config {
 func Redacted(value Config) Config {
 	result := clone(value)
 	result.IPC.AuthToken = ""
+	result.Integrations.MQTT.Password = ""
 	for index := range result.Integrations.WebSocketClients {
 		result.Integrations.WebSocketClients[index].AuthToken = ""
 	}
@@ -215,6 +217,14 @@ func resolveConfigSecrets(value Config, resolver *secretstore.Resolver) (Config,
 	// immediate alpha. Preserve references in persisted configuration for a
 	// future explicit migration, but never resolve or inject them at runtime.
 	result.IPC.AuthToken, result.IPC.AuthTokenRef = "", ""
+	if mqtt := &result.Integrations.MQTT; mqttbridge.Available && mqtt.Enabled && mqtt.PasswordRef != "" {
+		// An unavailable MQTT credential must not disable other transports
+		// or fall back to an anonymous broker connection.
+		ref := mqtt.PasswordRef
+		if err := resolve("integrations.mqtt.password", &mqtt.Password, &mqtt.PasswordRef); err != nil || len(mqtt.Password) > 4096 {
+			mqtt.Password, mqtt.PasswordRef = "", ref
+		}
+	}
 	for index := range result.Integrations.WebSocketClients {
 		peer := &result.Integrations.WebSocketClients[index]
 		// Outbound bearer credentials remain optional for the bounded transition
@@ -249,6 +259,7 @@ func resolveConfigSecrets(value Config, resolver *secretstore.Resolver) (Config,
 func failClosedRuntime(value Config) Config {
 	result := clone(value)
 	result.IPC.AuthToken, result.IPC.AuthTokenRef = "", ""
+	result.Integrations.MQTT.Password = ""
 	for index := range result.Integrations.WebSocketClients {
 		peer := &result.Integrations.WebSocketClients[index]
 		if peer.AuthTokenRef != "" {
@@ -273,6 +284,7 @@ func configuredSecretUses(value Config) []SecretUse {
 		}
 	}
 	appendUse("ipc.auth_token", value.IPC.AuthToken, value.IPC.AuthTokenRef)
+	appendUse("integrations.mqtt.password", "", value.Integrations.MQTT.PasswordRef)
 	for index, peer := range value.Integrations.WebSocketClients {
 		appendUse(fmt.Sprintf("integrations.websocket_clients[%d].auth_token", index), peer.AuthToken, peer.AuthTokenRef)
 	}

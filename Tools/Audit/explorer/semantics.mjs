@@ -555,6 +555,11 @@ export function rpcMeaning(name, description) {
   }
   const extra=rpcDescriptions[name];
   if(extra) description=extra;
+  if (name.startsWith('controller.mqtt.')) return {
+    title:methodTitle(name), summary:methodTitle(name), description,
+    use_case:name.endsWith('.set')?'Enable a unique broker topic in read-only mode before granting board command access.':'Confirm the configured broker session before relying on retained telemetry.',
+    result_description:'config is the persisted MQTT configuration without a password. status reports build availability, enabled configuration, acknowledged broker connection and any connection error. Access is local only.',
+  };
   if(/^(Read|Invoke) the .* (surface|operation)\.$/u.test(description)) throw new Error(`RPC method needs a purpose description: ${name}`);
   const title=methodTitle(name);
   return {title,summary:title,description};
@@ -563,7 +568,7 @@ export function rpcMeaning(name, description) {
 function methodTitle(name) {
   const parts=name.replace(/^controller\./u,'').split(/[._-]+/u);
   const verbs={get:'Read',set:'Update',put:'Save',list:'List',configure:'Configure',update:'Update',remove:'Remove',clear:'Clear',start:'Start',stop:'Stop',cancel:'Cancel',open:'Open',close:'Close',reset:'Reset',build:'Build',play:'Play',begin:'Begin',chunk:'Transfer chunk for',finish:'Finish',abort:'Abort',capture:'Capture',fetch:'Fetch',download:'Download',upload:'Upload',inspect:'Inspect',status:'Inspect',apply:'Apply',resync:'Resynchronize',invoke:'Invoke',execute:'Execute',release:'Release',renew:'Renew',override:'Override',add:'Add',map:'Map',transmit:'Transmit',send:'Send',scan:'Discover',subscribe:'Subscribe to',unsubscribe:'Unsubscribe from'};
-  const labels={ui:'UI',os:'OS',rf:'RF',pwm:'PWM',lcd:'LCD',udp:'UDP',config:'configuration',estop:'emergency interlock',eeprom:'EEPROM',ack:'acknowledgement',opcodes:'opcodes'};
+  const labels={ui:'UI',os:'OS',rf:'RF',pwm:'PWM',lcd:'LCD',udp:'UDP',mqtt:'MQTT',config:'configuration',estop:'emergency interlock',eeprom:'EEPROM',ack:'acknowledgement',opcodes:'opcodes'};
   const tail=parts.at(-1),verb=verbs[tail];
   if(verb)parts.pop();
   const object=parts.map(p=>labels[p]??p).join(' ');
@@ -606,6 +611,10 @@ const rpcDescriptions = {
   'controller.status_led.set':'Apply an explicit status LED override under the current board policy. Use controller.status_led.release to return presentation to the reactive policy.',
   'controller.udp.config.get':'Read persisted binary UDP transport settings without starting discovery or broadcasting commands. Effective runtime health is available from controller.udp.status.',
   'controller.udp.config.set':'Persist binary UDP transport settings through the host configuration path. Advertisement/subscription settings do not grant remote output authority.',
+  'controller.mqtt.config.get':'Read the local host’s saved outbound MQTT broker, topic and credential reference together with effective connection status. The password is never returned. This local-only call does not start or stop the transport.',
+  'controller.mqtt.config.set':'Replace the local host’s MQTT configuration and request a hot reload. A successful reply confirms persistence, not broker login; check controller.mqtt.status. Command authority is off unless allow_commands is true.',
+  'controller.mqtt.status':'Check whether this build supports MQTT, whether the integration is enabled, and whether the broker acknowledged its session. The result includes the saved configuration and the latest connection error, without secrets.',
+  'controller.buzzer.tone':'Send one bounded tone to the board buzzer, replacing any streamed melody. Specify frequency_hz (20–20000) and duration_ms (1–5000); the receipt acknowledges dispatch, not audible output.',
   'controller.udp.events.get':'Read bounded retained UDP transport event receipts for diagnostics. Historical receipts must not be replayed as current board commands.',
   'controller.unsubscribe':'Remove this WebSocket connection’s active subscriptions. This affects future notifications only; it does not disconnect the board, stop outputs or cancel already-running jobs.',
   'controller.app.page':'Navigate application surfaces using the compatibility page operation. Use controller.app.navigate for explicit surface/instance targeting.',

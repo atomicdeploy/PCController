@@ -230,6 +230,7 @@ type Service struct {
 	DesktopOSD       DesktopOSDService
 	udpOnce          sync.Once
 	udpState         udpRuntime
+	mqttState        mqttRuntime
 	Client           *controller.Client
 	WebSocketPath    string
 	SocketIOPath     string
@@ -559,6 +560,9 @@ func (service *Service) dispatch(
 	}
 	if strings.HasPrefix(request.Method, "controller.udp.") {
 		return service.dispatchUDP(ctx, request, access)
+	}
+	if strings.HasPrefix(request.Method, "controller.mqtt.") {
+		return service.dispatchMQTT(request, access)
 	}
 	// Primary discovery must not queue behind a long board, firmware, or shell
 	if request.ClientID != "" {
@@ -1605,6 +1609,26 @@ func (service *Service) dispatch(
 		if err = decodeParams(request.Params, &params); err == nil {
 			result, err = service.Client.PresentDisplay(ctx, params)
 		}
+	case "controller.buzzer.tone":
+		var params struct {
+			controlIntentOwner
+			FrequencyHz uint16 `json:"frequency_hz"`
+			DurationMS  uint16 `json:"duration_ms"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			if params.FrequencyHz < 20 || params.FrequencyHz > 20000 || params.DurationMS < 1 || params.DurationMS > 5000 {
+				err = &RPCError{Code: -32602, Message: "frequency_hz must be 20..20000; duration_ms must be 1..5000"}
+			} else {
+				var guarded context.Context
+				guarded, err = service.guardControlIntent(ctx, params.controlIntentOwner, false)
+				if err == nil {
+					err = service.Client.PlayTone(guarded, params.FrequencyHz, params.DurationMS)
+				}
+				if err == nil {
+					result = map[string]bool{"accepted": true}
+				}
+			}
+		}
 	case "controller.opcode.send", "controller.opcode.exchange", "controller.opcode.request":
 		var params opcodeExchangeParams
 		if err = decodeStrictParams(request.Params, &params); err == nil {
@@ -2565,6 +2589,17 @@ func (service *Service) authorizeCapability(
 	operation, capability string,
 ) error {
 	access = service.normalizeAccess(access)
+	if access.Transport == "mqtt" {
+		// The outbound broker session has an independent, narrower grant;
+		// never inherit alpha's LAN authorization bypass.
+		config := service.hostConfig().Integrations.MQTT
+		allowed := access.authenticated && config.Enabled && config.AllowCommands && capability == capabilityBoard && mqttMethodAllowed(operation)
+		service.auditAccess(access, operation, capability, allowed)
+		if !allowed {
+			return errors.New("MQTT command authority is disabled")
+		}
+		return nil
+	}
 	if !access.Remote {
 		if service.authorizationDisabled() {
 			return nil
@@ -2686,6 +2721,8 @@ func requestCapability(method string, params json.RawMessage) string {
 	case "controller.udp.events.get", "controller.udp.subscribe", "controller.udp.unsubscribe":
 		return capabilityEvents
 	case "controller.udp.config.set":
+		return capabilityHostConfig
+	case "controller.mqtt.config.get", "controller.mqtt.config.set", "controller.mqtt.status":
 		return capabilityHostConfig
 	case "controller.udp.call":
 		return capabilityBridgeCalls

@@ -439,6 +439,7 @@ Release archives add the version and include SHA-256 metadata. Follow
 | [Getting Started and Operations](docs/Getting-Started-and-Operations.md) | First connection, WebUI/TUI/CLI operation, RF, automation, and troubleshooting |
 | [Front Panel and Menus](docs/Front-Panel-and-Menus.md) | Physical controls, editors, display semantics, and hosted menus |
 | [Host Configuration and Integrations](docs/Host-Configuration-and-Integrations.md) | JSON configuration, hotkeys, notifications, discovery, local devices, webhooks, and bridges |
+| [MQTT](docs/MQTT.md) | Optional TLS broker integration, telemetry, events, and fenced board commands |
 | [OpenRGB, SignalRGB and lighting inputs](docs/RGB-INPUT.md) | DDP, Art-Net, sACN, WLED/Hyperion, serial Adalight/TPM2, SignalRGB plugin setup, ownership and recovery |
 | [Protocol and Network API](Tools/Controller/docs/Protocol-and-Network-API.md) | UART frames, commands, JSON-RPC, REST, WebSocket, authorization, and events |
 | [Machine-readable API contracts](Tools/Controller/api/reference.html) | Offline OpenAPI 3.1, AsyncAPI 3.0, JSON-RPC methods, errors, capabilities, and idempotency |

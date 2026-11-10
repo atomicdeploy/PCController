@@ -519,6 +519,7 @@ export function parseArguments(argv, env = process.env) {
 			case '--skip-resources':
 			case '--no-resources': options.resources = false; break
 			case '--no-upx': options.upx = false; break
+			case '--no-mqtt': options.noMQTT = true; break
 			case '--stage-only': options.stageOnly = true; break
 			case '--no-shared-library': options.sharedLibrary = false; break
 			case '--no-avrdude-library': options.avrdudeLibrary = false; break
@@ -816,7 +817,7 @@ export function createPlan(options, identity, platform = process.platform) {
 		if (options.vet) actions.push(commandAction('go-vet', 'Run Go vet', 'go', ['vet', './...'], HOST_ROOT))
 		const plannedExecutable = `<staging>/${platformExecutableName(identity, platform)}`
 		const nativeProgrammer = options.avrdudeLibrary && options.avrdudeMode === 'native'
-		actions.push(commandAction('host-build', 'Build controller host', 'go', ['build', ...(nativeProgrammer ? ['-tags', 'libavrdude'] : []), '-buildvcs=false', '-trimpath', '-ldflags', `<identity ${identity.version} ${identity.hostBuildTime}>`, '-o', plannedExecutable, './cmd/controller'], HOST_ROOT))
+		actions.push(commandAction('host-build', 'Build controller host', 'go', ['build', ...hostTagArguments(options, nativeProgrammer), '-buildvcs=false', '-trimpath', '-ldflags', `<identity ${identity.version} ${identity.hostBuildTime}>`, '-o', plannedExecutable, './cmd/controller'], HOST_ROOT))
 		if (platform === 'win32' && options.resources) actions.push(commandAction('winres', 'Apply Win32 resources', 'go-winres', [
 			'patch', '--in', '<staging>/winres-identity.json', '--delete', '--no-backup',
 			'--product-version', identity.version, '--file-version', identity.version,
@@ -827,7 +828,7 @@ export function createPlan(options, identity, platform = process.platform) {
 			actions.push(commandAction('upx-test', 'Test compressed controller host', 'upx', ['-t', plannedExecutable], HOST_ROOT))
 		}
 		if (options.sharedLibrary) actions.push(commandAction('c-abi', 'Build and smoke-test C ABI', 'go', [
-			'build', '-buildvcs=false', '-trimpath', '-tags', nativeProgrammer ? 'controllerlib,libavrdude' : 'controllerlib',
+			'build', '-buildvcs=false', '-trimpath', ...hostTagArguments(options, nativeProgrammer, true),
 			'-ldflags', '<embedded presentation defaults>',
 			'-buildmode=c-shared', '-o', '<staging>/pccontroller', './cmd/controller-cabi'
 		], HOST_ROOT))
@@ -922,6 +923,7 @@ Safe build options:
   --skip-vet                Explicitly skip Go vet only
   --skip-resources          Build Windows host without regenerated resources
   --no-upx                  Leave Windows controller executable unpacked
+  --no-mqtt                 Omit the outbound MQTT client from the host build
   --stage-only              Prepare host package for coordinator-owned update, without replacing the running package
   --no-shared-library       Skip C ABI library/header/smoke test
   --avrdude-mode MODE       native (default, static CGO), helper (isolated), cli
@@ -2015,6 +2017,11 @@ int main(void) {
 `
 }
 
+function hostTagArguments(options, nativeProgrammer, shared = false) {
+	const tags = [shared && 'controllerlib', nativeProgrammer && 'libavrdude', options.noMQTT && 'no_mqtt'].filter(Boolean)
+	return tags.length ? ['-tags', tags.join(',')] : []
+}
+
 function buildSharedLibrary(go, stage, env, goArch, options, log, ldflags, nativeProgrammer = null) {
 	const extension = process.platform === 'win32' ? '.dll' : process.platform === 'darwin' ? '.dylib' : '.so'
 	const output = join(stage, `pccontroller${extension}`)
@@ -2034,7 +2041,7 @@ function buildSharedLibrary(go, stage, env, goArch, options, log, ldflags, nativ
 		}
 	}
 	run(go, [
-		'build', '-buildvcs=false', '-trimpath', '-tags', nativeProgrammer ? 'controllerlib,libavrdude' : 'controllerlib',
+		'build', '-buildvcs=false', '-trimpath', ...hostTagArguments(options, nativeProgrammer, true),
 		'-ldflags', ldflags,
 		'-buildmode=c-shared', '-o', output, './cmd/controller-cabi'
 	], { cwd: HOST_ROOT, env: { ...compiler.env, CGO_ENABLED: '1', ...(nativeProgrammer || {}) }, verbose: options.verbose })
@@ -2455,9 +2462,10 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 		programmerLibrary = buildAvrdudeAdapter(stage, env, options)
 	}
 	const nativeAvrdude = options.avrdudeLibrary && options.avrdudeMode === 'native'
-	const nativeEnv = nativeAvrdude ? { ...goEnv, ...programmerLibrary.cgoEnv,
-		GOFLAGS: `${goEnv.GOFLAGS || ''} -tags=libavrdude`.trim(),
-		PCCONTROLLER_AVRDUDE_TEST_CONFIG: join(stage, 'tools', 'avrdude', 'avrdude.conf') } : goEnv
+	const hostTags = hostTagArguments(options, nativeAvrdude)
+	const nativeEnv = { ...goEnv, ...(nativeAvrdude ? programmerLibrary.cgoEnv : {}),
+		...(hostTags.length ? { GOFLAGS: `${goEnv.GOFLAGS || ''} -tags=${hostTags[1]}`.trim() } : {}),
+		...(nativeAvrdude ? { PCCONTROLLER_AVRDUDE_TEST_CONFIG: join(stage, 'tools', 'avrdude', 'avrdude.conf') } : {}) }
 	removeGeneratedWinResources()
 
 	log.stage('📦', 'Resolving Go modules')
@@ -2496,7 +2504,7 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 	const ldflags = `-s -w -X main.version=${identity.version} -X main.sourceHash=${before.sha256} -X main.buildTime=${identity.hostBuildTime} ${presentationFlags}`
 	log.stage('🖥️', `Building host ${identity.version} from ${before.sha256.slice(0, 12)}`)
 	const executableCGO = nativeAvrdude || process.platform === 'darwin' ? '1' : '0'
-	run(go, ['build', ...(nativeAvrdude ? ['-tags', 'libavrdude'] : []), '-buildvcs=false', '-trimpath', '-ldflags', ldflags, '-o', executable, './cmd/controller'], {
+	run(go, ['build', ...hostTags, '-buildvcs=false', '-trimpath', '-ldflags', ldflags, '-o', executable, './cmd/controller'], {
 		cwd: HOST_ROOT, env: { ...goEnv, CGO_ENABLED: executableCGO, ...(nativeAvrdude ? programmerLibrary.cgoEnv : {}) }, verbose: options.verbose
 	})
 	const after = hostSourceIdentity()

@@ -71,6 +71,7 @@ import { DEFAULT_STRIP_MAXIMUM_FPS } from './strip-limits'
 import { redactSensitiveCommand, shellArgument as quoteArgument } from './command-line'
 import { SevenSegmentPreview } from './seven-segment-preview'
 import { UDPSettings } from './udp-settings'
+import { MQTTSettings } from './mqtt-settings'
 import { StripColorOrder } from './strip-color-order'
 import { RGBInput } from './rgb-input'
 import type { FrontPanelState } from './types'
@@ -943,6 +944,7 @@ export function AdvancedWorkbench({
             <Toggle checked={discoverMNDP} onChange={setDiscoverMNDP} label="MNDP" />
           </div>
           <UDPSettings locale={locale} />
+          <MQTTSettings locale={locale} connectionEvent={events.find(event => event.kind === 'mqtt.connection')?.id} />
           <div className="advanced-fields advanced-fields--split">
             <TextField label={copy('Advertised instance name', 'نام تبلیغ‌شده نمونه')} hint={copy('Blank uses the configured app title', 'خالی یعنی عنوان برنامه')} value={discoveryInstanceName} maxLength={63} onChange={(event) => setDiscoveryInstanceName(event.target.value)} />
             <TextField label={copy('UDP broadcast port', 'درگاه پخش UDP')} type="number" min={1024} max={65535} value={discoveryBroadcastPort} onChange={(event) => setDiscoveryBroadcastPort(boundedInteger(event.target.value, 37889, 1024, 65535))} />
