@@ -131,6 +131,28 @@ func textImage(text string, size int, bold bool, c color.RGBA) (*image.RGBA, err
 	return img, nil
 }
 
+// A standalone glyph is an icon, not a line of text: font ascent/descent and
+// advance padding must not determine its position within a square hit target.
+func glyphInkBounds(img *image.RGBA) image.Rectangle {
+	b := img.Bounds()
+	var ink image.Rectangle
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			if img.Pix[img.PixOffset(x, y)+3] != 0 {
+				ink = ink.Union(image.Rect(x, y, x+1, y+1))
+			}
+		}
+	}
+	return ink
+}
+
+func trimGlyph(img *image.RGBA) *image.RGBA {
+	ink := glyphInkBounds(img)
+	cropped := image.NewRGBA(image.Rect(0, 0, max(1, ink.Dx()), max(1, ink.Dy())))
+	draw.Draw(cropped, cropped.Bounds(), img, ink.Min, draw.Src)
+	return cropped
+}
+
 type rendering struct {
 	base, frame          *image.RGBA
 	surface              *dib
@@ -266,14 +288,18 @@ func prepare(req Request, dpi, width int, icon image.Image, dark bool) (*renderi
 		at := image.Pt(px(29)+(px(42)-iw)/2, px(28)+(px(42)-ih)/2)
 		draw.Draw(r.base, image.Rectangle{Min: at, Max: at.Add(image.Pt(iw, ih))}, scaled, image.Point{}, draw.Over)
 	}
-	r.closeRect = image.Rect(width-px(45), px(15), width-px(17), px(43))
+	closeSize := px(28)
+	r.closeRect = image.Rect(width-px(17)-closeSize, px(15), width-px(17), px(15)+closeSize)
 	// Close glyph remains subordinate to the semantic icon, not stretched to fill.
 	closeText, err := textImage("×", px(20), false, r.muted)
 	if err != nil {
 		return nil, err
 	}
-	r.closeGlyph = closeText
-	r.closeGlyphAt = image.Pt(r.closeRect.Min.X+(r.closeRect.Dx()-closeText.Bounds().Dx())/2, r.closeRect.Min.Y)
+	r.closeGlyph = trimGlyph(closeText)
+	r.closeGlyphAt = image.Pt(
+		r.closeRect.Min.X+(r.closeRect.Dx()-r.closeGlyph.Bounds().Dx())/2,
+		r.closeRect.Min.Y+(r.closeRect.Dy()-r.closeGlyph.Bounds().Dy())/2,
+	)
 	r.titleRect = image.Rect(px(88), px(23), width-px(58), px(48))
 	r.title, err = textImage(req.Title, px(16), true, r.ink)
 	if err != nil {

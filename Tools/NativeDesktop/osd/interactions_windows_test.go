@@ -7,6 +7,7 @@ import (
 	"context"
 	"image"
 	"image/png"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -82,6 +83,36 @@ func TestHoverFramesNeverAccumulatePaint(t *testing.T) {
 					t.Fatal(err, closeErr)
 				}
 			}
+		}
+		r.close()
+	}
+}
+
+func TestCloseGlyphInkIsCenteredAtEveryDPIScale(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	restore, err := enterNativeDPI()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restore()
+	for _, dpi := range []int{96, 110, 120, 144, 168, 192, 240, 288, 384} {
+		r, err := prepare(Request{Title: "PCController", Text: "Close alignment"}, dpi, 1920*dpi/96, nil, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ink := glyphInkBounds(r.closeGlyph)
+		if r.closeRect.Dx() != r.closeRect.Dy() {
+			t.Fatal("close target is not square", dpi, r.closeRect)
+		}
+		if ink.Empty() || ink != r.closeGlyph.Bounds() {
+			t.Fatal("glyph still contains transparent padding", dpi, ink, r.closeGlyph.Bounds())
+		}
+		placed := ink.Add(r.closeGlyphAt)
+		dx := (float64(placed.Min.X+placed.Max.X) - float64(r.closeRect.Min.X+r.closeRect.Max.X)) / 2
+		dy := (float64(placed.Min.Y+placed.Max.Y) - float64(r.closeRect.Min.Y+r.closeRect.Max.Y)) / 2
+		if math.Abs(dx) > .5 || math.Abs(dy) > .5 || !placed.In(r.closeRect) {
+			t.Fatal("visible × not centered", dpi, placed, r.closeRect, dx, dy)
 		}
 		r.close()
 	}
