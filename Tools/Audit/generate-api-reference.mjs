@@ -9,7 +9,7 @@ import { loadProjectEnv } from "../Build/env.mjs";
 import { renderExplorer } from "./explorer/render.mjs";
 import { extractRequestShapes } from "./explorer/request-shapes.mjs";
 import { connectionGuides, subscriptionSchema } from "./explorer/websocket-contract.mjs";
-import { groups, introduction, enrichOperation, explainFields, explainContract, rpcMeaning } from './explorer/semantics.mjs';
+import { groups, introduction, enrichOperation, explainFields, explainContract, rpcMeaning, rpcWireDocumentation } from './explorer/semantics.mjs';
 
 loadProjectEnv();
 
@@ -988,6 +988,7 @@ const rpcSchema = {
 	"x-methods": Object.fromEntries(methods.map(({ name, ...metadata }) => {
 		Object.assign(metadata, rpcMeaning(name, metadata.summary));
 		if (requestFields[name] && !name.startsWith('controller.osd.')) metadata.request_fields = requestFields[name];
+		Object.assign(metadata,rpcWireDocumentation(name,requestFields));
 		if (name === 'controller.subscribe') {
 			metadata.params_schema = { $ref: '#/$defs/Subscription' };
 			metadata.request_template = subscriptionSchema.examples[0];

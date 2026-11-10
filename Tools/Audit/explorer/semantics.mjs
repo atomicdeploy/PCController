@@ -296,7 +296,7 @@ const typeFields={
   'releaseplane.StageStatus':{id:'Opaque staging job ID for /api/discovery/status/{id}.',kind:artifactFields.kind,state:'Staging lifecycle: queued, downloading, completed or failed. completed means imported, not installed.',progress_percent:'Staging progress: bounded download progress occupies up to 85%; completed reports 100 only after validation/import.'},
   'releaseplane.StageResult':{operation:'Current staging job snapshot; operation.id is the status lookup key.'},
   'artifacts.Descriptor':{...artifactFields,current:'Marked current by the artifact service; verified_readback separately establishes captured device bytes.'},
-  'artifacts.FetchRequest':artifactFields,'artifacts.UpdateStatus':updateFields,
+  'artifacts.FetchRequest':artifactFields,'artifacts.UploadRequest':{...artifactFields,data:'Base64-encoded artifact bytes for the JSON-RPC upload, not a multipart file or a local path.'},'artifacts.UpdateStatus':updateFields,
   'artifacts.OperationResult':{operation:'Current durable artifact/update job snapshot; operation.id is its lookup key.'},
   'artifacts.ToolchainReadiness':{ready:'Whether the selected provider passed readiness checks.',policy:'Configured provider selection policy; system is preferred unless explicitly selected otherwise.',provider:'Selected verified programming provider.',version:'Reported selected provider version.',providers:'Optional providers reported separately from the selected one.',compatible_sources:'Count of available compatible toolchain sources.'},
   'artifacts.ProgressStream':{transport:'Progress transport, normally the configured WebSocket.',url:'Configured progress stream endpoint; resolve host-relative paths against this listener.'},
@@ -375,6 +375,44 @@ export const httpTypes = {
   '/api/webhooks/outbound/replay':['ipcjson.webhookSelectorParams','ipcjson.WebhookReplayResult'],
   '/api/webhooks/outbound/clear':['ipcjson.webhookSelectorParams','ipcjson.WebhookClearResult'],
 };
+
+// Explicit RPC bindings: do not reuse the raw/multipart HTTP upload contract
+// for controller.artifact.upload, whose Go RPC request carries base64 data.
+const rpcTypes={
+  'controller.discovery.github.workflow':httpTypes['/api/discovery/github/workflow'],
+  'controller.discovery.github.release':httpTypes['/api/discovery/github/release'],
+  'controller.discovery.manifest':httpTypes['/api/discovery/manifest'],
+  'controller.discovery.local_manifest':[null,'releaseplane.Manifest'],
+  'controller.discovery.check':httpTypes['/api/discovery/check'],
+  'controller.discovery.stage':httpTypes['/api/discovery/stage'],
+  'controller.discovery.status':[null,'releaseplane.StageStatus'],
+  'controller.artifact.manifest':httpTypes['/api/artifacts/manifest'],
+  'controller.artifact.list':httpTypes['/api/artifacts'],
+  'controller.artifact.upload':['artifacts.UploadRequest','artifacts.OperationResult'],
+  'controller.artifact.fetch':httpTypes['/api/artifacts/fetch'],
+  'controller.artifact.capture':httpTypes['/api/artifacts/capture'],
+  'controller.board.firmware.upload':httpTypes['/api/board/firmware/upload'],
+  'controller.board.firmware.download':httpTypes['/api/board/firmware/download'],
+  'controller.update.firmware':httpTypes['/api/board/firmware/upload'],
+  'controller.update.eeprom':httpTypes['/api/board/firmware/upload'],
+  'controller.update.host':httpTypes['/api/board/firmware/upload'],
+  'controller.restore.flash':httpTypes['/api/restores/flash'],
+  'controller.update.status':httpTypes['/api/updates/status/{id}'],
+  'controller.display.send':httpTypes['/api/display'],
+  'controller.message.send':httpTypes['/api/messages'],
+  'controller.os.key':httpTypes['/api/os/key'],
+  'controller.os.power':httpTypes['/api/os/power'],
+};
+export function rpcWireDocumentation(name,shapes) {
+  const names=rpcTypes[name];if(!names)return {};
+  const read=key=>{if(!key)return undefined;const schema=shapes.$types[key];if(!schema||!Object.keys(schema).length)throw Error('Missing RPC Go type: '+key);return explainFields(structuredClone(schema));};
+  const result={};
+  if(names[0])result.request_fields=read(names[0]);
+  if(names[1])result.result_schema=read(names[1]);
+  const example=Object.entries(routeExamples).find(([key])=>{const [method,path]=key.split(' ');return routeMeaning(path,method).rpc===name;})?.[1];
+  if(example)result.request_template=example;
+  return result;
+}
 
 export const routeExamples = {
   'post /api/discovery/github/workflow':{repository:'atomicdeploy/PCController',branch:'main',kind:'host-executable',platform:'windows/amd64'},

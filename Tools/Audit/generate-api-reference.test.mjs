@@ -63,6 +63,11 @@ test('discovery and programming documentation distinguish inventory, staging, ac
   assert.equal(spec.paths['/api/webhooks/inbound'].get['x-idempotency'],'non-idempotent');
   assert.ok(spec.paths['/api/pwm/channel'].put);
   assert.equal(spec.paths['/api/pwm/channel'].get['x-required-capability'],'read');
+  const rpc=JSON.parse(readFileSync(join(outputDirectory,'jsonrpc.schema.json'),'utf8'))['x-methods'];
+  assert.match(rpc['controller.discovery.github.workflow'].request_fields.properties.repository.description,/owner\/repository/u);
+  assert.equal(rpc['controller.discovery.github.workflow'].result_schema.properties.candidates.type,'array');
+  assert.equal(rpc['controller.artifact.upload'].request_fields.properties.data.contentEncoding,'base64');
+  assert.equal(rpc['controller.artifact.upload'].request_fields.properties.file,undefined);
 });
 
 test('RPC purpose text is distinct from its title and never a mechanical surface label',()=>{
