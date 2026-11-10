@@ -12,6 +12,12 @@ may cover ordinary desktop windows.
   antialiased rounded edges, DPI-sized system text and original-aspect artwork.
 - A short cubic fade/slide at entrance and dismissal. Long headings/body text
   scroll at a fixed speed with pauses at both ends, independently of frame rate.
+- Clicking ×, choosing an action and API dismissal share the same short downward
+  fade, starting at the current opacity/position even during entrance. Repeated
+  dismissal does not restart it. Reduced-motion mode remains immediate.
+- Button and close-target hover fades over 120 ms, reversing from its current
+  tint if the pointer moves quickly. Only the input targets track pointer leave;
+  passive visual content never competes for hover. Surface opacity remains stable.
 - Body text preserves up to six explicit LF/CRLF lines, with height and action
   placement adapting to them. Each long line scrolls independently; short lines
   remain still. Oversized messages fail rather than covering off-screen controls.

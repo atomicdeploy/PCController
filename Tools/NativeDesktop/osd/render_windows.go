@@ -139,6 +139,8 @@ type rendering struct {
 	titleShadow          *image.RGBA
 	bodyShadows          []*image.RGBA
 	buttons              []*image.RGBA
+	closeGlyph           *image.RGBA
+	closeGlyphAt         image.Point
 	hits                 []image.Rectangle
 	scale                float64
 	titleRect, closeRect image.Rectangle
@@ -270,7 +272,8 @@ func prepare(req Request, dpi, width int, icon image.Image, dark bool) (*renderi
 	if err != nil {
 		return nil, err
 	}
-	draw.Draw(r.base, image.Rect(r.closeRect.Min.X+(r.closeRect.Dx()-closeText.Bounds().Dx())/2, r.closeRect.Min.Y, r.closeRect.Max.X, r.closeRect.Max.Y), closeText, image.Point{}, draw.Over)
+	r.closeGlyph = closeText
+	r.closeGlyphAt = image.Pt(r.closeRect.Min.X+(r.closeRect.Dx()-closeText.Bounds().Dx())/2, r.closeRect.Min.Y)
 	r.titleRect = image.Rect(px(88), px(23), width-px(58), px(48))
 	r.title, err = textImage(req.Title, px(16), true, r.ink)
 	if err != nil {
@@ -343,11 +346,23 @@ func RenderPreview(request Request, dpi int, dark bool, icon image.Image) (*imag
 		return nil, err
 	}
 	defer r.close()
-	return r.paint(0, request.ReduceMotion, -1), nil
+	return r.paint(0, request.ReduceMotion, nil), nil
 }
 
-func (r *rendering) paint(elapsed time.Duration, reduced bool, hover int) *image.RGBA {
+func (r *rendering) paint(elapsed time.Duration, reduced bool, hover []float64) *image.RGBA {
 	copy(r.frame.Pix, r.base.Pix)
+	amount := func(i int) float64 {
+		if i < len(hover) {
+			return min(1, max(0, hover[i]))
+		}
+		return 0
+	}
+	if level := amount(len(r.hits)); level > 0 {
+		c := r.muted
+		c.A = byte(30 * level)
+		rounded(r.frame, r.closeRect, 7*r.scale, c)
+	}
+	draw.Draw(r.frame, r.closeGlyph.Bounds().Add(r.closeGlyphAt).Intersect(r.closeRect), r.closeGlyph, image.Point{}, draw.Over)
 	line := func(im, shadow *image.RGBA, box image.Rectangle) {
 		offset := int(Marquee(elapsed, float64(im.Bounds().Dx()-box.Dx()), r.scale, reduced))
 		if shadow != nil {
@@ -387,16 +402,19 @@ func (r *rendering) paint(elapsed time.Duration, reduced bool, hover int) *image
 	}
 	for i, box := range r.hits {
 		stroke := r.muted
-		stroke.A = 65
+		level := amount(i)
+		stroke.A = byte(65 + 25*level)
 		rounded(r.frame, box, 7*r.scale, stroke)
 		fill := color.RGBA{65, 60, 75, 220}
 		if r.ink.R < 128 {
 			fill = color.RGBA{224, 219, 233, 245}
 		}
-		if i == hover {
-			fill = r.accent
-			fill.A = 60
-		}
+		// Keep surface opacity stable: the old hover replaced the opaque fill
+		// with a near-transparent tint, producing a conspicuous flash.
+		mix := .20 * level
+		fill.R = byte(float64(fill.R)*(1-mix) + float64(r.accent.R)*mix)
+		fill.G = byte(float64(fill.G)*(1-mix) + float64(r.accent.G)*mix)
+		fill.B = byte(float64(fill.B)*(1-mix) + float64(r.accent.B)*mix)
 		rounded(r.frame, box.Inset(1), max(1, 7*r.scale-1), fill)
 		im := r.buttons[i]
 		at := image.Pt(box.Min.X+(box.Dx()-im.Bounds().Dx())/2, box.Min.Y+(box.Dy()-im.Bounds().Dy())/2)
