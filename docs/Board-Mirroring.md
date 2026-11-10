@@ -115,7 +115,10 @@ note scheduler, rest cancellation, backend diagnostics and overflow reporting.
 VirtualBoard executes the same production firmware on Linux, with RAM-only
 `--memory --quiet` mode and independent processes per board. The native HAL
 implements virtual relay/PCA9685/display outputs and explicit input fixtures,
-not arbitrary real GPIO. `ON:n`/`OFF:n` stdout is available without `--quiet`.
+not arbitrary real GPIO. `Rn:ON`/`Rn:OFF` stdout is available without `--quiet`;
+`--output-format legacy` retains the former `ON:n`/`OFF:n` spelling. Explicit
+host GPIO/I2C and other mappings are described in [Native peripheral bridge](NATIVE-PERIPHERAL-BRIDGE.md);
+native build success is not physical wiring/adapter acceptance.
 
 The inspected `root@server` host is x86-64 Ubuntu, not an ARM SBC. It exposes a
 PC speaker and ALSA hardware, but no GPIO chips or attached AVR serial devices.

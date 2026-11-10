@@ -17,7 +17,7 @@ const suffix = process.platform === 'win32' ? '.exe' : ''
 const options = { board: join(here, '.build/release/bin/virtual_board' + suffix), controller: join(here, '../Controller/bin/controller' + suffix),
   'board-port': '18765', 'host-port': '18987', 'state-root': process.platform === 'win32'
     ? join(process.env.LOCALAPPDATA, 'Programs/PCController/development/virtual-board')
-    : join(homedir(), '.local/share/pccontroller/virtual-development'), 'sensor-temp0':'', 'sensor-temp1':'', 'sensor-voltage':'', 'sensor-current':'' }
+    : join(homedir(), '.local/share/pccontroller/virtual-development'), 'sensor-temp0':'', 'sensor-temp1':'', 'sensor-voltage':'', 'sensor-current':'', 'speaker':'auto', 'i2c':'auto' }
 for (let i=2; i<process.argv.length; i++) {
   const key = process.argv[i].replace(/^--/, '')
   if (!(key in options) || !process.argv[i+1]) throw new Error('Usage: node dev-host.mjs [--board FILE] [--controller FILE] [--board-port N] [--host-port N] [--state-root DIR]')
@@ -104,7 +104,7 @@ async function connect(port) {
 }
 try {
   const sensorArgs = Object.entries(options).filter(([key,value]) => key.startsWith('sensor-') && value).flatMap(([key,value]) => ['--'+key,value])
-  start(options.board, ['--bind','127.0.0.1','--port',String(boardPort),'--memory','--no-stdin','--quiet',...sensorArgs])
+  start(options.board, ['--bind','127.0.0.1','--port',String(boardPort),'--memory','--no-stdin','--quiet','--speaker',options.speaker,'--i2c',options.i2c,...sensorArgs])
   const ready = await connect(boardPort); ready.destroy()
   start(options.controller, ['--config',configPath,'ipc','serve','--listen',`127.0.0.1:${hostPort}`,'--port',`tcp://127.0.0.1:${boardPort}`,'--no-connect'])
   socket = await connect(hostPort)

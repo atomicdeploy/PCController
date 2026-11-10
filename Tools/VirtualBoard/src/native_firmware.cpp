@@ -68,6 +68,9 @@ OutputSnapshot VirtualBoard::outputSnapshot() const {
   std::copy(display.rawSegments(),display.rawSegments()+4,s.segments.begin());
   s.brightness=display.brightness(); s.tm1637Detected=display.detected();
   s.buzzerHz=NativeHal::toneFrequency; s.strip=NativeHal::strip;
+#if !PCCONTROLLER_USE_WS2812B
+  s.stripGreenOffset=2;s.stripBlueOffset=0;
+#endif
   return s;
 }
 std::string VirtualBoard::describe() const {
@@ -77,32 +80,106 @@ std::string VirtualBoard::describe() const {
   return out.str();
 }
 ConsoleResult VirtualBoard::console(const std::string &line) {
+  if(line.size()>256) return {"input exceeds 256 bytes"};
   if(line=="status") return {describe()};
-  if(line=="help") return {"status | door open/closed | raw 0..255 | tm1637 on/off | temp 0/1 centiC/none | rf code bits protocol pulseUs | quit. Inputs are explicit demo fixtures, not physical measurements."};
+  if(line=="help") return {"status | door open/closed | raw 0..255 | input 1..8 on/off | gpio 0..63 0/1/none | tm1637 on/off | temp 0/1 centiC/none | power milliV milliA/none | rf code bits protocol pulseUs | quit. Aliases: I1:ON/OFF, T1:centiC, GPIO17:0/1. No text relay/PWM actuation; use the controller protocol."};
   if(line=="quit" || line=="exit") return {"",true};
   std::lock_guard<std::mutex> lock(mutex_);
-  std::istringstream input(line); std::string command,value;
+  std::string normalized=line;
+  const auto colon=line.find(':');
+  if(colon!=std::string::npos) {
+    const auto key=line.substr(0,colon), reading=line.substr(colon+1);
+    if(key=="T1" || key=="T2") normalized=std::string("temp ")+(key=="T1"?"0 ":"1 ")+reading;
+    else if(key.size()==2 && key[0]=='I' && key[1]>='1' && key[1]<='8' && (reading=="ON" || reading=="OFF"))
+      normalized="input "+key.substr(1)+" "+(reading=="ON"?"on":"off");
+    else if(key.rfind("GPIO",0)==0) normalized="gpio "+key.substr(4)+" "+reading;
+  }
+  std::istringstream input(normalized); std::string command,value;
   input >> command >> value;
+  auto finished=[&]() { input >> std::ws; return input.eof(); };
+  auto number=[](const std::string &text,int64_t low,int64_t high) {
+    if(text.empty()) throw std::invalid_argument("missing numeric input");
+    size_t used=0; const auto n=std::stoll(text,&used,0);
+    if(used!=text.size() || n<low || n>high) throw std::invalid_argument("numeric input out of range");
+    return n;
+  };
+  // Validate complete input before mutation; no partial/trailing-command admission.
+  try {
+  if(command=="input") {
+    const auto index=static_cast<unsigned>(number(value,1,8)-1);
+    if(hostInputMask_ & (1U<<index)) return {"input is owned by its assigned host GPIO source"};
+    std::string state; input >> state;
+    if(!finished() || (state!="on" && state!="off")) return {"input requires 1..8 on/off"};
+    const auto mask=static_cast<uint8_t>(1U<<index);
+    if(state=="on") NativeHal::shiftInput &= static_cast<uint8_t>(~mask);
+    else NativeHal::shiftInput |= mask;
+  } else if(command=="gpio") {
+    const auto pin=static_cast<size_t>(number(value,0,63));
+    std::string state; input >> state;
+    if(!finished() || (state!="0" && state!="1" && state!="none")) return {"gpio requires 0..63 0/1/none"};
+    NativeHal::inputLevels[pin]=static_cast<int8_t>(state=="none"?-1:state=="1"?1:0);
+  } else if(command=="power") {
+    if(NativeHal::powerSourceMapped()) return {"power is owned by configured sensor files"};
+    if(value=="none") {
+      if(!finished()) return {"power none takes no other arguments"};
+      NativeHal::powerAvailable=false;
+      ina219Available=false;
+      sensors.supplyMilliVolts=sensors.busMilliVolts=INVALID_I32;
+      sensors.currentMilliAmps=sensors.powerMilliWatts=INVALID_I32;
+    } else {
+      std::string current; input >> current;
+      const auto voltage=number(value,0,100000), milliA=number(current,-100000,100000);
+      if(!finished()) return {"power requires milliV milliA or none"};
+      NativeHal::supplyMilliVolts=static_cast<int32_t>(voltage);
+      NativeHal::currentMilliAmps=static_cast<int32_t>(milliA);
+      NativeHal::powerMilliWatts=static_cast<int32_t>(voltage*milliA/1000);
+      NativeHal::powerAvailable=true; ina219Available=true;
+    }
+  } else
   if(command=="door" && (value=="open" || value=="closed")) {
+    if(hostInputMask_&0x80) return {"door is owned by its assigned host GPIO source"};
+    if(!finished()) return {"unexpected trailing input"};
     if(value=="open") NativeHal::shiftInput |= 0x80;
     else NativeHal::shiftInput &= 0x7F;
   } else if(command=="tm1637" && (value=="on" || value=="off")) {
+    if(!finished()) return {"unexpected trailing input"};
     NativeHal::tm1637Present=value=="on";
   } else if(command=="raw") {
+    if(hostInputMask_) return {"raw input conflicts with assigned host GPIO sources"};
     size_t used=0; const auto v=std::stoul(value,&used,0);
-    if(used!=value.size() || v>255) return {"raw input must be 0..255"};
+    if(used!=value.size() || v>255 || !finished()) return {"raw input must be 0..255"};
     NativeHal::shiftInput=static_cast<uint8_t>(v);
   } else if(command=="temp" && (value=="0" || value=="1")) {
+    if(NativeHal::temperatureSourceMapped(value=="1")) return {"temperature is owned by a configured sensor file"};
     std::string reading; input >> reading;
-    if(reading=="none") NativeHal::temperature[value=="1"]=INT16_MIN;
-    else { size_t used=0; const auto v=std::stol(reading,&used); if(used!=reading.size() || v<-5500 || v>12500) return {"temperature fixture must be -5500..12500 centiC or none"}; NativeHal::temperature[value=="1"]=static_cast<int16_t>(v); }
+    if(!finished()) return {"unexpected trailing input"};
+    const auto parsed=reading=="none" ? INT16_MIN : number(reading,-5500,12500);
+    NativeHal::temperatureConfigured[0]=true;
+    if(value=="1") NativeHal::temperatureConfigured[1]=true;
+    NativeHal::temperature[value=="1"]=static_cast<int16_t>(parsed);
     temperatureBus.begin(); discoverTemperatureSensors();
   } else if(command=="rf") {
     size_t used=0; const auto code=std::stoull(value,&used,0); unsigned bits=0,protocol=0,pulse=0;
-    if(used!=value.size() || !(input >> bits >> protocol >> pulse) || code>UINT32_MAX || code==0 || bits==0 || bits>32 || protocol==0 || protocol>12 || pulse==0 || pulse>UINT16_MAX) return {"invalid RF fixture"};
+    if(used!=value.size() || !(input >> bits >> protocol >> pulse) || code>UINT32_MAX || code==0 || bits==0 || bits>32 || protocol==0 || protocol>12 || pulse==0 || pulse>UINT16_MAX || !finished()) return {"invalid RF fixture"};
     if(NativeHal::radioRx.size()>=16) return {"RF input backpressure"};
     NativeHal::radioRx.push_back({static_cast<uint32_t>(code),static_cast<uint16_t>(pulse),static_cast<uint8_t>(bits),static_cast<uint8_t>(protocol)});
   } else return {"unsupported hardware input; type help"};
+  } catch(const std::exception &) { return {"invalid or out-of-range hardware input"}; }
   return {"fixture input applied"};
+}
+void VirtualBoard::bindHostInput(uint8_t channel) {
+  if(channel<1 || channel>8)throw std::invalid_argument("host input must be 1..8");
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto mask=static_cast<uint8_t>(1U<<(channel-1));
+  if(hostInputMask_&mask)throw std::invalid_argument("duplicate host input owner");
+  hostInputMask_|=mask;
+}
+void VirtualBoard::observeHostInput(uint8_t channel,bool active) {
+  if(channel<1 || channel>8)throw std::invalid_argument("host input must be 1..8");
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto mask=static_cast<uint8_t>(1U<<(channel-1));
+  if(!(hostInputMask_&mask))throw std::invalid_argument("host input is not assigned");
+  if(active)NativeHal::shiftInput&=static_cast<uint8_t>(~mask);
+  else NativeHal::shiftInput|=mask;
 }
 }

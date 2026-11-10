@@ -1,4 +1,5 @@
 #include "virtual_board/tcp_server.hpp"
+#include "virtual_board/activity.hpp"
 
 
 #include <array>
@@ -107,25 +108,13 @@ private:
 };
 
 void printOutputChanges(const OutputSnapshot &before,
-                        const OutputSnapshot &after, bool quiet, bool logPwm) {
-  if (quiet) {
+                        const OutputSnapshot &after, const TcpServerOptions &options) {
+  if (options.quiet) {
     return;
   }
-  const std::uint8_t changed = before.relayMask ^ after.relayMask;
-  for (std::uint8_t index = 0; index < 8; ++index) {
-    const std::uint8_t bit = static_cast<std::uint8_t>(1U << index);
-    if ((changed & bit) != 0) {
-      std::cout << (((after.relayMask & bit) != 0) ? "ON:" : "OFF:")
-                << static_cast<unsigned>(index + 1U) << std::endl;
-    }
-  }
-  if (!logPwm) return;
-  for (std::size_t channel = 0; channel < after.pwm.size(); ++channel) {
-    if (before.pwm[channel] != after.pwm[channel]) {
-      std::cout << "PWM" << (channel + 1U) << ':' << after.pwm[channel]
-                << std::endl;
-    }
-  }
+  for (const auto &line : activityLines(before, after, options.logPwm,
+                                       options.logPeripherals, options.legacyOutput))
+    std::cout << line << std::endl;
 }
 
 Socket makeListener(const TcpServerOptions &options) {
@@ -265,7 +254,8 @@ void runTcpServer(VirtualBoard &board, const TcpServerOptions &options,
 
     const auto asynchronous = board.tick();
     const auto current = board.outputSnapshot();
-    printOutputChanges(previous, current, options.quiet, options.logPwm);
+    if(options.observe) options.observe(current);
+    printOutputChanges(previous, current, options);
     previous = current;
     if (client.valid()) {
       // Bounded, nonblocking output: a slow peer cannot stall firmware safety.
