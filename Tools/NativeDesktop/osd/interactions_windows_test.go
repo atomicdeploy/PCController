@@ -142,6 +142,14 @@ func TestOSDLiveCloseSlidesBeforeHidingAndDoesNotRestart(t *testing.T) {
 	if !initial.Active || !win.IsWindowVisible(h) {
 		t.Fatal("close hid the surface immediately", initial)
 	}
+	if !win.IsWindowVisible(target.hwnd) {
+		t.Fatal("fading close target lets a second click through to the desktop")
+	}
+	win.SendMessage(target.hwnd, win.WM_LBUTTONDOWN, 0, local)
+	win.SendMessage(target.hwnd, win.WM_LBUTTONUP, 0, local)
+	if !p.Status().ExpiresAt.Equal(initial.ExpiresAt) {
+		t.Fatal("double click restarted dismissal")
+	}
 	time.Sleep(70 * time.Millisecond)
 	var during win.RECT
 	win.GetWindowRect(h, &during)

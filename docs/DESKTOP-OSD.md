@@ -14,7 +14,9 @@ may cover ordinary desktop windows.
   scroll at a fixed speed with pauses at both ends, independently of frame rate.
 - Clicking ×, choosing an action and API dismissal share the same short downward
   fade, starting at the current opacity/position even during entrance. Repeated
-  dismissal does not restart it. Reduced-motion mode remains immediate.
+  dismissal does not restart it. Fading control targets absorb duplicate clicks
+  until they disappear, without taking focus; passive content remains click-through.
+  Reduced-motion mode remains immediate.
 - Button and close-target hover fades over 120 ms, reversing from its current
   tint if the pointer moves quickly. Only the input targets track pointer leave;
   passive visual content never competes for hover. Surface opacity remains stable.

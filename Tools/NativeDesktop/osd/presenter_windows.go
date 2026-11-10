@@ -453,8 +453,9 @@ func (p *presenter) beginDismiss(reason string) error {
 	p.endReason = reason
 	p.pressed, p.pressedInput, p.hoverInput = -1, 0, 0
 	p.setHover(-1, now)
-	// Disable input immediately, but keep the visual plane alive for its exit.
-	p.positionInputs(p.inputOrigin, false)
+	// Reject activation immediately, but retain the small input targets until
+	// the visual exit ends. A fast second click must not hit the desktop behind
+	// a button that is still visibly fading away.
 	if p.request.ReduceMotion || p.exitDuration <= 0 {
 		p.hide(reason)
 		return nil
@@ -499,7 +500,7 @@ func (p *presenter) render(force bool) error {
 		if ok == 0 {
 			return fmt.Errorf("OSD UpdateLayeredWindow: %v", callErr)
 		}
-		p.positionInputs(image.Pt(int(point.X), int(point.Y)), opacity > 0 && !p.exiting)
+		p.positionInputs(image.Pt(int(point.X), int(point.Y)), opacity > 0)
 		p.lastOpacity = opacity
 		p.lastOffset = offsets
 		p.lastHover = hover
