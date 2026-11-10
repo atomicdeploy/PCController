@@ -13,25 +13,7 @@
     if (cls) node.className = cls;
     return node;
   };
-  const resolve = (value) => {
-    let current = value;
-    const seen = new Set();
-    while (current?.$ref && !seen.has(current.$ref)) {
-      const ref = current.$ref;
-      const external = ref.startsWith("./jsonrpc.schema.json#/");
-      if (!external && !ref.startsWith("#/")) break;
-      seen.add(current.$ref);
-      const pointer = external ? ref.slice("./jsonrpc.schema.json".length) : ref;
-      current = pointer
-        .slice(2)
-        .split("/")
-        .reduce(
-          (v, k) => v?.[k.replaceAll("~1", "/").replaceAll("~0", "~")],
-          external || pointer.startsWith("#/$defs/") ? rpcContract : spec,
-        );
-    }
-    return current ?? value;
-  };
+  const { resolve, expand } = createSchemaResolver(spec, rpcContract);
   const sample = (schema, depth = 0) => {
     schema = resolve(schema);
     if (!schema || typeof schema !== "object" || depth > 8) return {};
@@ -116,7 +98,7 @@
   function schemaPanel(title, value) {
     const details = el("details");
     details.append(el("summary", title));
-    details.append(el("pre", JSON.stringify(value, null, 2)));
+    details.append(el("pre", JSON.stringify(expand(value), null, 2)));
     return details;
   }
   function methodLinks(methods) {

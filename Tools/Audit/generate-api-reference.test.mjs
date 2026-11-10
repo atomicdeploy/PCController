@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { createSchemaResolver } from "./explorer/schema-resolver.mjs";
 
 import {
   extractGoCaseMethods,
@@ -261,4 +262,25 @@ test('WebSocket explorer exposes connection guides, resolved RPC contracts and e
     assert.ok(events['x-socket-io-events'].outgoing.includes(match[1]), match[1]);
   }
   assert.ok(guides[1].sections.some(section => section.code?.startsWith('42["subscribe"')));
+});
+
+test('offline schema resolver expands nested response branches and preserves cycle edges', () => {
+  const events = JSON.parse(readFileSync(join(outputDirectory, 'asyncapi.json'), 'utf8'));
+  const rpc = JSON.parse(readFileSync(join(outputDirectory, 'jsonrpc.schema.json'), 'utf8'));
+  const { expand } = createSchemaResolver(events, rpc);
+  const response = expand(events.components.messages.JSONRPCResponse.payload);
+  assert.equal(response.oneOf[0].type, 'object');
+  assert.ok(response.oneOf[0].required.includes('result'));
+  assert.equal(response.oneOf[1].properties.error.properties.code.type, 'integer');
+  assert.equal(response.oneOf[0].properties.id.oneOf[0].type, 'string');
+  assert.ok(!JSON.stringify(response).includes('"$ref"'), 'all finite response branches must resolve');
+  const finite = expand(events.components.messages.JSONRPCRequest.payload);
+  assert.ok(!JSON.stringify(finite).includes('"$ref"'), 'request allOf/parameter schemas must also resolve');
+  const graph = { $defs: { node: { type: 'object', properties: { child: { $ref: '#/$defs/node' } } }, 'a/b~c': { type: 'string' }, forbidden: false } };
+  const resolver = createSchemaResolver(graph);
+  assert.equal(resolver.expand({ $ref: '#/$defs/node' }).properties.child.$ref, '#/$defs/node');
+  assert.equal(resolver.expand({ $ref: '#/$defs/a~1b~0c' }).type, 'string');
+  assert.equal(resolver.expand({ $ref: '#/$defs/forbidden' }), false);
+  assert.deepEqual(resolver.expand({ $ref: 'https://untrusted.invalid/schema' }), { $ref: 'https://untrusted.invalid/schema' });
+  assert.equal(resolver.expand({ $ref: '#/$defs/a~1b~0c', description: 'local override' }).description, 'local override');
 });

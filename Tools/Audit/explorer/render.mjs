@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { createSchemaResolver } from "./schema-resolver.mjs";
 const html = (value) =>
   String(value)
     .replaceAll("&", "&amp;")
@@ -42,7 +43,8 @@ export function renderExplorer({
     ],
     [
       "assets/catalog.js",
-      readFileSync(new URL("./catalog.js", import.meta.url), "utf8"),
+      `const createSchemaResolver = ${createSchemaResolver.toString()};\n` +
+        readFileSync(new URL("./catalog.js", import.meta.url), "utf8"),
     ],
   ]);
 }

@@ -1,3 +1,42 @@
+const createSchemaResolver = function createSchemaResolver(spec, rpcContract = spec) {
+  const lookup = (ref) => {
+    const external = ref.startsWith("./jsonrpc.schema.json#/");
+    if (!external && !ref.startsWith("#/")) return undefined;
+    const pointer = external ? ref.slice("./jsonrpc.schema.json".length) : ref;
+    return pointer.slice(2).split("/").reduce(
+      (value, key) => value?.[key.replaceAll("~1", "/").replaceAll("~0", "~")],
+      external || pointer.startsWith("#/$defs/") ? rpcContract : spec,
+    );
+  };
+  const resolve = (value) => {
+    let current = value;
+    const seen = new Set();
+    while (current?.$ref && !seen.has(current.$ref)) {
+      seen.add(current.$ref);
+      const target = lookup(current.$ref);
+      if (target === undefined) break;
+      current = target;
+    }
+    return current;
+  };
+  const expand = (value, ancestors = new Set()) => {
+    if (Array.isArray(value)) return value.map(item => expand(item, ancestors));
+    if (!value || typeof value !== "object") return value;
+    if (typeof value.$ref === "string" && !ancestors.has(value.$ref)) {
+      const target = lookup(value.$ref);
+      if (target !== undefined) {
+        const next = new Set(ancestors).add(value.$ref);
+        if (typeof target !== "object" || target === null) return target;
+        const { $ref, ...siblings } = value;
+        return expand({ ...target, ...siblings }, next);
+      }
+    }
+    // Retain unknown refs and genuine cycle edges, but expand other siblings.
+    return Object.fromEntries(Object.entries(value).map(([key, child]) =>
+      [key, expand(child, ancestors)]));
+  };
+  return { resolve, expand };
+};
 // No network requests, API mutations, credentials, CDN, or synthetic live data.
 (() => {
   const root = document.querySelector(".catalog");
@@ -13,25 +52,7 @@
     if (cls) node.className = cls;
     return node;
   };
-  const resolve = (value) => {
-    let current = value;
-    const seen = new Set();
-    while (current?.$ref && !seen.has(current.$ref)) {
-      const ref = current.$ref;
-      const external = ref.startsWith("./jsonrpc.schema.json#/");
-      if (!external && !ref.startsWith("#/")) break;
-      seen.add(current.$ref);
-      const pointer = external ? ref.slice("./jsonrpc.schema.json".length) : ref;
-      current = pointer
-        .slice(2)
-        .split("/")
-        .reduce(
-          (v, k) => v?.[k.replaceAll("~1", "/").replaceAll("~0", "~")],
-          external || pointer.startsWith("#/$defs/") ? rpcContract : spec,
-        );
-    }
-    return current ?? value;
-  };
+  const { resolve, expand } = createSchemaResolver(spec, rpcContract);
   const sample = (schema, depth = 0) => {
     schema = resolve(schema);
     if (!schema || typeof schema !== "object" || depth > 8) return {};
@@ -116,7 +137,7 @@
   function schemaPanel(title, value) {
     const details = el("details");
     details.append(el("summary", title));
-    details.append(el("pre", JSON.stringify(value, null, 2)));
+    details.append(el("pre", JSON.stringify(expand(value), null, 2)));
     return details;
   }
   function methodLinks(methods) {
