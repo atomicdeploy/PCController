@@ -1,0 +1,22 @@
+[Unit]
+Description=PCController board telemetry hwmon bridge
+After=network.target
+
+[Service]
+Type=simple
+# Review these paths and the existing host's listener port before installation.
+ExecStart=/usr/local/bin/controller sensors hwmon --url http://127.0.0.1:8787
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+DevicePolicy=closed
+DeviceAllow=/dev/pccontroller-hwmon w
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

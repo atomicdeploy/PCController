@@ -10,6 +10,18 @@ SPDX-FileCopyrightText = "2026 David Refoua and PCController contributors"
 SPDX-License-Identifier = "MIT OR BSD-2-Clause"
 
 [[annotations]]
+path = ["Tools/Integrations/hwmon/pccontroller_hwmon.c", "Tools/Integrations/hwmon/COPYING"]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 David Refoua and PCController contributors"
+SPDX-License-Identifier = "GPL-2.0-only"
+
+[[annotations]]
+path = ["Tools/Controller/api/assets/scalar.js"]
+precedence = "override"
+SPDX-FileCopyrightText = ["2023-present Scalar", "Tailwind Labs, Inc.", "2025 Atomic Deploy", "2026 David Refoua and PCController contributors"]
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
 path = ["Project/AddressableLeds.cpp"]
 precedence = "override"
 SPDX-FileCopyrightText = [

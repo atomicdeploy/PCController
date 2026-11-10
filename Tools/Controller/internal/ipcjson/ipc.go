@@ -3291,6 +3291,8 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 	webSocketPath := service.currentWebSocketPath()
 	socketIOPath := service.currentSocketIOPath()
 	mux := http.NewServeMux()
+	registerBoardSensorsHTTP(mux, service)
+	registerAPIReferenceHTTP(mux, service)
 	mux.HandleFunc("/api/diagnostics/cpu-profile", service.serveCPUProfile)
 	mux.HandleFunc("/api/diagnostics/execution-trace", service.serveExecutionTrace)
 	mux.HandleFunc(webSocketPath, func(writer http.ResponseWriter, request *http.Request) {

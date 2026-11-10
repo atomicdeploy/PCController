@@ -18,6 +18,7 @@ host-owned JSON configuration are documented separately on purpose.
 | Understand the physical panel | [Front Panel and Menus](Front-Panel-and-Menus.md) |
 | Configure the host, WebUI, hotkeys, notifications, or integrations | [Host Configuration and Integrations](Host-Configuration-and-Integrations.md) |
 | Read PC temperature, voltage, current, power and fan measurements | [PC hardware sensors](HOST-SENSORS.md) |
+| Export PCB temperatures, voltage, current and power to system monitors | [Board sensor exports: Linux hwmon and Windows monitoring](BOARD-SENSOR-EXPORTS.md) |
 | Record, edit, schedule and play effects across every peripheral | [Unified Effects System](Effects-System.md) |
 | Integrate through UART, JSON-RPC, REST, WebSocket, Go, or C | [Protocol and Network API](../Tools/Controller/docs/Protocol-and-Network-API.md), [machine-readable contracts](../Tools/Controller/api/reference.html), and [C Library API](../Tools/Controller/docs/C-Library-API.md) |
 | Export or host the WebUI from a separate origin | [Portable WebUI](../Tools/Controller/docs/Portable-WebUI.md) |

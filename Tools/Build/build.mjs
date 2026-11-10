@@ -1357,8 +1357,12 @@ function walkFiles(current, output, include, excludeBuildState = true) {
 
 export function hostSourceIdentity(hostRoot = HOST_ROOT) {
 	const files = []
-	const rgbIntegrations = resolve(hostRoot, '..', 'Integrations', 'SignalRGB')
-	if (existsSync(rgbIntegrations)) walkFiles(rgbIntegrations, files, () => true)
+	for (const integration of ['SignalRGB', 'hwmon', 'Prometheus']) {
+		const directory = resolve(hostRoot, '..', 'Integrations', integration)
+		if (existsSync(directory)) walkFiles(directory, files, () => true)
+	}
+	const sensorGuide = resolve(hostRoot, '..', '..', 'docs', 'BOARD-SENSOR-EXPORTS.md')
+	if (existsSync(sensorGuide)) files.push(sensorGuide)
 	const rgbGuide = resolve(hostRoot, '..', '..', 'docs', 'RGB-INPUT.md')
 	if (existsSync(rgbGuide)) files.push(rgbGuide)
 	// The native desktop is a local module, including reviewed vendored Walk
@@ -1372,6 +1376,8 @@ export function hostSourceIdentity(hostRoot = HOST_ROOT) {
 		for (const name of ['go.mod', 'go.sum']) if (existsSync(join(nativeDesktop, name))) files.push(join(nativeDesktop, name))
 	}
 	walkFiles(hostRoot, files, path => ['.go', '.c', '.h'].includes(extname(path).toLowerCase()))
+	const apiReference = join(hostRoot, 'api')
+	if (existsSync(apiReference)) walkFiles(apiReference, files, () => true)
 	const programmerBridge = resolve(hostRoot, '..', 'AvrdudeAdapter')
 	if (existsSync(programmerBridge)) walkFiles(programmerBridge, files, () => true)
 	for (const path of [join(hostRoot, 'go.mod'), join(hostRoot, 'go.sum'), join(hostRoot, 'winres', 'winres.json')]) {
@@ -2576,7 +2582,29 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 	const rgbGuide = join(stage, 'integrations', 'RGB-INPUT.md')
 	copyFileSync(join(PROJECT_ROOT, 'Tools', 'Integrations', 'SignalRGB', 'PCController.js'), rgbPlugin)
 	copyFileSync(join(PROJECT_ROOT, 'docs', 'RGB-INPUT.md'), rgbGuide)
-	const artifacts = [executable, rgbPlugin, rgbGuide, ...(toastLogo ? [toastLogo] : []), ...shared.paths]
+	const sensorFiles = []
+	for (const [directory, names] of [
+		['hwmon', ['pccontroller_hwmon.c', 'Makefile', 'pccontroller-hwmon.service', 'COPYING']],
+		['Prometheus', ['prometheus.yml']],
+	]) {
+		const destination = join(stage, 'integrations', directory)
+		mkdirSync(destination, { recursive: true })
+		for (const name of names) {
+			const output = join(destination, name)
+			copyFileSync(join(PROJECT_ROOT, 'Tools', 'Integrations', directory, name), output)
+			sensorFiles.push(output)
+		}
+	}
+	const sensorGuide = join(stage, 'integrations', 'BOARD-SENSOR-EXPORTS.md')
+	// The package is self-contained; source-checkout links/commands must not
+	// point outside its integrations directory after extraction.
+	const packagedSensorGuide = readFileSync(join(PROJECT_ROOT, 'docs', 'BOARD-SENSOR-EXPORTS.md'), 'utf8')
+		.replace('[host sensor diagnostics](HOST-SENSORS.md)', 'host sensor diagnostics (documented in the source checkout under docs/HOST-SENSORS.md)')
+		.replaceAll('../Tools/Integrations/', './')
+		.replace('cd Tools/Integrations # In a source checkout; use integrations in a host package.', 'cd integrations # From the extracted host package root.')
+	writeFileSync(sensorGuide, packagedSensorGuide)
+	sensorFiles.push(sensorGuide)
+	const artifacts = [executable, rgbPlugin, rgbGuide, ...sensorFiles, ...(toastLogo ? [toastLogo] : []), ...shared.paths]
 		.concat(programmerLibrary.paths)
 		.map(path => artifactRecord(path, stage))
 	const manifest = {

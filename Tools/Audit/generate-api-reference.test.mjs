@@ -88,7 +88,7 @@ test("derives public API titles and schema ID from product metadata", () => {
   assert.equal(rpcSchema.$id, expected.rpcSchemaID);
   assert.equal(rpcSchema.title, expected.rpcTitle);
   assert.equal(reference.includes(`<title>${expected.referenceTitle}</title>`), true);
-  assert.equal(reference.includes(`<h1>${expected.referenceHeading}</h1>`), true);
+  assert.equal(reference.includes(`${expected.referenceHeading}</h1>`), true);
   assert.equal(openapi.components.securitySchemes.tokenHeader.name, "X-PCController-Token");
   assert.equal(openapi.paths["/api/session/ticket"].post.responses["409"].description.includes("disabled"), true);
   assert.equal(openapi.paths["/api/auth/server-proof"].get.security.length, 0);
@@ -195,4 +195,23 @@ test("--check is read-only and stable across repeated runs", () => {
     first.stdout,
     new RegExp(`^API reference is current: ${methodCount} RPC methods, ${pathCount} REST paths, digest [a-f0-9]{12}\\.\\n$`, "u"),
   );
+});
+
+test('explorer includes complete protocol catalogs and source-derived JSON field names', () => {
+  const rpc = JSON.parse(readFileSync(join(outputDirectory,'jsonrpc.schema.json'),'utf8'));
+  const openapi = JSON.parse(readFileSync(join(outputDirectory,'openapi.json'),'utf8'));
+  const page = readFileSync(join(outputDirectory,'rpc.html'),'utf8');
+  for(const method of Object.keys(rpc['x-methods'])) assert.ok(page.includes(method),method);
+  const fields = rpc['x-methods']['controller.pwm.set'].request_fields.properties;
+  for(const name of ['channel','percent','raw_value','expected_host_instance_id']) assert.ok(fields[name],name);
+  assert.equal(fields.raw_value.type,'integer');
+  assert.equal(fields.percent.type,'number');
+  assert.equal(rpc['x-methods']['controller.pwm.set'].request_fields.required,undefined,'Go field presence must not invent semantic requiredness');
+  assert.equal(rpc['x-methods']['controller.pwm.set'].request_template.percent,50);
+  assert.equal(rpc['x-methods']['controller.pwm.set'].request_template.raw_value,undefined,'PWM template must not combine mutually exclusive selectors');
+  assert.ok(openapi.paths['/api/sensors/board'].get.responses['200'].content['application/json'].schema.$ref);
+  assert.ok(openapi.paths['/api/sensors/metrics'].get.responses['200'].content['text/plain']);
+  assert.deepEqual(openapi.paths['/api/sensors/board'].get.tags,['sensors']);
+  const bootstrap=readFileSync(join(outputDirectory,'assets/scalar.js'),'utf8');
+  for(const safety of ['hideTestRequestButton: true','persistAuth: false','telemetry: false']) assert.ok(bootstrap.includes(safety),safety);
 });

@@ -1281,12 +1281,50 @@
     "controller.action.invoke": {
       "capability": "board_commands",
       "summary": "Invoke one stable action ID advertised by the attached board profile and wait for the board acknowledgement.",
-      "idempotency": "non-idempotent"
+      "idempotency": "non-idempotent",
+      "request_fields": {
+        "properties": {
+          "action_id": {
+            "type": "string"
+          },
+          "board_identity": {
+            "type": "string"
+          },
+          "expected_connection_generation": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "expected_host_instance_id": {
+            "type": "string"
+          },
+          "expected_pwm_configuration_revision": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.app.action": {
       "capability": "dynamic",
       "summary": "Freeze a validated action to exact live targets and return its correlated per-target delivery operation.",
       "idempotency": "non-idempotent",
+      "request_fields": {
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "params_schema": {
         "$ref": "#/$defs/AppActionRequest"
       },
@@ -1298,6 +1336,26 @@
       "capability": "host_configuration",
       "summary": "Acknowledge one exact app-action target as applied or rejected.",
       "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "delivery_id": {
+            "type": "string"
+          },
+          "instance_id": {
+            "type": "string"
+          },
+          "operation_id": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "params_schema": {
         "$ref": "#/$defs/ActionAck"
       },
@@ -1309,6 +1367,14 @@
       "capability": "read",
       "summary": "Return one bounded app-action operation and its exact per-target outcomes.",
       "idempotency": "safe",
+      "request_fields": {
+        "properties": {
+          "operation_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "params_schema": {
         "$ref": "#/$defs/ActionOutcomeRequest"
       },
@@ -1324,17 +1390,89 @@
     "controller.app.instance.get": {
       "capability": "read",
       "summary": "Read one live application instance by ID.",
-      "idempotency": "safe"
+      "idempotency": "safe",
+      "request_fields": {
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.app.instance.remove": {
       "capability": "host_configuration",
       "summary": "Remove one application instance from the live registry.",
-      "idempotency": "non-idempotent"
+      "idempotency": "non-idempotent",
+      "request_fields": {
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.app.instance.report": {
       "capability": "host_configuration",
       "summary": "Create or refresh one leased application-instance report.",
-      "idempotency": "non-idempotent"
+      "idempotency": "non-idempotent",
+      "request_fields": {
+        "properties": {
+          "expires_at": {},
+          "id": {
+            "type": "string"
+          },
+          "lease_seconds": {
+            "type": "integer"
+          },
+          "page": {
+            "type": "string"
+          },
+          "registered_at": {},
+          "self": {
+            "properties": {
+              "image_path": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "parent_pid": {
+                "type": "integer"
+              },
+              "pid": {
+                "type": "integer"
+              },
+              "started_at": {},
+              "vars": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "working_directory": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "state": {
+            "type": "string"
+          },
+          "surface": {
+            "type": "string"
+          },
+          "updated_at": {},
+          "values": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.app.instances": {
       "capability": "read",
@@ -1344,26 +1482,85 @@
     "controller.app.launch": {
       "capability": "host_configuration",
       "summary": "Ensure, launch, or focus a named TUI or WebUI surface without arbitrary process execution.",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "idempotency_key": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "page": {
+            "type": "string"
+          },
+          "surface": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.app.navigate": {
       "capability": "host_configuration",
       "summary": "Navigate all, one surface, or one exact live application instance.",
-      "idempotency": "non-idempotent"
+      "idempotency": "non-idempotent",
+      "request_fields": {
+        "properties": {
+          "page": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.app.navigation.commit": {
       "capability": "host_configuration",
       "summary": "Commit one follower group's canonical page and return its correlated coordinator outcome.",
-      "idempotency": "non-idempotent"
+      "idempotency": "non-idempotent",
+      "request_fields": {
+        "properties": {
+          "group": {
+            "type": "string"
+          },
+          "operation_id": {
+            "type": "string"
+          },
+          "page": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.app.page": {
       "capability": "host_configuration",
-      "summary": "app page",
-      "idempotency": "non-idempotent"
+      "summary": "Invoke the app page operation.",
+      "idempotency": "non-idempotent",
+      "request_fields": {
+        "properties": {
+          "page": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.artifact.capture": {
       "capability": "programming",
-      "summary": "artifact capture",
+      "summary": "Invoke the artifact capture operation.",
       "idempotency": "non-idempotent"
     },
     "controller.artifact.download.begin": {
@@ -1383,22 +1580,22 @@
     },
     "controller.artifact.fetch": {
       "capability": "programming",
-      "summary": "artifact fetch",
+      "summary": "Invoke the artifact fetch operation.",
       "idempotency": "non-idempotent"
     },
     "controller.artifact.list": {
       "capability": "read",
-      "summary": "artifact list",
+      "summary": "List artifact.",
       "idempotency": "safe"
     },
     "controller.artifact.manifest": {
       "capability": "read",
-      "summary": "artifact manifest",
+      "summary": "Read the artifact manifest surface.",
       "idempotency": "safe"
     },
     "controller.artifact.upload": {
       "capability": "programming",
-      "summary": "artifact upload",
+      "summary": "Invoke the artifact upload operation.",
       "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.artifact.upload.abort": {
@@ -1429,7 +1626,15 @@
     "controller.audio.play": {
       "capability": "integrations",
       "summary": "Play one validated sound-effect intent on the receiving host while honoring its mute and volume policy.",
-      "idempotency": "non-idempotent"
+      "idempotency": "non-idempotent",
+      "request_fields": {
+        "properties": {
+          "cue": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.automations.get": {
       "capability": "read",
@@ -1454,12 +1659,66 @@
     "controller.board_automation.put": {
       "capability": "board_commands",
       "summary": "Transactionally add or edit one board automation and verify readback.",
-      "idempotency": "non-idempotent"
+      "idempotency": "non-idempotent",
+      "request_fields": {
+        "properties": {
+          "action_kind": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "action_target": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "event_kind": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "event_mask": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "event_value": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "extra": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "flags": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "id": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "options": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "value": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.board_automation.remove": {
       "capability": "board_commands",
       "summary": "Remove one board automation and verify its absence.",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "id": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.board_profile.get": {
       "capability": "read",
@@ -1469,7 +1728,24 @@
     "controller.board_profile.update": {
       "capability": "host_configuration",
       "summary": "Bind the attached physical board identity to one explicit host-owned wiring profile.",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "expected_revision": {
+            "type": "string"
+          },
+          "expose_raw_relays": {
+            "type": "boolean"
+          },
+          "key": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.board.firmware.download": {
       "capability": "programming",
@@ -1483,12 +1759,18 @@
     },
     "controller.bridge.call": {
       "capability": "bridge_calls",
-      "summary": "bridge call",
-      "idempotency": "non-idempotent"
+      "summary": "Invoke the bridge call operation.",
+      "idempotency": "non-idempotent",
+      "request_fields": {
+        "properties": {
+          "request": {}
+        },
+        "type": "object"
+      }
     },
     "controller.bridge.list": {
       "capability": "read",
-      "summary": "bridge list",
+      "summary": "List bridge.",
       "idempotency": "safe"
     },
     "controller.channel_routing.get": {
@@ -1506,6 +1788,29 @@
       "capability": "host_configuration",
       "summary": "Atomically replace revision-fenced compatible bindings while affected outputs are observed idle; never actuate outputs or migrate numeric cues.",
       "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "board_identity": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "string"
+          },
+          "routing": {
+            "properties": {
+              "channels": {
+                "items": {},
+                "type": "array"
+              },
+              "enabled": {
+                "type": "boolean"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "type": "object"
+      },
       "params_schema": {
         "$ref": "#/$defs/ChannelRoutingUpdate"
       },
@@ -1517,6 +1822,38 @@
       "capability": "board_commands",
       "summary": "Resolve a stable semantic key and confirm one owner/revision/session-pinned physical output; never automatically retry unknown outcomes.",
       "idempotency": "non-idempotent",
+      "request_fields": {
+        "properties": {
+          "board_identity": {
+            "type": "string"
+          },
+          "expected_connection_generation": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "expected_host_instance_id": {
+            "type": "string"
+          },
+          "expected_pwm_configuration_revision": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "percent_milli": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "value": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
       "params_schema": {
         "$ref": "#/$defs/SemanticOutputRequest"
       },
@@ -1526,7 +1863,7 @@
     },
     "controller.close": {
       "capability": "connection_control",
-      "summary": "close",
+      "summary": "Close the controller session.",
       "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.command.catalog": {
@@ -1537,31 +1874,75 @@
     "controller.command.execute": {
       "capability": "dynamic",
       "summary": "Run a shared command after semantic capability classification.",
-      "idempotency": "non-idempotent"
+      "idempotency": "non-idempotent",
+      "request_fields": {
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.connect": {
       "capability": "connection_control",
-      "summary": "connect",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "summary": "Invoke the connect operation.",
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "port": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.device.action": {
       "capability": "integrations",
-      "summary": "device action",
-      "idempotency": "non-idempotent"
+      "summary": "Invoke the device action operation.",
+      "idempotency": "non-idempotent",
+      "request_fields": {
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.device.inspect": {
       "capability": "integrations",
-      "summary": "device inspect",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "summary": "Invoke the device inspect operation.",
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "resource": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.device.status": {
       "capability": "integrations",
-      "summary": "device status",
+      "summary": "Invoke the device status operation.",
       "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.discovery.check": {
       "capability": "read",
-      "summary": "discovery check",
+      "summary": "Read the discovery check surface.",
       "idempotency": "safe"
     },
     "controller.discovery.config": {
@@ -1577,51 +1958,138 @@
     "controller.discovery.config.set": {
       "capability": "integrations",
       "summary": "Persist and hot-apply network advertisement configuration.",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "broadcast_enabled": {
+            "type": "boolean"
+          },
+          "broadcast_port": {
+            "type": "integer"
+          },
+          "dns_sd_enabled": {
+            "type": "boolean"
+          },
+          "instance_name": {
+            "type": "string"
+          },
+          "mdns_enabled": {
+            "type": "boolean"
+          },
+          "mndp_enabled": {
+            "type": "boolean"
+          },
+          "netbios_enabled": {
+            "type": "boolean"
+          },
+          "ssdp_enabled": {
+            "type": "boolean"
+          },
+          "upnp_enabled": {
+            "type": "boolean"
+          },
+          "ws_discovery_enabled": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.discovery.connect": {
       "capability": "bridge_calls",
       "summary": "Verify an authenticated discovered host and return its health and snapshot.",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "auth": {
+            "type": "string"
+          },
+          "timeout_ms": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.discovery.github.release": {
       "capability": "read",
-      "summary": "discovery github release",
+      "summary": "Read the discovery github release surface.",
       "idempotency": "safe"
     },
     "controller.discovery.github.workflow": {
       "capability": "read",
-      "summary": "discovery github workflow",
+      "summary": "Read the discovery github workflow surface.",
       "idempotency": "safe"
     },
     "controller.discovery.local_manifest": {
       "capability": "read",
-      "summary": "discovery local manifest",
+      "summary": "Read the discovery local manifest surface.",
       "idempotency": "safe"
     },
     "controller.discovery.manifest": {
       "capability": "read",
-      "summary": "discovery manifest",
+      "summary": "Read the discovery manifest surface.",
       "idempotency": "safe"
     },
     "controller.discovery.scan": {
       "capability": "read",
-      "summary": "discovery scan",
-      "idempotency": "safe"
+      "summary": "Read the discovery scan surface.",
+      "idempotency": "safe",
+      "request_fields": {
+        "properties": {
+          "broadcast": {
+            "type": "boolean"
+          },
+          "dns_sd": {
+            "type": "boolean"
+          },
+          "mdns": {
+            "type": "boolean"
+          },
+          "mndp": {
+            "type": "boolean"
+          },
+          "netbios": {
+            "type": "boolean"
+          },
+          "protocols": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "ssdp": {
+            "type": "boolean"
+          },
+          "timeout_ms": {
+            "type": "integer"
+          },
+          "upnp": {
+            "type": "boolean"
+          },
+          "ws_discovery": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.discovery.stage": {
       "capability": "programming",
-      "summary": "discovery stage",
+      "summary": "Invoke the discovery stage operation.",
       "idempotency": "non-idempotent"
     },
     "controller.discovery.status": {
       "capability": "read",
-      "summary": "discovery status",
+      "summary": "Read the discovery status surface.",
       "idempotency": "safe"
     },
     "controller.display.send": {
       "capability": "board_commands",
-      "summary": "display send",
+      "summary": "Invoke the display send operation.",
       "idempotency": "non-idempotent"
     },
     "controller.effects.library.get": {
@@ -1632,7 +2100,19 @@
     "controller.effects.library.set": {
       "capability": "host_configuration",
       "summary": "Import or replace an effect library using mandatory if_match, canonical validation and serialized compare-and-swap; does not execute effects.",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "if_match": {
+            "type": "string"
+          },
+          "library": {},
+          "mode": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.estop.get": {
       "capability": "read",
@@ -1642,81 +2122,456 @@
     "controller.estop.set": {
       "capability": "board_commands",
       "summary": "Engage or release the PCController-wide effect and motion interlock; release never resumes cancelled work.",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.event.latest": {
       "capability": "events",
-      "summary": "event latest",
+      "summary": "Read the event latest surface.",
       "idempotency": "safe"
     },
     "controller.event.next": {
       "capability": "events",
       "summary": "Long-poll the next retained event after an event ID, optionally selecting activity, state, telemetry, or debug.",
-      "idempotency": "safe"
+      "idempotency": "safe",
+      "request_fields": {
+        "properties": {
+          "after_id": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "opcode": {
+            "type": "integer"
+          },
+          "stream": {
+            "type": "string"
+          },
+          "timeout_ms": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.exit": {
       "capability": "shutdown",
-      "summary": "exit",
+      "summary": "Invoke the exit operation.",
       "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.firmware.build": {
       "capability": "programming",
       "summary": "Compile the canonical host project with reviewed feature names and publish correlated ordered program progress events.",
-      "idempotency": "non-idempotent"
+      "idempotency": "non-idempotent",
+      "request_fields": {
+        "properties": {
+          "firmware_features": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "no_firmware_features": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.front_panel": {
       "capability": "read",
-      "summary": "front panel",
+      "summary": "Read the front panel surface.",
       "idempotency": "safe"
     },
     "controller.front-panel": {
       "capability": "read",
-      "summary": "front panel",
+      "summary": "Read the front panel surface.",
       "idempotency": "safe"
     },
     "controller.history.status": {
       "capability": "read",
-      "summary": "history status",
-      "idempotency": "safe"
+      "summary": "Read the history status surface.",
+      "idempotency": "safe",
+      "request_fields": {
+        "properties": {
+          "since": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.history.timeline": {
       "capability": "read",
-      "summary": "history timeline",
-      "idempotency": "safe"
+      "summary": "Read the history timeline surface.",
+      "idempotency": "safe",
+      "request_fields": {
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "since": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.host_menu.config": {
       "capability": "read",
-      "summary": "host menu config",
+      "summary": "Read the host menu config surface.",
       "idempotency": "safe"
     },
     "controller.host_menu.config.get": {
       "capability": "read",
-      "summary": "host menu config get",
+      "summary": "Read host menu config.",
       "idempotency": "safe"
     },
     "controller.host_menu.config.set": {
       "capability": "host_configuration",
-      "summary": "host menu config set",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "summary": "Set host menu config.",
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "builtin_overrides": {
+            "items": {
+              "properties": {
+                "brightness": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "content": {
+                  "type": "string"
+                },
+                "edit_visual": {
+                  "type": "string"
+                },
+                "flags": {
+                  "properties": {
+                    "action": {},
+                    "editable": {},
+                    "read_only": {},
+                    "selectable": {},
+                    "visible": {}
+                  },
+                  "type": "object"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "order_id": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "parent_id": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "stable_id": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "default_menu": {
+            "type": "string"
+          },
+          "display_duration_ms": {
+            "type": "integer"
+          },
+          "menus": {
+            "items": {
+              "properties": {
+                "brightness": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "content": {
+                  "type": "string"
+                },
+                "edit_visual": {
+                  "type": "string"
+                },
+                "flags": {
+                  "properties": {
+                    "action": {},
+                    "editable": {},
+                    "read_only": {},
+                    "selectable": {},
+                    "visible": {}
+                  },
+                  "type": "object"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "items": {
+                  "items": {},
+                  "type": "array"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "node_id": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "order_id": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "parent_id": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "request_gesture": {
+            "type": "string"
+          },
+          "session_timeout_ms": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.host_menu.configure": {
       "capability": "host_configuration",
-      "summary": "host menu configure",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "summary": "Configure host menu.",
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "builtin_overrides": {
+            "items": {
+              "properties": {
+                "brightness": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "content": {
+                  "type": "string"
+                },
+                "edit_visual": {
+                  "type": "string"
+                },
+                "flags": {
+                  "properties": {
+                    "action": {},
+                    "editable": {},
+                    "read_only": {},
+                    "selectable": {},
+                    "visible": {}
+                  },
+                  "type": "object"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "order_id": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "parent_id": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "stable_id": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "default_menu": {
+            "type": "string"
+          },
+          "display_duration_ms": {
+            "type": "integer"
+          },
+          "menus": {
+            "items": {
+              "properties": {
+                "brightness": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "content": {
+                  "type": "string"
+                },
+                "edit_visual": {
+                  "type": "string"
+                },
+                "flags": {
+                  "properties": {
+                    "action": {},
+                    "editable": {},
+                    "read_only": {},
+                    "selectable": {},
+                    "visible": {}
+                  },
+                  "type": "object"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "items": {
+                  "items": {},
+                  "type": "array"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "node_id": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "order_id": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "parent_id": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "request_gesture": {
+            "type": "string"
+          },
+          "session_timeout_ms": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.host_menu.content.push": {
       "capability": "board_commands",
-      "summary": "host menu content push",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "summary": "Invoke the host menu content push operation.",
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "brightness": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "flags": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "generation": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "id": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "lcd_line_1": {
+            "type": "string"
+          },
+          "lcd_line_2": {
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "segments": {
+            "type": "string"
+          },
+          "visual": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.host_menu.directory.replace": {
       "capability": "board_commands",
-      "summary": "host menu directory replace",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "summary": "Invoke the host menu directory replace operation.",
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "entries": {
+            "items": {
+              "properties": {
+                "flags": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "id": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "parent_id": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "generation": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.host_menu.state": {
       "capability": "read",
-      "summary": "host menu state",
+      "summary": "Read the host menu state surface.",
       "idempotency": "safe"
     },
     "controller.host.facts": {
@@ -1731,12 +2586,12 @@
     },
     "controller.hotkeys.get": {
       "capability": "read",
-      "summary": "hotkeys get",
+      "summary": "Read hotkeys.",
       "idempotency": "safe"
     },
     "controller.hotkeys.set": {
       "capability": "host_configuration",
-      "summary": "hotkeys set",
+      "summary": "Set hotkeys.",
       "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.illumination.get": {
@@ -1747,22 +2602,111 @@
     "controller.illumination.override": {
       "capability": "board_commands",
       "summary": "Temporarily apply exact 0..4095 PWM to MOSFET channel 12 without changing or taking ownership from the enclosure-light policy, then return authoritative readback.",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "value": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.illumination.set": {
       "capability": "board_commands",
       "summary": "Change only mode/on/off illumination fields, verify EEPROM durability, and return authoritative live state.",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "mode": {
+            "type": "integer"
+          },
+          "off_brightness": {
+            "type": "integer"
+          },
+          "on_brightness": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.integrations.local.get": {
       "capability": "integrations",
-      "summary": "integrations local get",
+      "summary": "Read integrations local.",
       "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.integrations.local.set": {
       "capability": "integrations",
-      "summary": "integrations local set",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "summary": "Set integrations local.",
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "buzzer_mirror": {
+            "properties": {
+              "backend": {
+                "type": "string"
+              },
+              "driver_directory": {
+                "type": "string"
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "executable": {
+                "type": "string"
+              },
+              "native_enabled": {
+                "type": "boolean"
+              },
+              "path": {
+                "type": "string"
+              },
+              "web_audio_enabled": {
+                "type": "boolean"
+              }
+            },
+            "type": "object"
+          },
+          "data_hub": {
+            "properties": {
+              "base_url": {
+                "type": "string"
+              },
+              "enabled": {
+                "type": "boolean"
+              }
+            },
+            "type": "object"
+          },
+          "lifecycle_safety": {
+            "properties": {
+              "refresh_on_resume": {
+                "type": "boolean"
+              },
+              "session_lock": {
+                "type": "string"
+              },
+              "suspend": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "local_device": {
+            "properties": {
+              "base_url": {
+                "type": "string"
+              },
+              "enabled": {
+                "type": "boolean"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.integrations.status": {
       "capability": "read",
@@ -1771,23 +2715,65 @@
     },
     "controller.lcd.presentation.configure": {
       "capability": "host_configuration",
-      "summary": "lcd presentation configure",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "summary": "Configure LCD presentation.",
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "debounce_ms": {
+            "type": "integer"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "priority_hold_ms": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.lcd.presentation.status": {
       "capability": "read",
-      "summary": "lcd presentation status",
+      "summary": "Read the LCD presentation status surface.",
       "idempotency": "safe"
     },
     "controller.lcd.priority": {
       "capability": "board_commands",
-      "summary": "lcd priority",
-      "idempotency": "non-idempotent"
+      "summary": "Invoke the LCD priority operation.",
+      "idempotency": "non-idempotent",
+      "request_fields": {
+        "properties": {
+          "hold_ms": {
+            "type": "integer"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "line1": {
+            "type": "string"
+          },
+          "line2": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.lcd.prompt": {
       "capability": "board_commands",
-      "summary": "lcd prompt",
-      "idempotency": "non-idempotent"
+      "summary": "Invoke the LCD prompt operation.",
+      "idempotency": "non-idempotent",
+      "request_fields": {
+        "properties": {
+          "line1": {
+            "type": "string"
+          },
+          "line2": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.media.authority.change": {
       "capability": "board_commands",
@@ -1836,78 +2822,258 @@
     },
     "controller.menu.current": {
       "capability": "read",
-      "summary": "menu current",
+      "summary": "Read the menu current surface.",
       "idempotency": "safe"
     },
     "controller.menu.jump": {
       "capability": "board_commands",
-      "summary": "menu jump",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "summary": "Invoke the menu jump operation.",
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "page": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.menu.layout.get": {
       "capability": "read",
-      "summary": "menu layout get",
+      "summary": "Read menu layout.",
       "idempotency": "safe"
     },
     "controller.menu.layout.set": {
       "capability": "board_commands",
-      "summary": "menu layout set",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "summary": "Set menu layout.",
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "order": {
+            "items": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "visible_mask": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.menu.list": {
       "capability": "read",
-      "summary": "menu list",
+      "summary": "List menu.",
       "idempotency": "safe"
     },
     "controller.menu.page": {
       "capability": "board_commands",
-      "summary": "menu page",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "summary": "Invoke the menu page operation.",
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "page": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.message.send": {
       "capability": "messages",
-      "summary": "message send",
-      "idempotency": "non-idempotent"
+      "summary": "Invoke the message send operation.",
+      "idempotency": "non-idempotent",
+      "request_fields": {
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "correlation": {
+            "type": "string"
+          },
+          "delivery": {
+            "type": "string"
+          },
+          "line1": {
+            "type": "string"
+          },
+          "line2": {
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "targets": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "text": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.mirror.apply": {
       "capability": "board_commands",
-      "summary": "mirror apply",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "summary": "Invoke the mirror apply operation.",
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "group_id": {
+            "type": "string"
+          },
+          "source_board_id": {}
+        },
+        "type": "object"
+      }
     },
     "controller.mirror.configure": {
       "capability": "host_configuration",
-      "summary": "mirror configure",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "summary": "Configure mirror.",
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "group_id": {
+            "type": "string"
+          },
+          "source_board_id": {}
+        },
+        "type": "object"
+      }
     },
     "controller.mirror.inspect": {
       "capability": "read",
-      "summary": "mirror inspect",
-      "idempotency": "safe"
+      "summary": "Read the mirror inspect surface.",
+      "idempotency": "safe",
+      "request_fields": {
+        "properties": {
+          "cached": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.mirror.resync": {
       "capability": "board_commands",
-      "summary": "mirror resync",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "summary": "Invoke the mirror resync operation.",
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "group_id": {
+            "type": "string"
+          },
+          "source_board_id": {}
+        },
+        "type": "object"
+      }
     },
     "controller.mirror.status": {
       "capability": "read",
-      "summary": "mirror status",
-      "idempotency": "safe"
+      "summary": "Read the mirror status surface.",
+      "idempotency": "safe",
+      "request_fields": {
+        "properties": {
+          "group_id": {
+            "type": "string"
+          },
+          "source_board_id": {}
+        },
+        "type": "object"
+      }
     },
     "controller.motion.hold.release": {
       "capability": "board_commands",
       "summary": "Revoke a pending or active owned hold and request safety-priority STOP; stale tokens cannot stop newer intents.",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "direction": {
+            "type": "string"
+          },
+          "expires_at": {},
+          "generation": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "side": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.motion.hold.renew": {
       "capability": "board_commands",
       "summary": "Extend the owned 700 ms motion lease without retransmitting movement; reject expired owners and unsafe door status.",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "direction": {
+            "type": "string"
+          },
+          "expires_at": {},
+          "generation": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "side": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.motion.hold.start": {
       "capability": "board_commands",
       "summary": "Start an advertised seat hold with a fresh 128-bit token, board generation and short press deadline; existing door and authority gates apply.",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "direction": {
+            "type": "string"
+          },
+          "expires_at": {},
+          "generation": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "side": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.network.peers.get": {
       "capability": "read",
@@ -1917,32 +3083,157 @@
     "controller.network.peers.set": {
       "capability": "host_configuration",
       "summary": "Replace and hot-apply peer topology; events, state, and status topics are accepted, and only optional secret references may carry compatibility credentials.",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "if_match": {
+            "type": "string"
+          },
+          "peers": {
+            "items": {
+              "properties": {
+                "allow_commands": {
+                  "type": "boolean"
+                },
+                "auth_token_ref": {
+                  "type": "string"
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "forward_events": {
+                  "type": "boolean"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "protocol": {
+                  "type": "string"
+                },
+                "topics": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "url": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.opcode.exchange": {
       "capability": "board_commands",
       "summary": "Exchange an opaque versionless UART opcode and caller-selected response opcode.",
-      "idempotency": "non-idempotent"
+      "idempotency": "non-idempotent",
+      "request_fields": {
+        "properties": {
+          "expect_opcode": {
+            "type": "integer"
+          },
+          "opcode": {
+            "type": "integer"
+          },
+          "payload": {
+            "items": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "payload_hex": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.opcode.request": {
       "capability": "board_commands",
       "summary": "Alias for an opaque versionless UART opcode exchange.",
-      "idempotency": "non-idempotent"
+      "idempotency": "non-idempotent",
+      "request_fields": {
+        "properties": {
+          "expect_opcode": {
+            "type": "integer"
+          },
+          "opcode": {
+            "type": "integer"
+          },
+          "payload": {
+            "items": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "payload_hex": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.opcode.send": {
       "capability": "board_commands",
       "summary": "Send an opaque versionless UART opcode; ACK is expected by default.",
-      "idempotency": "non-idempotent"
+      "idempotency": "non-idempotent",
+      "request_fields": {
+        "properties": {
+          "expect_opcode": {
+            "type": "integer"
+          },
+          "opcode": {
+            "type": "integer"
+          },
+          "payload": {
+            "items": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "payload_hex": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.open": {
       "capability": "connection_control",
-      "summary": "open",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "summary": "Open the controller session.",
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "port": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.os.configure": {
       "capability": "host_configuration",
-      "summary": "os configure",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "summary": "Configure OS.",
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "explicit_authorization_required": {
+            "type": "boolean"
+          },
+          "remote_programming_enabled": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.os.facts": {
       "capability": "read",
@@ -1956,28 +3247,60 @@
     },
     "controller.os.key": {
       "capability": "virtual_keys",
-      "summary": "os key",
+      "summary": "Invoke the OS key operation.",
       "idempotency": "non-idempotent"
     },
     "controller.os.policy": {
       "capability": "read",
-      "summary": "os policy",
+      "summary": "Read the OS policy surface.",
       "idempotency": "safe"
     },
     "controller.os.power": {
       "capability": "power_actions",
-      "summary": "os power",
+      "summary": "Invoke the OS power operation.",
       "idempotency": "non-idempotent"
     },
     "controller.os.status": {
       "capability": "read",
-      "summary": "os status",
+      "summary": "Read the OS status surface.",
       "idempotency": "safe"
     },
     "controller.output.set": {
       "capability": "board_commands",
       "summary": "Confirm one explicit physical output with owner/revision/session pins; PWM accepts raw value or curve-aware percent_milli with a PWM configuration revision. No batch atomicity or automatic retry.",
       "idempotency": "non-idempotent",
+      "request_fields": {
+        "properties": {
+          "board_identity": {
+            "type": "string"
+          },
+          "expected_connection_generation": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "expected_host_instance_id": {
+            "type": "string"
+          },
+          "expected_pwm_configuration_revision": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "string"
+          },
+          "percent_milli": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "target": {
+            "type": "string"
+          },
+          "value": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
       "params_schema": {
         "$ref": "#/$defs/PhysicalOutputRequest"
       },
@@ -1988,32 +3311,127 @@
     "controller.peer.update.host": {
       "capability": "programming",
       "summary": "Transfer a verified executable using a caller-generated idempotency_key, wait through the peer restart, and verify its exact active SHA-256 acknowledgement. Retry uncertain outcomes with the same key.",
-      "idempotency": "non-idempotent"
+      "idempotency": "non-idempotent",
+      "request_fields": {
+        "properties": {
+          "artifact_sha256": {
+            "type": "string"
+          },
+          "authorized": {
+            "type": "boolean"
+          },
+          "idempotency_key": {
+            "type": "string"
+          },
+          "peer": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.peripheral.folder.update": {
       "capability": "host_configuration",
       "summary": "Atomically create, rename, set the icon, delete or move members of a board-profile channel folder using required expected_revision; return the complete authoritative folder/control catalog.",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "expected_revision": {
+            "type": "string"
+          },
+          "icon": {
+            "type": "string"
+          },
+          "keys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "next_name": {
+            "type": "string"
+          },
+          "operation": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.peripheral.presentation.update": {
       "capability": "host_configuration",
       "summary": "Update one advertised peripheral name, icon, group, kind-local order, visibility, or lock using optional optimistic concurrency.",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "color": {
+            "type": "string"
+          },
+          "down_color": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "string"
+          },
+          "group": {
+            "type": "string"
+          },
+          "hidden": {
+            "type": "boolean"
+          },
+          "icon": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "locked": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "order": {
+            "type": "integer"
+          },
+          "up_color": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.peripherals": {
       "capability": "read",
-      "summary": "peripherals",
+      "summary": "Read the peripherals surface.",
       "idempotency": "safe"
     },
     "controller.peripherals.get": {
       "capability": "read",
-      "summary": "peripherals get",
+      "summary": "Read peripherals.",
       "idempotency": "safe"
     },
     "controller.peripherals.set": {
       "capability": "host_configuration",
-      "summary": "peripherals set",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "summary": "Set peripherals.",
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "peripheral_names": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.ping": {
       "capability": "read",
@@ -2022,68 +3440,177 @@
     },
     "controller.port.close": {
       "capability": "connection_control",
-      "summary": "port close",
+      "summary": "Close port.",
       "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.port.open": {
       "capability": "connection_control",
-      "summary": "port open",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "summary": "Open port.",
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "port": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.port.owner": {
       "capability": "read",
-      "summary": "port owner",
+      "summary": "Read the port owner surface.",
       "idempotency": "safe"
     },
     "controller.port.process": {
       "capability": "read",
-      "summary": "port process",
+      "summary": "Read the port process surface.",
       "idempotency": "safe"
     },
     "controller.port.reset": {
       "capability": "reset",
-      "summary": "port reset",
-      "idempotency": "non-idempotent"
+      "summary": "Reset port.",
+      "idempotency": "non-idempotent",
+      "request_fields": {
+        "properties": {
+          "pulse_ms": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.ports": {
       "capability": "read",
-      "summary": "ports",
+      "summary": "Read the ports surface.",
       "idempotency": "safe"
     },
     "controller.program_state.get": {
       "capability": "read",
-      "summary": "program state get",
+      "summary": "Read program state.",
       "idempotency": "safe"
     },
     "controller.program_state.set": {
       "capability": "board_commands",
-      "summary": "program state set",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "summary": "Set program state.",
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "mode": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.program-state.get": {
       "capability": "read",
-      "summary": "program state get",
+      "summary": "Read program state.",
       "idempotency": "safe"
     },
     "controller.program-state.set": {
       "capability": "board_commands",
-      "summary": "program state set",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "summary": "Set program state.",
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "mode": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.pwm.channel.configure": {
       "capability": "host_configuration",
       "summary": "Persist a partial PWM channel configuration (output type, icon, curve, gamma, step_percent, on_behavior full|restore), preserving omitted fields, then publish the changed descriptor.",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "channel": {
+            "type": "integer"
+          },
+          "curve": {
+            "type": "string"
+          },
+          "gamma": {
+            "type": "number"
+          },
+          "icon": {
+            "type": "string"
+          },
+          "on_behavior": {
+            "type": "string"
+          },
+          "output_type": {
+            "type": "string"
+          },
+          "step_percent": {
+            "type": "number"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.pwm.off": {
       "capability": "board_commands",
-      "summary": "pwm off",
+      "summary": "Turn off selected PWM outputs through the current board owner and return authoritative state.",
       "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.pwm.set": {
       "capability": "board_commands",
-      "summary": "pwm set",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "summary": "Set one physical PWM channel (0..15) using either calibrated percent (0..100) or raw_value (0..4095), never both. Supply current snapshot owner/revision fields; the host verifies admission and returns authoritative readback.",
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "board_identity": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "integer"
+          },
+          "expected_connection_generation": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "expected_host_instance_id": {
+            "type": "string"
+          },
+          "expected_pwm_configuration_revision": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "string"
+          },
+          "percent": {
+            "type": "number"
+          },
+          "raw_value": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "request_template": {
+        "channel": 0,
+        "percent": 50,
+        "expected_host_instance_id": "<snapshot host_instance_id>",
+        "expected_connection_generation": 0,
+        "board_identity": "<snapshot board identity>",
+        "expected_revision": "<snapshot revision>",
+        "expected_pwm_configuration_revision": "<snapshot PWM configuration revision>"
+      }
     },
     "controller.pwm.trace.get": {
       "capability": "read",
@@ -2093,7 +3620,18 @@
     "controller.pwm.trace.start": {
       "capability": "events",
       "summary": "Temporarily capture one channel 0..15 for explicit duration_ms 1..60000, off by default; no board operation.",
-      "idempotency": "safe"
+      "idempotency": "safe",
+      "request_fields": {
+        "properties": {
+          "channel": {
+            "type": "integer"
+          },
+          "duration_ms": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.pwm.trace.stop": {
       "capability": "events",
@@ -2102,23 +3640,39 @@
     },
     "controller.pwm.values": {
       "capability": "read",
-      "summary": "pwm values",
+      "summary": "Read cached authoritative PWM output values without changing any channel.",
       "idempotency": "safe"
     },
     "controller.quit": {
       "capability": "shutdown",
-      "summary": "quit",
+      "summary": "Invoke the quit operation.",
       "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.reset": {
       "capability": "reset",
-      "summary": "reset",
-      "idempotency": "non-idempotent"
+      "summary": "Reset the controller session.",
+      "idempotency": "non-idempotent",
+      "request_fields": {
+        "properties": {
+          "pulse_ms": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.reset.lines": {
       "capability": "reset",
-      "summary": "reset lines",
-      "idempotency": "non-idempotent"
+      "summary": "Invoke the reset lines operation.",
+      "idempotency": "non-idempotent",
+      "request_fields": {
+        "properties": {
+          "pulse_ms": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.restore.flash": {
       "capability": "programming",
@@ -2128,81 +3682,208 @@
     "controller.rf.binding.put": {
       "capability": "host_configuration",
       "summary": "Create a uniquely named validated RF binding, or explicitly edit with previous_name; reject name/stale-target conflicts without replacing unrelated assignments.",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "allow_keyboard": {
+            "type": "boolean"
+          },
+          "binding": {},
+          "previous_name": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.rf.binding.remove": {
       "capability": "host_configuration",
       "summary": "Remove one named host-owned RF application binding.",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.rf.catalog": {
       "capability": "read",
       "summary": "Return learned RF records, live capture state, persisted bindings, and currently advertised action choices.",
-      "idempotency": "safe"
+      "idempotency": "safe",
+      "request_fields": {
+        "properties": {
+          "read_board": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.rf.clear": {
       "capability": "board_commands",
-      "summary": "rf clear",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "summary": "Clear RF.",
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "confirm": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.rf.learn.cancel": {
       "capability": "board_commands",
-      "summary": "rf learn cancel",
+      "summary": "Cancel RF learn.",
       "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.rf.learn.start": {
       "capability": "board_commands",
-      "summary": "rf learn start",
-      "idempotency": "non-idempotent"
+      "summary": "Start RF learn.",
+      "idempotency": "non-idempotent",
+      "request_fields": {
+        "properties": {
+          "continuous": {
+            "type": "boolean"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "timeout_ms": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.rf.learn.status": {
       "capability": "read",
-      "summary": "rf learn status",
+      "summary": "Read the RF learn status surface.",
       "idempotency": "safe"
     },
     "controller.rf.list": {
       "capability": "read",
-      "summary": "rf list",
+      "summary": "List RF.",
       "idempotency": "safe"
     },
     "controller.rf.map": {
       "capability": "board_commands",
       "summary": "Replace one learned RF mapping and return board readback.",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "behavior": {
+            "type": "string"
+          },
+          "id": {
+            "type": "integer"
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.rf.observed.add": {
       "capability": "board_commands",
       "summary": "Save a waveform actually received from the current board, unassigned, with preserved records and verified readback.",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "bits": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "code": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "protocol": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.rf.preferences.set": {
       "capability": "host_configuration",
       "summary": "Save timed-learning, duration and continuous-capture preferences without entering learning.",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "continuous": {
+            "type": "boolean"
+          },
+          "timed": {
+            "type": "boolean"
+          },
+          "timeout_seconds": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.rf.presentation": {
       "capability": "read",
-      "summary": "rf presentation",
+      "summary": "Read the RF presentation surface.",
       "idempotency": "safe"
     },
     "controller.rf.remove": {
       "capability": "board_commands",
-      "summary": "rf remove",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "summary": "Remove RF.",
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "id": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.rf.transmit": {
       "capability": "board_commands",
       "summary": "Transmit one validated RF waveform request.",
-      "idempotency": "non-idempotent"
+      "idempotency": "non-idempotent",
+      "request_fields": {
+        "properties": {
+          "bits": {
+            "type": "integer"
+          },
+          "code": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "protocol": {
+            "type": "integer"
+          },
+          "pulse_us": {
+            "type": "integer"
+          },
+          "repeats": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.session.snapshot": {
       "capability": "read",
-      "summary": "session snapshot",
+      "summary": "Read the session snapshot surface.",
       "idempotency": "safe"
     },
     "controller.session.snapshot.last": {
       "capability": "read",
-      "summary": "session snapshot last",
+      "summary": "Read the session snapshot last surface.",
       "idempotency": "safe"
     },
     "controller.snapshot": {
@@ -2232,7 +3913,7 @@
     },
     "controller.status": {
       "capability": "read",
-      "summary": "status",
+      "summary": "Read the status surface.",
       "idempotency": "safe"
     },
     "controller.status_led.policy.get": {
@@ -2243,67 +3924,1514 @@
     "controller.status_led.policy.set": {
       "capability": "host_configuration",
       "summary": "Replace the reactive status-lighting policy with mandatory canonical JSON if_match revision and serialized validation.",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "bluetooth_audio_connected": {
+            "properties": {
+              "alternate_color": {
+                "properties": {
+                  "blue": {},
+                  "green": {},
+                  "red": {}
+                },
+                "type": "object"
+              },
+              "brightness": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "color": {
+                "properties": {
+                  "blue": {},
+                  "green": {},
+                  "red": {}
+                },
+                "type": "object"
+              },
+              "effect": {
+                "type": "string"
+              },
+              "minimum_brightness": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "period_ms": {
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          },
+          "bluetooth_audio_off": {
+            "properties": {
+              "alternate_color": {
+                "properties": {
+                  "blue": {},
+                  "green": {},
+                  "red": {}
+                },
+                "type": "object"
+              },
+              "brightness": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "color": {
+                "properties": {
+                  "blue": {},
+                  "green": {},
+                  "red": {}
+                },
+                "type": "object"
+              },
+              "effect": {
+                "type": "string"
+              },
+              "minimum_brightness": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "period_ms": {
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          },
+          "bluetooth_audio_searching": {
+            "properties": {
+              "alternate_color": {
+                "properties": {
+                  "blue": {},
+                  "green": {},
+                  "red": {}
+                },
+                "type": "object"
+              },
+              "brightness": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "color": {
+                "properties": {
+                  "blue": {},
+                  "green": {},
+                  "red": {}
+                },
+                "type": "object"
+              },
+              "effect": {
+                "type": "string"
+              },
+              "minimum_brightness": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "period_ms": {
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          },
+          "door_closed": {
+            "properties": {
+              "alternate_color": {
+                "properties": {
+                  "blue": {},
+                  "green": {},
+                  "red": {}
+                },
+                "type": "object"
+              },
+              "brightness": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "color": {
+                "properties": {
+                  "blue": {},
+                  "green": {},
+                  "red": {}
+                },
+                "type": "object"
+              },
+              "effect": {
+                "type": "string"
+              },
+              "minimum_brightness": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "period_ms": {
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          },
+          "door_cue_hold_ms": {
+            "type": "integer"
+          },
+          "door_opened": {
+            "properties": {
+              "alternate_color": {
+                "properties": {
+                  "blue": {},
+                  "green": {},
+                  "red": {}
+                },
+                "type": "object"
+              },
+              "brightness": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "color": {
+                "properties": {
+                  "blue": {},
+                  "green": {},
+                  "red": {}
+                },
+                "type": "object"
+              },
+              "effect": {
+                "type": "string"
+              },
+              "minimum_brightness": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "period_ms": {
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "hot": {
+            "properties": {
+              "alternate_color": {
+                "properties": {
+                  "blue": {},
+                  "green": {},
+                  "red": {}
+                },
+                "type": "object"
+              },
+              "brightness": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "color": {
+                "properties": {
+                  "blue": {},
+                  "green": {},
+                  "red": {}
+                },
+                "type": "object"
+              },
+              "effect": {
+                "type": "string"
+              },
+              "minimum_brightness": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "period_ms": {
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          },
+          "idle": {
+            "properties": {
+              "alternate_color": {
+                "properties": {
+                  "blue": {},
+                  "green": {},
+                  "red": {}
+                },
+                "type": "object"
+              },
+              "brightness": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "color": {
+                "properties": {
+                  "blue": {},
+                  "green": {},
+                  "red": {}
+                },
+                "type": "object"
+              },
+              "effect": {
+                "type": "string"
+              },
+              "minimum_brightness": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "period_ms": {
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          },
+          "if_match": {
+            "type": "string"
+          },
+          "pc_offline": {
+            "properties": {
+              "alternate_color": {
+                "properties": {
+                  "blue": {},
+                  "green": {},
+                  "red": {}
+                },
+                "type": "object"
+              },
+              "brightness": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "color": {
+                "properties": {
+                  "blue": {},
+                  "green": {},
+                  "red": {}
+                },
+                "type": "object"
+              },
+              "effect": {
+                "type": "string"
+              },
+              "minimum_brightness": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "period_ms": {
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          },
+          "rf_activity": {
+            "properties": {
+              "alternate_color": {
+                "properties": {
+                  "blue": {},
+                  "green": {},
+                  "red": {}
+                },
+                "type": "object"
+              },
+              "brightness": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "color": {
+                "properties": {
+                  "blue": {},
+                  "green": {},
+                  "red": {}
+                },
+                "type": "object"
+              },
+              "effect": {
+                "type": "string"
+              },
+              "minimum_brightness": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "period_ms": {
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          },
+          "rf_hold_ms": {
+            "type": "integer"
+          },
+          "running": {
+            "properties": {
+              "alternate_color": {
+                "properties": {
+                  "blue": {},
+                  "green": {},
+                  "red": {}
+                },
+                "type": "object"
+              },
+              "brightness": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "color": {
+                "properties": {
+                  "blue": {},
+                  "green": {},
+                  "red": {}
+                },
+                "type": "object"
+              },
+              "effect": {
+                "type": "string"
+              },
+              "minimum_brightness": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "period_ms": {
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          },
+          "running_door_open": {
+            "properties": {
+              "alternate_color": {
+                "properties": {
+                  "blue": {},
+                  "green": {},
+                  "red": {}
+                },
+                "type": "object"
+              },
+              "brightness": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "color": {
+                "properties": {
+                  "blue": {},
+                  "green": {},
+                  "red": {}
+                },
+                "type": "object"
+              },
+              "effect": {
+                "type": "string"
+              },
+              "minimum_brightness": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "period_ms": {
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          },
+          "step_ms": {
+            "type": "integer"
+          },
+          "transition_ms": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.status_led.release": {
       "capability": "board_commands",
-      "summary": "status led release",
+      "summary": "Invoke the status led release operation.",
       "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.status_led.set": {
       "capability": "board_commands",
-      "summary": "status led set",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "summary": "Set status led.",
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "blue": {
+            "type": "integer"
+          },
+          "brightness": {
+            "type": "integer"
+          },
+          "green": {
+            "type": "integer"
+          },
+          "red": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.subscribe": {
       "capability": "events",
       "summary": "Subscribe this WebSocket connection to activity events, changed state, explicit debug, raw opcodes, and/or status.",
-      "idempotency": "safe"
+      "idempotency": "safe",
+      "request_fields": {
+        "properties": {
+          "after_id": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "interval_ms": {
+            "type": "integer"
+          },
+          "opcodes": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "preserve": {
+            "type": "boolean"
+          },
+          "state_interval_ms": {
+            "type": "integer"
+          },
+          "topics": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.system.status": {
       "capability": "read",
-      "summary": "system status",
+      "summary": "Read the system status surface.",
       "idempotency": "safe"
     },
     "controller.temperatures": {
       "capability": "read",
-      "summary": "temperatures",
-      "idempotency": "safe"
+      "summary": "Read the temperatures surface.",
+      "idempotency": "safe",
+      "request_fields": {
+        "properties": {
+          "rescan": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.udp.call": {
       "capability": "bridge_calls",
-      "summary": "udp call",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "summary": "Invoke the UDP call operation.",
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "peer": {
+            "type": "string"
+          },
+          "request": {},
+          "timeout_ms": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.udp.config.get": {
       "capability": "read",
-      "summary": "udp config get",
+      "summary": "Read UDP config.",
       "idempotency": "safe"
     },
     "controller.udp.config.set": {
       "capability": "host_configuration",
-      "summary": "udp config set",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "summary": "Set UDP config.",
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "automations": {
+            "items": {},
+            "type": "array"
+          },
+          "board_profiles": {
+            "additionalProperties": {
+              "properties": {
+                "channel_routing": {
+                  "properties": {
+                    "channels": {},
+                    "enabled": {}
+                  },
+                  "type": "object"
+                },
+                "expose_raw_relays": {
+                  "type": "boolean"
+                },
+                "folders": {
+                  "items": {},
+                  "type": "array"
+                },
+                "key": {
+                  "type": "string"
+                },
+                "mode": {
+                  "type": "string"
+                },
+                "presentation": {
+                  "additionalProperties": {},
+                  "type": "object"
+                },
+                "pwm_recall": {
+                  "additionalProperties": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "type": "object"
+                }
+              },
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "connection": {
+            "properties": {
+              "baud_rate": {
+                "type": "integer"
+              },
+              "hello_attempts": {
+                "type": "integer"
+              },
+              "last_device": {
+                "properties": {
+                  "instance_id": {},
+                  "last_seen": {},
+                  "name": {},
+                  "pid": {},
+                  "port": {},
+                  "serial_number": {},
+                  "vid": {}
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "pid": {
+                "type": "string"
+              },
+              "port": {
+                "type": "string"
+              },
+              "reconnect_initial_ms": {
+                "type": "integer"
+              },
+              "reconnect_maximum_ms": {
+                "type": "integer"
+              },
+              "request_timeout_ms": {
+                "type": "integer"
+              },
+              "reset_on_reconnect": {
+                "type": "boolean"
+              },
+              "startup_wait_ms": {
+                "type": "integer"
+              },
+              "vid": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "effect_groups": {
+            "additionalProperties": {
+              "properties": {
+                "icon": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "host_menus": {
+            "properties": {
+              "builtin_overrides": {
+                "items": {
+                  "properties": {
+                    "brightness": {},
+                    "content": {},
+                    "edit_visual": {},
+                    "flags": {},
+                    "label": {},
+                    "order_id": {},
+                    "parent_id": {},
+                    "stable_id": {},
+                    "title": {}
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "default_menu": {
+                "type": "string"
+              },
+              "display_duration_ms": {
+                "type": "integer"
+              },
+              "menus": {
+                "items": {
+                  "properties": {
+                    "brightness": {},
+                    "content": {},
+                    "edit_visual": {},
+                    "flags": {},
+                    "id": {},
+                    "items": {},
+                    "label": {},
+                    "node_id": {},
+                    "order_id": {},
+                    "parent_id": {},
+                    "title": {}
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "request_gesture": {
+                "type": "string"
+              },
+              "session_timeout_ms": {
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          },
+          "integrations": {
+            "properties": {
+              "board_mirror": {},
+              "buzzer_mirror": {
+                "properties": {
+                  "backend": {
+                    "type": "string"
+                  },
+                  "driver_directory": {
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "executable": {
+                    "type": "string"
+                  },
+                  "native_enabled": {
+                    "type": "boolean"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "web_audio_enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "type": "object"
+              },
+              "data_hub": {
+                "properties": {
+                  "base_url": {
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "type": "object"
+              },
+              "discovery": {
+                "properties": {
+                  "broadcast_enabled": {
+                    "type": "boolean"
+                  },
+                  "broadcast_port": {
+                    "type": "integer"
+                  },
+                  "dns_sd_enabled": {
+                    "type": "boolean"
+                  },
+                  "instance_name": {
+                    "type": "string"
+                  },
+                  "mdns_enabled": {
+                    "type": "boolean"
+                  },
+                  "mndp_enabled": {
+                    "type": "boolean"
+                  },
+                  "netbios_enabled": {
+                    "type": "boolean"
+                  },
+                  "ssdp_enabled": {
+                    "type": "boolean"
+                  },
+                  "upnp_enabled": {
+                    "type": "boolean"
+                  },
+                  "ws_discovery_enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "type": "object"
+              },
+              "hotkeys": {
+                "items": {
+                  "properties": {
+                    "chord": {},
+                    "command": {},
+                    "enabled": {},
+                    "name": {}
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "inbound_webhooks_enabled": {
+                "type": "boolean"
+              },
+              "keyboard_control": {
+                "properties": {
+                  "bindings": {
+                    "items": {},
+                    "type": "array"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "type": "object"
+              },
+              "lifecycle_safety": {
+                "properties": {
+                  "refresh_on_resume": {
+                    "type": "boolean"
+                  },
+                  "session_lock": {
+                    "type": "string"
+                  },
+                  "suspend": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "local_device": {
+                "properties": {
+                  "base_url": {
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "type": "object"
+              },
+              "notifications": {
+                "properties": {
+                  "actions": {
+                    "items": {},
+                    "type": "array"
+                  },
+                  "door_running_beep": {
+                    "type": "boolean"
+                  },
+                  "door_running_toast": {
+                    "type": "boolean"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "important_kinds": {
+                    "items": {},
+                    "type": "array"
+                  }
+                },
+                "type": "object"
+              },
+              "outbound_webhooks": {
+                "items": {
+                  "properties": {
+                    "body_template": {},
+                    "enabled": {},
+                    "event_kind": {},
+                    "headers": {},
+                    "max_attempts": {},
+                    "method": {},
+                    "name": {},
+                    "retry_initial_ms": {},
+                    "retry_maximum_ms": {},
+                    "secret_headers": {},
+                    "signing_secret": {},
+                    "signing_secret_ref": {},
+                    "timeout_ms": {},
+                    "url": {}
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "status_led": {
+                "properties": {
+                  "bluetooth_audio_connected": {},
+                  "bluetooth_audio_off": {},
+                  "bluetooth_audio_searching": {},
+                  "door_closed": {},
+                  "door_cue_hold_ms": {
+                    "type": "integer"
+                  },
+                  "door_opened": {},
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "hot": {},
+                  "idle": {},
+                  "pc_offline": {},
+                  "rf_activity": {},
+                  "rf_hold_ms": {
+                    "type": "integer"
+                  },
+                  "running": {},
+                  "running_door_open": {},
+                  "step_ms": {
+                    "type": "integer"
+                  },
+                  "transition_ms": {
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              },
+              "text_mappings": {
+                "items": {
+                  "properties": {
+                    "command": {},
+                    "contains": {},
+                    "enabled": {},
+                    "name": {},
+                    "source": {},
+                    "target": {},
+                    "type": {}
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "websocket_clients": {
+                "items": {
+                  "properties": {
+                    "allow_commands": {},
+                    "auth_token": {},
+                    "auth_token_ref": {},
+                    "enabled": {},
+                    "forward_events": {},
+                    "name": {},
+                    "protocol": {},
+                    "topics": {},
+                    "url": {}
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          },
+          "ipc": {
+            "properties": {
+              "allow_remote": {
+                "type": "boolean"
+              },
+              "allowed_origins": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "auth_token": {
+                "type": "string"
+              },
+              "auth_token_ref": {
+                "type": "string"
+              },
+              "listen": {
+                "type": "string"
+              },
+              "remote_policy": {
+                "properties": {
+                  "board_commands": {
+                    "type": "boolean"
+                  },
+                  "bridge_calls": {
+                    "type": "boolean"
+                  },
+                  "connection_control": {
+                    "type": "boolean"
+                  },
+                  "events": {
+                    "type": "boolean"
+                  },
+                  "host_automations": {
+                    "type": "boolean"
+                  },
+                  "host_configuration": {
+                    "type": "boolean"
+                  },
+                  "integrations": {
+                    "type": "boolean"
+                  },
+                  "messages": {
+                    "type": "boolean"
+                  },
+                  "power_actions": {
+                    "type": "boolean"
+                  },
+                  "programming": {
+                    "type": "boolean"
+                  },
+                  "read": {
+                    "type": "boolean"
+                  },
+                  "reset": {
+                    "type": "boolean"
+                  },
+                  "shutdown": {
+                    "type": "boolean"
+                  },
+                  "virtual_keys": {
+                    "type": "boolean"
+                  }
+                },
+                "type": "object"
+              },
+              "remote_principal": {
+                "type": "string"
+              },
+              "socket_io_path": {
+                "description": "Socket.IO is a distinct protocol and is never advertised by the plain\nWebSocket endpoint. This path is reserved for an explicit adapter.",
+                "type": "string"
+              },
+              "udp": {
+                "properties": {
+                  "automations": {
+                    "items": {},
+                    "type": "array"
+                  },
+                  "board_profiles": {
+                    "additionalProperties": {},
+                    "type": "object"
+                  },
+                  "connection": {},
+                  "effect_groups": {
+                    "additionalProperties": {},
+                    "type": "object"
+                  },
+                  "host_menus": {},
+                  "integrations": {},
+                  "ipc": {},
+                  "macros": {
+                    "items": {},
+                    "type": "array"
+                  },
+                  "melodies": {
+                    "items": {},
+                    "type": "array"
+                  },
+                  "os_actions": {},
+                  "paths": {},
+                  "programming": {},
+                  "rf": {},
+                  "safety": {},
+                  "schema": {
+                    "type": "integer"
+                  },
+                  "scripts": {
+                    "additionalProperties": {},
+                    "type": "object"
+                  },
+                  "status_effects": {
+                    "items": {},
+                    "type": "array"
+                  },
+                  "strip_effects": {
+                    "items": {},
+                    "type": "array"
+                  },
+                  "ui": {}
+                },
+                "type": "object"
+              },
+              "websocket_path": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "macros": {
+            "items": {},
+            "type": "array"
+          },
+          "melodies": {
+            "items": {
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "notes": {
+                  "items": {},
+                  "type": "array"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "os_actions": {
+            "properties": {
+              "explicit_authorization_required": {
+                "type": "boolean"
+              },
+              "remote_programming_enabled": {
+                "type": "boolean"
+              }
+            },
+            "type": "object"
+          },
+          "paths": {
+            "properties": {
+              "firmware_hex": {
+                "type": "string"
+              },
+              "history_file": {
+                "type": "string"
+              },
+              "project": {
+                "type": "string"
+              },
+              "scripts_directory": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "programming": {
+            "properties": {
+              "avrdude": {
+                "type": "string"
+              },
+              "avrdude_adapter": {
+                "type": "string"
+              },
+              "avrdude_backend": {
+                "type": "string"
+              },
+              "avrdude_conf": {
+                "type": "string"
+              },
+              "bootloader_bytes": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "deployment": {
+                "type": "string"
+              },
+              "eeprom_bytes": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "firmware_features": {
+                "items": {},
+                "type": "array"
+              },
+              "flash_bytes": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "fqbn": {
+                "type": "string"
+              },
+              "method": {
+                "type": "string"
+              },
+              "programmer": {
+                "type": "string"
+              },
+              "toolchain_cli": {
+                "type": "string"
+              },
+              "toolchain_config": {
+                "type": "string"
+              },
+              "toolchain_managed": {
+                "type": "boolean"
+              }
+            },
+            "type": "object"
+          },
+          "rf": {
+            "properties": {
+              "categories": {
+                "items": {
+                  "properties": {
+                    "color": {},
+                    "name": {}
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "display_radix": {
+                "type": "string"
+              },
+              "learning": {
+                "properties": {
+                  "continuous": {
+                    "type": "boolean"
+                  },
+                  "timed": {
+                    "type": "boolean"
+                  },
+                  "timeout_seconds": {
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              },
+              "metadata": {
+                "items": {
+                  "properties": {
+                    "category": {},
+                    "key": {},
+                    "name": {}
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          },
+          "safety": {
+            "properties": {
+              "motion_door_policy": {
+                "description": "MotionDoorPolicy is a PC-side command guard, not an MCU EEPROM mirror.\nValues are always, open, closed, and never.",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "schema": {
+            "type": "integer"
+          },
+          "scripts": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "status_effects": {
+            "items": {
+              "properties": {
+                "alternate_blue": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "alternate_green": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "alternate_red": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "blue": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "brightness": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "green": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "min_brightness": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "period_ms": {
+                  "type": "integer"
+                },
+                "red": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "repeats": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "strip_effects": {
+            "items": {},
+            "type": "array"
+          },
+          "ui": {
+            "properties": {
+              "app_title": {
+                "type": "string"
+              },
+              "appearance": {
+                "properties": {
+                  "audio_muted": {
+                    "type": "boolean"
+                  },
+                  "audio_volume": {
+                    "type": "number"
+                  },
+                  "compact_numbers": {
+                    "type": "boolean"
+                  },
+                  "direction": {
+                    "type": "string"
+                  },
+                  "locale": {
+                    "type": "string"
+                  },
+                  "reduce_motion": {
+                    "type": "boolean"
+                  },
+                  "theme": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "control_value_colors": {
+                "type": "boolean"
+              },
+              "current_decimals": {
+                "type": "integer"
+              },
+              "event_log_limit": {
+                "type": "integer"
+              },
+              "history_hours": {
+                "type": "integer"
+              },
+              "history_sample_ms": {
+                "type": "integer"
+              },
+              "idle_status_interval_ms": {
+                "type": "integer"
+              },
+              "intro_mode": {
+                "type": "string"
+              },
+              "lcd_priority_hold_ms": {
+                "type": "integer"
+              },
+              "lcd_prompt_debounce_ms": {
+                "type": "integer"
+              },
+              "lcd_service_enabled": {
+                "type": "boolean"
+              },
+              "measurement_freshness_ms": {
+                "type": "integer"
+              },
+              "mirror_prompt_to_lcd": {
+                "type": "boolean"
+              },
+              "peripheral_names": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "power_decimals": {
+                "type": "integer"
+              },
+              "pwm_channels": {
+                "additionalProperties": {
+                  "properties": {
+                    "curve": {},
+                    "gamma": {},
+                    "icon": {},
+                    "on_behavior": {},
+                    "output_type": {},
+                    "step_percent": {}
+                  },
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              "segment_scroll": {
+                "properties": {
+                  "door_closed_text": {
+                    "type": "string"
+                  },
+                  "door_open_text": {
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "gap_cells": {
+                    "type": "integer"
+                  },
+                  "interval_seconds": {
+                    "type": "integer"
+                  },
+                  "pages": {
+                    "items": {},
+                    "type": "array"
+                  },
+                  "repeat": {
+                    "type": "string"
+                  },
+                  "speed_ms": {
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              },
+              "separate_port_buttons": {
+                "type": "boolean"
+              },
+              "setup_complete": {
+                "type": "boolean"
+              },
+              "show_bus_voltage": {
+                "type": "boolean"
+              },
+              "show_current": {
+                "type": "boolean"
+              },
+              "show_diagnostics": {
+                "type": "boolean"
+              },
+              "show_graphs": {
+                "type": "boolean"
+              },
+              "show_io": {
+                "type": "boolean"
+              },
+              "show_power": {
+                "type": "boolean"
+              },
+              "show_supply_voltage": {
+                "type": "boolean"
+              },
+              "show_temperature_bt": {
+                "type": "boolean"
+              },
+              "show_temperature_led": {
+                "type": "boolean"
+              },
+              "status_interval_ms": {
+                "type": "integer"
+              },
+              "strip_color_order": {
+                "type": "string"
+              },
+              "strip_firmware_order": {
+                "type": "string"
+              },
+              "table_layout": {
+                "type": "string"
+              },
+              "tagline": {
+                "type": "string"
+              },
+              "temperature_decimals": {
+                "type": "integer"
+              },
+              "tui_console": {
+                "properties": {
+                  "columns": {
+                    "type": "integer"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "font_face": {
+                    "type": "string"
+                  },
+                  "font_size": {
+                    "type": "integer"
+                  },
+                  "rows": {
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              },
+              "voltage_decimals": {
+                "type": "integer"
+              },
+              "welcome_melody": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.udp.events.get": {
       "capability": "read",
-      "summary": "udp events get",
+      "summary": "Read UDP events.",
       "idempotency": "safe"
     },
     "controller.udp.status": {
       "capability": "read",
-      "summary": "udp status",
+      "summary": "Read the UDP status surface.",
       "idempotency": "safe"
     },
     "controller.udp.subscribe": {
       "capability": "host_configuration",
-      "summary": "udp subscribe",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "summary": "Invoke the UDP subscribe operation.",
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "peer": {
+            "type": "string"
+          },
+          "request": {},
+          "timeout_ms": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.udp.unsubscribe": {
       "capability": "host_configuration",
-      "summary": "udp unsubscribe",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "summary": "Invoke the UDP unsubscribe operation.",
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "peer": {
+            "type": "string"
+          },
+          "request": {},
+          "timeout_ms": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.ui.config": {
       "capability": "read",
@@ -2318,12 +5446,110 @@
     "controller.ui.config.open": {
       "capability": "host_configuration",
       "summary": "Open the active configuration file or its containing folder on the host desktop; target is file or folder. Requires an available interactive desktop.",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "target": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.ui.config.set": {
       "capability": "host_configuration",
       "summary": "Atomically persist host UI fields; status_interval_ms is 50..60000 and measurement_freshness_ms is refresh+100..120000.",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "app_title": {
+            "type": "string"
+          },
+          "appearance": {
+            "properties": {
+              "audioMuted": {
+                "type": "boolean"
+              },
+              "audioVolume": {
+                "type": "number"
+              },
+              "compactNumbers": {
+                "type": "boolean"
+              },
+              "direction": {
+                "type": "string"
+              },
+              "locale": {
+                "type": "string"
+              },
+              "reduceMotion": {
+                "type": "boolean"
+              },
+              "theme": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "if_match": {
+            "type": "string"
+          },
+          "intro_mode": {
+            "type": "string"
+          },
+          "measurement_freshness_ms": {
+            "type": "integer"
+          },
+          "peripheral_names": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "segment_scroll": {
+            "properties": {
+              "door_closed_text": {
+                "type": "string"
+              },
+              "door_open_text": {
+                "type": "string"
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "gap_cells": {
+                "type": "integer"
+              },
+              "interval_seconds": {
+                "type": "integer"
+              },
+              "pages": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "repeat": {
+                "type": "string"
+              },
+              "speed_ms": {
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          },
+          "setup_complete": {
+            "type": "boolean"
+          },
+          "status_interval_ms": {
+            "type": "integer"
+          },
+          "tagline": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.ui.preferences.get": {
       "capability": "read",
@@ -2333,7 +5559,215 @@
     "controller.ui.preferences.set": {
       "capability": "host_configuration",
       "summary": "Replace only UI preferences with mandatory if_match ETag, serialized compare-and-swap, validation and no-op suppression.",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "if_match": {
+            "type": "string"
+          },
+          "settings": {
+            "properties": {
+              "app_title": {
+                "type": "string"
+              },
+              "appearance": {
+                "properties": {
+                  "audio_muted": {
+                    "type": "boolean"
+                  },
+                  "audio_volume": {
+                    "type": "number"
+                  },
+                  "compact_numbers": {
+                    "type": "boolean"
+                  },
+                  "direction": {
+                    "type": "string"
+                  },
+                  "locale": {
+                    "type": "string"
+                  },
+                  "reduce_motion": {
+                    "type": "boolean"
+                  },
+                  "theme": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "control_value_colors": {
+                "type": "boolean"
+              },
+              "current_decimals": {
+                "type": "integer"
+              },
+              "event_log_limit": {
+                "type": "integer"
+              },
+              "history_hours": {
+                "type": "integer"
+              },
+              "history_sample_ms": {
+                "type": "integer"
+              },
+              "idle_status_interval_ms": {
+                "type": "integer"
+              },
+              "intro_mode": {
+                "type": "string"
+              },
+              "lcd_priority_hold_ms": {
+                "type": "integer"
+              },
+              "lcd_prompt_debounce_ms": {
+                "type": "integer"
+              },
+              "lcd_service_enabled": {
+                "type": "boolean"
+              },
+              "measurement_freshness_ms": {
+                "type": "integer"
+              },
+              "mirror_prompt_to_lcd": {
+                "type": "boolean"
+              },
+              "peripheral_names": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "power_decimals": {
+                "type": "integer"
+              },
+              "pwm_channels": {
+                "additionalProperties": {
+                  "properties": {
+                    "curve": {},
+                    "gamma": {},
+                    "icon": {},
+                    "on_behavior": {},
+                    "output_type": {},
+                    "step_percent": {}
+                  },
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              "segment_scroll": {
+                "properties": {
+                  "door_closed_text": {
+                    "type": "string"
+                  },
+                  "door_open_text": {
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "gap_cells": {
+                    "type": "integer"
+                  },
+                  "interval_seconds": {
+                    "type": "integer"
+                  },
+                  "pages": {
+                    "items": {},
+                    "type": "array"
+                  },
+                  "repeat": {
+                    "type": "string"
+                  },
+                  "speed_ms": {
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              },
+              "separate_port_buttons": {
+                "type": "boolean"
+              },
+              "setup_complete": {
+                "type": "boolean"
+              },
+              "show_bus_voltage": {
+                "type": "boolean"
+              },
+              "show_current": {
+                "type": "boolean"
+              },
+              "show_diagnostics": {
+                "type": "boolean"
+              },
+              "show_graphs": {
+                "type": "boolean"
+              },
+              "show_io": {
+                "type": "boolean"
+              },
+              "show_power": {
+                "type": "boolean"
+              },
+              "show_supply_voltage": {
+                "type": "boolean"
+              },
+              "show_temperature_bt": {
+                "type": "boolean"
+              },
+              "show_temperature_led": {
+                "type": "boolean"
+              },
+              "status_interval_ms": {
+                "type": "integer"
+              },
+              "strip_color_order": {
+                "type": "string"
+              },
+              "strip_firmware_order": {
+                "type": "string"
+              },
+              "table_layout": {
+                "type": "string"
+              },
+              "tagline": {
+                "type": "string"
+              },
+              "temperature_decimals": {
+                "type": "integer"
+              },
+              "tui_console": {
+                "properties": {
+                  "columns": {
+                    "type": "integer"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "font_face": {
+                    "type": "string"
+                  },
+                  "font_size": {
+                    "type": "integer"
+                  },
+                  "rows": {
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              },
+              "voltage_decimals": {
+                "type": "integer"
+              },
+              "welcome_melody": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.unsubscribe": {
       "capability": "events",
@@ -2342,48 +5776,92 @@
     },
     "controller.update.eeprom": {
       "capability": "programming",
-      "summary": "update eeprom",
+      "summary": "Invoke the update eeprom operation.",
       "idempotency": "non-idempotent"
     },
     "controller.update.firmware": {
       "capability": "programming",
-      "summary": "update firmware",
+      "summary": "Invoke the update firmware operation.",
       "idempotency": "non-idempotent"
     },
     "controller.update.host": {
       "capability": "programming",
-      "summary": "update host",
+      "summary": "Invoke the update host operation.",
       "idempotency": "non-idempotent"
     },
     "controller.update.status": {
       "capability": "read",
-      "summary": "update status",
+      "summary": "Read the update status surface.",
       "idempotency": "safe"
     },
     "controller.virtual_key": {
       "capability": "virtual_keys",
-      "summary": "virtual key",
+      "summary": "Invoke the virtual key operation.",
       "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.webhooks.clear": {
       "capability": "integrations",
       "summary": "Clear explicitly selected dead-letter deliveries.",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "idempotency": "idempotent-with-authoritative-readback",
+      "request_fields": {
+        "properties": {
+          "all": {
+            "type": "boolean"
+          },
+          "confirm_all": {
+            "type": "boolean"
+          },
+          "delivery_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.webhooks.dead": {
       "capability": "read",
       "summary": "List bounded non-secret dead-letter deliveries.",
-      "idempotency": "safe"
+      "idempotency": "safe",
+      "request_fields": {
+        "properties": {
+          "limit": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.webhooks.pending": {
       "capability": "read",
       "summary": "List bounded non-secret pending outbound deliveries.",
-      "idempotency": "safe"
+      "idempotency": "safe",
+      "request_fields": {
+        "properties": {
+          "limit": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.webhooks.replay": {
       "capability": "integrations",
       "summary": "Replay explicitly selected dead-letter deliveries.",
-      "idempotency": "non-idempotent"
+      "idempotency": "non-idempotent",
+      "request_fields": {
+        "properties": {
+          "all": {
+            "type": "boolean"
+          },
+          "confirm_all": {
+            "type": "boolean"
+          },
+          "delivery_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.webhooks.status": {
       "capability": "read",
