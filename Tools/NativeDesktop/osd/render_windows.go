@@ -1,0 +1,360 @@
+//go:build windows
+
+package osd
+
+import (
+	"errors"
+	"image"
+	"image/color"
+	"image/draw"
+	"math"
+	"runtime"
+	"strings"
+	"time"
+	"unicode"
+	"unsafe"
+
+	"github.com/lxn/win"
+	"golang.org/x/sys/windows"
+	"pccontroller.local/desktop/internal/design"
+	"pccontroller.local/desktop/internal/graphics"
+)
+
+type dib struct {
+	dc            win.HDC
+	bitmap        win.HBITMAP
+	old           win.HGDIOBJ
+	pixels        []byte
+	width, height int
+}
+
+func newDIB(w, h int) (*dib, error) {
+	if w < 1 || h < 1 || int64(w)*int64(h) > 16<<20 {
+		return nil, errors.New("OSD surface exceeds safe pixel bounds")
+	}
+	d := &dib{width: w, height: h, dc: win.CreateCompatibleDC(0)}
+	if d.dc == 0 {
+		return nil, errors.New("OSD CreateCompatibleDC failed")
+	}
+	info := win.BITMAPINFOHEADER{BiSize: uint32(unsafe.Sizeof(win.BITMAPINFOHEADER{})), BiWidth: int32(w), BiHeight: -int32(h), BiPlanes: 1, BiBitCount: 32}
+	var bits unsafe.Pointer
+	d.bitmap = win.CreateDIBSection(d.dc, &info, 0, &bits, 0, 0)
+	if d.bitmap == 0 || bits == nil {
+		d.close()
+		return nil, errors.New("OSD CreateDIBSection failed")
+	}
+	d.old = win.SelectObject(d.dc, win.HGDIOBJ(d.bitmap))
+	d.pixels = unsafe.Slice((*byte)(bits), w*h*4)
+	return d, nil
+}
+func (d *dib) close() {
+	if d == nil {
+		return
+	}
+	if d.old != 0 {
+		win.SelectObject(d.dc, d.old)
+	}
+	if d.bitmap != 0 {
+		win.DeleteObject(win.HGDIOBJ(d.bitmap))
+	}
+	if d.dc != 0 {
+		win.DeleteDC(d.dc)
+	}
+	d.pixels = nil
+	d.dc = 0
+	d.bitmap = 0
+}
+
+func textImage(text string, size int, bold bool, c color.RGBA) (*image.RGBA, error) {
+	text = strings.Join(strings.Fields(text), " ")
+	if text == "" {
+		return image.NewRGBA(image.Rect(0, 0, 1, max(1, size))), nil
+	}
+	var lf win.LOGFONT
+	lf.LfHeight = -int32(size)
+	lf.LfWeight = win.FW_NORMAL
+	if bold {
+		lf.LfWeight = win.FW_SEMIBOLD
+	}
+	lf.LfQuality = win.ANTIALIASED_QUALITY
+	copy(lf.LfFaceName[:], windows.StringToUTF16("Segoe UI"))
+	f := win.CreateFontIndirect(&lf)
+	if f == 0 {
+		return nil, errors.New("OSD font creation failed")
+	}
+	defer win.DeleteObject(win.HGDIOBJ(f))
+	dc := win.CreateCompatibleDC(0)
+	if dc == 0 {
+		return nil, errors.New("OSD text DC failed")
+	}
+	defer win.DeleteDC(dc)
+	old := win.SelectObject(dc, win.HGDIOBJ(f))
+	defer win.SelectObject(dc, old)
+	u, _ := windows.UTF16FromString(text)
+	var extent win.SIZE
+	if !win.GetTextExtentPoint32(dc, &u[0], int32(len(u)-1), &extent) {
+		return nil, errors.New("OSD text measurement failed")
+	}
+	w, h := max(1, int(extent.CX)+4), max(size+8, int(extent.CY)+4)
+	mask, err := newDIB(w, h)
+	if err != nil {
+		return nil, err
+	}
+	defer mask.close()
+	fontBefore := win.SelectObject(mask.dc, win.HGDIOBJ(f))
+	defer win.SelectObject(mask.dc, fontBefore)
+	clear(mask.pixels)
+	win.SetTextColor(mask.dc, 0xffffff)
+	win.SetBkColor(mask.dc, 0)
+	win.SetBkMode(mask.dc, win.TRANSPARENT)
+	r := win.RECT{Right: int32(w), Bottom: int32(h)}
+	flags := uint32(win.DT_SINGLELINE | win.DT_VCENTER | win.DT_NOPREFIX)
+	for _, ch := range text {
+		if unicode.Is(unicode.Arabic, ch) || unicode.Is(unicode.Hebrew, ch) {
+			flags |= win.DT_RTLREADING
+			break
+		}
+		if unicode.IsLetter(ch) {
+			break
+		}
+	}
+	win.DrawTextEx(mask.dc, &u[0], int32(len(u)-1), &r, flags, nil)
+	gdiFlush.Call()
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for i := 0; i < len(mask.pixels); i += 4 {
+		a := uint16(max(mask.pixels[i], max(mask.pixels[i+1], mask.pixels[i+2])))
+		img.Pix[i] = byte(uint16(c.R) * a / 255)
+		img.Pix[i+1] = byte(uint16(c.G) * a / 255)
+		img.Pix[i+2] = byte(uint16(c.B) * a / 255)
+		img.Pix[i+3] = byte(uint16(c.A) * a / 255)
+	}
+	return img, nil
+}
+
+type rendering struct {
+	base, frame                    *image.RGBA
+	surface                        *dib
+	title, body                    *image.RGBA
+	buttons                        []*image.RGBA
+	hits                           []image.Rectangle
+	scale                          float64
+	titleRect, bodyRect, closeRect image.Rectangle
+	ink, muted, accent             color.RGBA
+}
+
+func (r *rendering) close() {
+	if r != nil {
+		r.surface.close()
+	}
+}
+func rgba(s string) color.RGBA {
+	var v uint32
+	for _, b := range strings.TrimPrefix(s, "#") {
+		v = v*16 + uint32(strings.IndexRune("0123456789abcdef", unicode.ToLower(b)))
+	}
+	return color.RGBA{byte(v >> 16), byte(v >> 8), byte(v), 255}
+}
+
+// rounded uses analytic distance coverage; no jagged region clipping or
+// low-resolution scaling of corners. All coordinates are physical DPI pixels.
+func rounded(img *image.RGBA, r image.Rectangle, radius float64, c color.RGBA) {
+	clip := r.Inset(-1).Intersect(img.Bounds())
+	cx, cy := float64(r.Min.X+r.Max.X)/2, float64(r.Min.Y+r.Max.Y)/2
+	hx, hy := float64(r.Dx())/2-radius, float64(r.Dy())/2-radius
+	for y := clip.Min.Y; y < clip.Max.Y; y++ {
+		for x := clip.Min.X; x < clip.Max.X; x++ {
+			qx, qy := math.Abs(float64(x)+.5-cx)-hx, math.Abs(float64(y)+.5-cy)-hy
+			distance := math.Hypot(max(qx, 0), max(qy, 0)) + min(max(qx, qy), 0) - radius
+			coverage := min(1, max(0, .5-distance))
+			if coverage == 0 {
+				continue
+			}
+			a := float64(c.A) / 255 * coverage
+			i := img.PixOffset(x, y)
+			img.Pix[i] = byte(float64(c.R)*a + float64(img.Pix[i])*(1-a))
+			img.Pix[i+1] = byte(float64(c.G)*a + float64(img.Pix[i+1])*(1-a))
+			img.Pix[i+2] = byte(float64(c.B)*a + float64(img.Pix[i+2])*(1-a))
+			img.Pix[i+3] = byte(255*a + float64(img.Pix[i+3])*(1-a))
+		}
+	}
+}
+
+func prepare(req Request, dpi, width int, icon image.Image, dark bool) (*rendering, error) {
+	s := float64(dpi) / 96
+	px := func(v int) int { return int(math.Round(float64(v) * s)) }
+	width = min(px(540), width-px(32))
+	if width < px(260) {
+		return nil, errors.New("display work area is too narrow for OSD")
+	}
+	rows := (len(req.Actions) + 2) / 3
+	height := px(106)
+	if rows > 0 {
+		height += px(rows*40 + 4)
+	}
+	r := &rendering{scale: s, base: image.NewRGBA(image.Rect(0, 0, width, height))}
+	tokens := design.ControllerTokens().Colors.Dark
+	if !dark {
+		tokens = design.ControllerTokens().Colors.Light
+	}
+	r.ink = rgba(tokens.Text)
+	r.muted = rgba(tokens.TextMuted)
+	r.accent = rgba(tokens.Accent)
+	switch req.Severity {
+	case "success":
+		r.accent = rgba(tokens.Success)
+	case "warning":
+		r.accent = rgba(tokens.Warm)
+	case "error":
+		r.accent = rgba(tokens.Danger)
+	}
+	card := image.Rect(px(8), px(5), width-px(8), height-px(9))
+	for i := px(7); i > 0; i-- {
+		rounded(r.base, card.Add(image.Pt(0, px(2))).Inset(-i), float64(px(18)+i), color.RGBA{0, 0, 0, byte(2 + 8*(px(7)-i)/max(1, px(7)))})
+	}
+	border := rgba(tokens.StrokeHighlight)
+	border.A = 180
+	rounded(r.base, card, float64(px(18)), border)
+	bg := rgba(tokens.Surface)
+	bg.A = 246
+	rounded(r.base, card.Inset(1), float64(px(18)-1), bg)
+	// One continuous surface, with a soft brand glow rather than a second slab.
+	for y := card.Min.Y + 1; y < min(card.Max.Y, card.Min.Y+px(48)); y++ {
+		mix := .06 * math.Pow(1-float64(y-card.Min.Y)/float64(px(48)), 2)
+		for x := card.Min.X + 1; x < card.Max.X-1; x++ {
+			i := r.base.PixOffset(x, y)
+			if r.base.Pix[i+3] > 230 {
+				r.base.Pix[i] = byte(float64(r.base.Pix[i])*(1-mix) + float64(r.accent.R)*mix)
+				r.base.Pix[i+1] = byte(float64(r.base.Pix[i+1])*(1-mix) + float64(r.accent.G)*mix)
+				r.base.Pix[i+2] = byte(float64(r.base.Pix[i+2])*(1-mix) + float64(r.accent.B)*mix)
+			}
+		}
+	}
+	if icon != nil {
+		scaled, err := graphics.Resize(icon, px(42), px(42))
+		if err != nil {
+			return nil, err
+		}
+		draw.Draw(r.base, image.Rect(px(29), px(28), px(71), px(70)), scaled, image.Point{}, draw.Over)
+	}
+	r.closeRect = image.Rect(width-px(45), px(15), width-px(17), px(43))
+	// Close glyph remains subordinate to the semantic icon, not stretched to fill.
+	closeText, err := textImage("×", px(20), false, r.muted)
+	if err != nil {
+		return nil, err
+	}
+	draw.Draw(r.base, image.Rect(r.closeRect.Min.X+(r.closeRect.Dx()-closeText.Bounds().Dx())/2, r.closeRect.Min.Y, r.closeRect.Max.X, r.closeRect.Max.Y), closeText, image.Point{}, draw.Over)
+	r.titleRect = image.Rect(px(88), px(23), width-px(58), px(48))
+	r.bodyRect = image.Rect(px(88), px(49), width-px(28), px(77))
+	r.title, err = textImage(req.Title, px(16), true, r.ink)
+	if err != nil {
+		return nil, err
+	}
+	r.body, err = textImage(req.Text, px(14), false, r.muted)
+	if err != nil {
+		return nil, err
+	}
+	for row := 0; row < rows; row++ {
+		count := min(3, len(req.Actions)-row*3)
+		cell := min(px(156), (width-px(48)-px(8)*(count-1))/count)
+		left := width - px(24) - count*cell - (count-1)*px(8)
+		for col := 0; col < count; col++ {
+			index := row*3 + col
+			box := image.Rect(left+col*(cell+px(8)), px(87+row*40), left+col*(cell+px(8))+cell, px(119+row*40))
+			r.hits = append(r.hits, box)
+			label := req.Actions[index].Label
+			var im *image.RGBA
+			for {
+				im, err = textImage(label, px(13), true, r.ink)
+				if err != nil {
+					return nil, err
+				}
+				if im.Bounds().Dx() <= cell-px(16) || len([]rune(label)) < 2 {
+					break
+				}
+				chars := []rune(strings.TrimSuffix(label, "…"))
+				label = string(chars[:len(chars)-1]) + "…"
+			}
+			r.buttons = append(r.buttons, im)
+		}
+	}
+	r.frame = image.NewRGBA(r.base.Bounds())
+	r.surface, err = newDIB(width, height)
+	if err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
+// RenderPreview uses the actual renderer without creating a window or timer.
+func RenderPreview(request Request, dpi int, dark bool, icon image.Image) (*image.RGBA, error) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	restoreDPI, err := enterNativeDPI()
+	if err != nil {
+		return nil, err
+	}
+	defer restoreDPI()
+	request, err = Normalize(request)
+	if err != nil {
+		return nil, err
+	}
+	if dpi < 96 || dpi > 384 {
+		return nil, errors.New("preview DPI must be 96..384")
+	}
+	r, err := prepare(request, dpi, 1920*dpi/96, icon, dark)
+	if err != nil {
+		return nil, err
+	}
+	defer r.close()
+	return r.paint(0, request.ReduceMotion, -1), nil
+}
+
+func (r *rendering) paint(elapsed time.Duration, reduced bool, hover int) *image.RGBA {
+	copy(r.frame.Pix, r.base.Pix)
+	line := func(im *image.RGBA, box image.Rectangle) {
+		offset := int(Marquee(elapsed, float64(im.Bounds().Dx()-box.Dx()), r.scale, reduced))
+		draw.Draw(r.frame, box, im, image.Pt(offset, 0), draw.Over)
+		if im.Bounds().Dx() > box.Dx() {
+			fade := max(1, int(14*r.scale))
+			clip := box.Intersect(r.frame.Bounds())
+			for y := clip.Min.Y; y < clip.Max.Y; y++ {
+				for x := clip.Min.X; x < clip.Max.X; x++ {
+					factor := 1.0
+					if offset > 0 {
+						factor = min(factor, float64(x-box.Min.X)/float64(fade))
+					}
+					if offset+box.Dx() < im.Bounds().Dx() {
+						factor = min(factor, float64(box.Max.X-1-x)/float64(fade))
+					}
+					factor = max(0, factor)
+					if factor < 1 {
+						i := r.frame.PixOffset(x, y)
+						for c := 0; c < 4; c++ {
+							r.frame.Pix[i+c] = byte(float64(r.base.Pix[i+c])*(1-factor) + float64(r.frame.Pix[i+c])*factor)
+						}
+					}
+				}
+			}
+		}
+	}
+	line(r.title, r.titleRect)
+	line(r.body, r.bodyRect)
+	for i, box := range r.hits {
+		stroke := r.muted
+		stroke.A = 65
+		rounded(r.frame, box, 7*r.scale, stroke)
+		fill := color.RGBA{65, 60, 75, 220}
+		if r.ink.R < 128 {
+			fill = color.RGBA{224, 219, 233, 245}
+		}
+		if i == hover {
+			fill = r.accent
+			fill.A = 60
+		}
+		rounded(r.frame, box.Inset(1), max(1, 7*r.scale-1), fill)
+		im := r.buttons[i]
+		at := image.Pt(box.Min.X+(box.Dx()-im.Bounds().Dx())/2, box.Min.Y+(box.Dy()-im.Bounds().Dy())/2)
+		draw.Draw(r.frame, im.Bounds().Add(at).Intersect(box), im, image.Point{}, draw.Over)
+	}
+	return r.frame
+}

@@ -14,6 +14,130 @@
   ],
   "security": [],
   "paths": {
+    "/api/osd": {
+      "get": {
+        "operationId": "get_api_osd",
+        "summary": "Current Windows desktop OSD presentation and platform support",
+        "description": "Current Windows desktop OSD presentation and platform support",
+        "tags": [
+          "osd"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OSDStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_api_osd",
+        "summary": "Show or dismiss a timed desktop OSD; actions run only on human activation",
+        "description": "Show or dismiss a timed desktop OSD; actions run only on human activation",
+        "tags": [
+          "osd"
+        ],
+        "x-required-capability": "messages",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OSDStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OSDRequest"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_api_osd",
+        "summary": "Show or dismiss a timed desktop OSD; actions run only on human activation",
+        "description": "Show or dismiss a timed desktop OSD; actions run only on human activation",
+        "tags": [
+          "osd"
+        ],
+        "x-required-capability": "messages",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OSDStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OSDDismiss"
+              }
+            }
+          }
+        }
+      }
+    },
     "/healthz": {
       "get": {
         "operationId": "get_healthz",
@@ -4286,6 +4410,9 @@
       "name": "os"
     },
     {
+      "name": "osd"
+    },
+    {
       "name": "peripherals"
     },
     {
@@ -4338,6 +4465,170 @@
       }
     },
     "schemas": {
+      "OSDEmpty": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "OSDDismiss": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "Exact active OSD identity; omission dismisses whichever overlay is current."
+          }
+        }
+      },
+      "OSDAction": {
+        "type": "object",
+        "required": [
+          "label",
+          "uri"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "uri": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "description": "Allowed pccontroller://, http:// or https:// URI. Activated only by an explicit button click; never a shell command or remote icon source."
+          }
+        }
+      },
+      "OSDRequest": {
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "examples": [
+              "Desktop overlay preview"
+            ]
+          },
+          "icon": {
+            "enum": [
+              "app",
+              "info",
+              "success",
+              "warning",
+              "error",
+              "door",
+              "hot",
+              "temperature-cleared",
+              "motion",
+              "relay",
+              "radio"
+            ],
+            "default": "app"
+          },
+          "severity": {
+            "enum": [
+              "info",
+              "success",
+              "warning",
+              "error"
+            ]
+          },
+          "duration_ms": {
+            "type": "integer",
+            "anyOf": [
+              {
+                "const": 0
+              },
+              {
+                "minimum": 500,
+                "maximum": 120000
+              }
+            ],
+            "default": 5000
+          },
+          "position": {
+            "enum": [
+              "bottom-center",
+              "top-center",
+              "bottom-right",
+              "top-right"
+            ],
+            "default": "bottom-center"
+          },
+          "theme": {
+            "enum": [
+              "system",
+              "dark",
+              "light"
+            ],
+            "default": "system"
+          },
+          "reduce_motion": {
+            "type": "boolean",
+            "default": false
+          },
+          "actions": {
+            "type": "array",
+            "maxItems": 5,
+            "items": {
+              "$ref": "#/components/schemas/OSDAction"
+            }
+          }
+        }
+      },
+      "OSDStatus": {
+        "type": "object",
+        "required": [
+          "supported",
+          "active",
+          "accepted"
+        ],
+        "properties": {
+          "supported": {
+            "type": "boolean"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "accepted": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string"
+          },
+          "shown_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_action": {
+            "type": "string"
+          },
+          "last_error": {
+            "type": "string"
+          }
+        }
+      },
       "BoardSensorReading": {
         "type": "object",
         "required": [
@@ -4596,6 +4887,9 @@
               "controller.os.policy",
               "controller.os.power",
               "controller.os.status",
+              "controller.osd.dismiss",
+              "controller.osd.show",
+              "controller.osd.status",
               "controller.output.set",
               "controller.peer.update.host",
               "controller.peripheral.folder.update",

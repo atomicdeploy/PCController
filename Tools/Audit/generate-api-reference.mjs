@@ -111,7 +111,7 @@ const capabilityGroups = {
   ],
   reset: ["controller.reset.lines", "controller.reset", "controller.port.reset"],
   shutdown: ["controller.quit", "controller.exit"],
-  messages: ["controller.message.send"],
+  messages: ["controller.message.send", "controller.osd.show", "controller.osd.dismiss"],
   host_configuration: [
     "controller.udp.config.set", "controller.udp.subscribe", "controller.udp.unsubscribe",
 		"controller.mirror.configure",
@@ -137,6 +137,7 @@ const capabilityGroups = {
 		"controller.discovery.config.set",
   ],
   read: [
+    "controller.osd.status",
     "controller.udp.config.get", "controller.udp.status", "controller.udp.events.get",
 		"controller.mirror.inspect", "controller.mirror.status",
 		"controller.audio.cues",
@@ -188,6 +189,9 @@ const capabilityGroups = {
 };
 
 const methodOverrides = {
+  "controller.osd.show": "Present a non-activating Windows desktop overlay with a bounded lifetime, semantic icon, time-based transitions/marquee and up to five human-activated URI actions. Replaces the current OSD; never executes actions on receipt.",
+  "controller.osd.status": "Read desktop OSD support, current presentation identity, expiry and last action/error without creating a window.",
+  "controller.osd.dismiss": "Fade out the current OSD. Supply its id to prevent an obsolete dismissal from closing a replacement overlay.",
   "controller.pwm.set": "Set one physical PWM channel (0..15) using either calibrated percent (0..100) or raw_value (0..4095), never both. Supply current snapshot owner/revision fields; the host verifies admission and returns authoritative readback.",
   "controller.pwm.off": "Turn off selected PWM outputs through the current board owner and return authoritative state.",
   "controller.pwm.values": "Read cached authoritative PWM output values without changing any channel.",
@@ -302,6 +306,7 @@ const methodOverrides = {
 };
 
 const nonIdempotentMethods = new Set([
+  "controller.osd.show",
   "controller.reset.lines", "controller.reset", "controller.port.reset", "controller.command.execute",
 	"controller.audio.play",
 	"controller.firmware.build",
@@ -357,6 +362,8 @@ if (new Set(methods.map(({ name }) => name)).size !== methods.length) {
 }
 
 const routes = [
+  { path:"/api/osd", methods:["get"], capability:"read", summary:"Current Windows desktop OSD presentation and platform support" },
+  { path:"/api/osd", methods:["post","delete"], capability:"messages", summary:"Show or dismiss a timed desktop OSD; actions run only on human activation" },
   { path: "/healthz", methods: ["get"], public: true, capability: "public", summary: "Service liveness and API identity" },
   { path: "/upnp/public.json", methods: ["get"], public: true, capability: "public", summary: "Bounded public host, board, endpoint, health, and telemetry directory" },
   { path: "/api/ui-config", methods: ["get"], public: true, capability: "public", summary: "Non-secret browser bootstrap" },
@@ -444,6 +451,23 @@ const actionKindSchema = {
 	],
 };
 
+function osdSchemas(prefix) {
+  const ref=name=>({$ref:prefix+name});
+  return {
+    OSDEmpty:{type:'object',additionalProperties:false,properties:{}},
+    OSDDismiss:{type:'object',additionalProperties:false,properties:{id:{type:'string',maxLength:64,description:'Exact active OSD identity; omission dismisses whichever overlay is current.'}}},
+    OSDAction:{type:'object',required:['label','uri'],additionalProperties:false,properties:{label:{type:'string',minLength:1,maxLength:64},uri:{type:'string',minLength:1,maxLength:2048,description:'Allowed pccontroller://, http:// or https:// URI. Activated only by an explicit button click; never a shell command or remote icon source.'}}},
+    OSDRequest:{type:'object',required:['text'],additionalProperties:false,properties:{
+      id:{type:'string',maxLength:64},title:{type:'string',maxLength:128},text:{type:'string',minLength:1,maxLength:2048,examples:['Desktop overlay preview']},
+      icon:{enum:['app','info','success','warning','error','door','hot','temperature-cleared','motion','relay','radio'],default:'app'},
+      severity:{enum:['info','success','warning','error']},duration_ms:{type:'integer',anyOf:[{const:0},{minimum:500,maximum:120000}],default:5000},
+      position:{enum:['bottom-center','top-center','bottom-right','top-right'],default:'bottom-center'},theme:{enum:['system','dark','light'],default:'system'},reduce_motion:{type:'boolean',default:false},
+      actions:{type:'array',maxItems:5,items:ref('OSDAction')},
+    }},
+    OSDStatus:{type:'object',required:['supported','active','accepted'],properties:{supported:{type:'boolean'},active:{type:'boolean'},accepted:{type:'integer',minimum:0},id:{type:'string'},shown_at:{type:'string',format:'date-time'},expires_at:{type:'string',format:'date-time'},last_action:{type:'string'},last_error:{type:'string'}}},
+  };
+}
+
 function actionSchemas(refPrefix) {
 	const ref = (name) => ({ $ref: `${refPrefix}${name}` });
 	const actionProperties = {
@@ -465,6 +489,7 @@ function actionSchemas(refPrefix) {
 		at: { type: "string", format: "date-time" },
 	};
 	return {
+		...osdSchemas(refPrefix),
 		AppAction: {
 			type: "object", required: ["kind"], additionalProperties: false,
 			properties: actionProperties,
@@ -532,6 +557,9 @@ function actionSchemas(refPrefix) {
 const openAPIActionSchemas = actionSchemas("#/components/schemas/");
 const rpcActionSchemas = actionSchemas("#/$defs/");
 const rpcActionMethodContracts = {
+  "controller.osd.show": { params:"OSDRequest", result:"OSDStatus" },
+  "controller.osd.dismiss": { params:"OSDDismiss", result:"OSDStatus" },
+  "controller.osd.status": { params:"OSDEmpty", result:"OSDStatus" },
 	"controller.app.action": { params: "AppActionRequest", result: "ActionOperationEnvelope" },
 	"controller.app.action.ack": { params: "ActionAck", result: "ActionOperationEnvelope" },
 	"controller.app.action.outcome": { params: "ActionOutcomeRequest", result: "ActionOperationEnvelope" },
@@ -601,6 +629,10 @@ function operationFor(route, method) {
       "405": { $ref: "#/components/responses/MethodNotAllowed" },
     },
   };
+	if(route.path==='/api/osd'){
+		operation.responses['200'].content['application/json'].schema={$ref:'#/components/schemas/OSDStatus'};
+		if(method!=='get') operation.requestBody={required:true,content:{'application/json':{schema:{$ref:'#/components/schemas/'+(method==='post'?'OSDRequest':'OSDDismiss')}}}};
+	}
 	if (route.path === "/api/sensors/metrics") {
 		operation.responses["200"] = { description: "Prometheus text exposition", content: { "text/plain": { schema: { type: "string" } } } };
 	}
@@ -674,7 +706,7 @@ function operationFor(route, method) {
       content: { "application/json": { schema: { $ref: "#/components/schemas/AppInstance" } } },
     };
   }
-  if (!["get", "head", "delete"].includes(method)) {
+  if (!["get", "head", "delete"].includes(method) && !operation.requestBody) {
     operation.requestBody = {
       required: true,
       content: {
@@ -762,6 +794,7 @@ const openapi = {
       tokenHeader: { type: "apiKey", in: "header", name: "X-PCController-Token", description: "Header-only compatibility credential." },
     },
     schemas: {
+			...osdSchemas('#/components/schemas/'),
       BoardSensorReading: { type:'object',required:['id','label','kind','unit','value'],additionalProperties:false,properties:{
         id:{enum:['supply','bus','current','power','temperature_led','temperature_bt_audio']},label:{type:'string'},
         kind:{enum:['voltage','current','power','temperature']},unit:{enum:['V','A','W','C']},
@@ -944,7 +977,7 @@ const rpcSchema = {
     },
   },
 	"x-methods": Object.fromEntries(methods.map(({ name, ...metadata }) => {
-		if (requestFields[name]) metadata.request_fields = requestFields[name];
+		if (requestFields[name] && !name.startsWith('controller.osd.')) metadata.request_fields = requestFields[name];
 		// Examples must not contain mutually exclusive selectors. This remains a
 		// template: owner and revision placeholders must come from a fresh snapshot.
 		if (name === 'controller.pwm.set') metadata.request_template = {
@@ -1054,6 +1087,7 @@ validateMethodCatalog({
 });
 
 const routeSourceFiles = [
+	"Tools/Controller/internal/ipcjson/osd.go",
   "Tools/Controller/internal/ipcjson/ipc.go",
 	"Tools/Controller/internal/ipcjson/upnp.go",
 	"Tools/Controller/internal/ipcjson/board_sensors.go",

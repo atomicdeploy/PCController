@@ -1369,7 +1369,7 @@ export function hostSourceIdentity(hostRoot = HOST_ROOT) {
 	// fixes and embedded assets. A GUI-only edit must invalidate host packages.
 	const nativeDesktop = resolve(hostRoot, '..', 'NativeDesktop')
 	if (existsSync(nativeDesktop)) {
-		for (const name of ['desktop', 'presentation', 'internal', 'assets', 'vendor']) {
+		for (const name of ['desktop', 'presentation', 'osd', 'internal', 'assets', 'vendor']) {
 			const directory = join(nativeDesktop, name)
 			if (existsSync(directory)) walkFiles(directory, files, () => true)
 		}

@@ -462,6 +462,7 @@ func (manager *Manager) Close() {
 	if !waitForIntegrationShutdown(&manager.wait, integrationShutdownTimeout) {
 		manager.setLastError("host integration shutdown exceeded 8 seconds; remaining workers were abandoned for process exit")
 	}
+	hostui.CloseDesktopOSD()
 }
 
 func waitForIntegrationShutdown(wait *sync.WaitGroup, timeout time.Duration) bool {
@@ -1293,7 +1294,24 @@ func (manager *Manager) notificationLoop() {
 		if job.audioCue.Valid() && !appearance.AudioMuted && appearance.AudioVolume > 0 {
 			audioErr = hostui.PlayAudioCue(job.audioCue)
 		}
-		err := manager.notifier.Notify(ctx, job.notification)
+		config := manager.store.CurrentRuntime()
+		var err error
+		if config.Integrations.Notifications.Presentation == "osd" {
+			request := hostui.OSDForNotification(job.notification, config.Integrations.Notifications.OSDDurationMS)
+			request.ReduceMotion = config.UI.Appearance.ReduceMotion
+			_, err = hostui.ShowOSD(ctx, request)
+			if err != nil {
+				osdErr := err
+				err = manager.notifier.Notify(ctx, job.notification)
+				if err != nil {
+					err = errors.Join(osdErr, err)
+				} else {
+					manager.recordError("OSD unavailable; delivered native notification: " + osdErr.Error())
+				}
+			}
+		} else {
+			err = manager.notifier.Notify(ctx, job.notification)
+		}
 		cancel()
 		manager.notificationQueue.complete(job.key)
 		if combined := errors.Join(audioErr, err); combined != nil && manager.ctx.Err() == nil {

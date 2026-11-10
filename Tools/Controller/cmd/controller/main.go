@@ -193,6 +193,8 @@ func run(args []string, stdout, stderr io.Writer) (resultErr error) {
 	case "sensors":
 		// Read-only local telemetry forwarding; never start a second USB owner.
 		return runSensors(args[1:], stdout, stderr)
+	case "osd":
+		return runOSD(args[1:], stdout, stderr)
 	case "package":
 		return runPackageLifecycle(args[1:], stdout, stderr)
 	case "install", "repair":

@@ -193,6 +193,8 @@ type Hotkey struct {
 }
 
 type Notifications struct {
+	Presentation     string               `json:"presentation,omitempty"` // native (default) or osd
+	OSDDurationMS    int                  `json:"osd_duration_ms,omitempty"`
 	Enabled          bool                 `json:"enabled"`
 	DoorRunningBeep  bool                 `json:"door_running_beep"`
 	DoorRunningToast bool                 `json:"door_running_toast"`
@@ -337,6 +339,14 @@ func (value Config) validateIntegrations() error {
 	}
 	if len(value.Integrations.Notifications.Actions) > 5 {
 		return fmt.Errorf("integrations.notifications.actions supports at most five actions")
+	}
+	switch value.Integrations.Notifications.Presentation {
+	case "", "native", "osd":
+	default:
+		return fmt.Errorf("integrations.notifications.presentation must be native or osd")
+	}
+	if ms := value.Integrations.Notifications.OSDDurationMS; ms != 0 && (ms < 500 || ms > 120000) {
+		return fmt.Errorf("integrations.notifications.osd_duration_ms must be 500..120000")
 	}
 	for index, action := range value.Integrations.Notifications.Actions {
 		if strings.TrimSpace(action.ID) == "" || strings.TrimSpace(action.Label) == "" ||

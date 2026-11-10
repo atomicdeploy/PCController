@@ -319,7 +319,8 @@ test('native module source and assets invalidate controller package and test ide
 	await mkdir(host)
 	await mkdir(join(native, 'assets'), { recursive: true })
 	await mkdir(join(native, 'internal', 'ui'), { recursive: true })
-	for (const name of ['go.mod', 'internal/ui/paint_windows.go', 'assets/icon.png']) {
+	await mkdir(join(native,'osd'),{recursive:true})
+	for (const name of ['go.mod', 'internal/ui/paint_windows.go', 'osd/presenter_windows.go', 'assets/icon.png']) {
 		await writeFile(join(native, name), 'before')
 		const beforePackage = hostSourceIdentity(host)
 		const beforeTest = goTestSourceIdentity(host, 'fixture')
