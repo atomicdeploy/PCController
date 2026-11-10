@@ -4,9 +4,10 @@ package ui
 
 import (
 	"fmt"
+	"sort"
+
 	"github.com/lxn/walk"
 	"pccontroller.local/desktop/presentation"
-	"sort"
 )
 
 // Keep Off physically left of On, regardless of the host catalog order.
@@ -30,8 +31,48 @@ func orderedControllerActions(actions []presentation.Action) []presentation.Acti
 	return result
 }
 
-// Cards share the donor compositor and activation lifecycle with the front
-// panel. Actions are catalog IDs, never inferred commands from display names.
+func (s *Shell) orderedControllerChannels() []presentation.Channel {
+	channels := append([]presentation.Channel(nil), s.controllerState.Channels...)
+	context := s.controllerLocalOrderContext()
+	if context == "" {
+		return channels
+	}
+	keys := s.controllerRoot().Config().UI.ControllerCardOrders[context]
+	if len(keys) == 0 {
+		return channels
+	}
+	ranks := map[string]int{}
+	for i, key := range keys {
+		ranks[key] = i
+	}
+	// Only reorder existing peers of the same kind. New catalog entries retain
+	// stable order after known entries; stale/foreign keys cannot create cards.
+	kinds := map[string][]int{}
+	for i, ch := range channels {
+		kinds[ch.Kind] = append(kinds[ch.Kind], i)
+	}
+	for _, slots := range kinds {
+		peers := make([]presentation.Channel, len(slots))
+		for i, slot := range slots {
+			peers[i] = channels[slot]
+		}
+		sort.SliceStable(peers, func(i, j int) bool {
+			a, okA := ranks[peers[i].Key]
+			b, okB := ranks[peers[j].Key]
+			if okA != okB {
+				return okA
+			}
+			return okA && a < b
+		})
+		for i, slot := range slots {
+			channels[slot] = peers[i]
+		}
+	}
+	return channels
+}
+
+// Cards share the compositor and activation lifecycle with the front panel.
+// Actions are catalog IDs, never inferred commands from display names.
 func (s *Shell) paintControllerChannels(canvas *walk.Canvas, bounds walk.Rectangle, colors palette) error {
 	s.controllerActionIDs = make(map[actionID]string)
 	s.controllerChannelHits = nil
@@ -53,15 +94,25 @@ func (s *Shell) paintControllerChannels(canvas *walk.Canvas, bounds walk.Rectang
 	s.controllerPage = min(s.controllerPage, pages-1)
 	cw := (bounds.Width - (columns-1)*12) / columns
 	start := s.controllerPage * perPage
-	for slot, ch := range s.controllerState.Channels[start:min(start+perPage, len(s.controllerState.Channels))] {
+	channels := s.orderedControllerChannels()
+	for slot, ch := range channels[start:min(start+perPage, len(channels))] {
 		x, y := bounds.X+(slot%columns)*(cw+12), bounds.Y+50+(slot/columns)*174
 		rect := walk.Rectangle{X: x, Y: y, Width: cw, Height: 162}
-		s.controllerCard(canvas, rect, colors)
 		header := walk.Rectangle{X: x + 8, Y: y + 8, Width: cw - 76, Height: 32}
 		nameRect := walk.Rectangle{X: x + 72, Y: y + 10, Width: cw - 148, Height: 28}
 		iconRect := walk.Rectangle{X: x + 42, Y: y + 10, Width: 24, Height: 28}
 		slider := walk.Rectangle{X: x + 20, Y: y + 70, Width: cw - 40, Height: 30}
-		s.controllerChannelHits = append(s.controllerChannelHits, controllerChannelHit{key: ch.Key, rect: rect, header: header, name: nameRect, icon: iconRect, slider: slider, channel: ch})
+		grip := walk.Rectangle{X: x + 8, Y: y + 8, Width: 20, Height: 32}
+		s.controllerChannelHits = append(s.controllerChannelHits, controllerChannelHit{key: ch.Key, rect: rect, header: header, grip: grip, name: nameRect, icon: iconRect, slider: slider, channel: ch})
+	}
+	// Resolve against the whole page before drawing, including when the
+	// destination is painted before the source in a backwards drag.
+	dropTarget := s.controllerDropTarget(s.controllerGesture.point)
+	for slot, hit := range s.controllerChannelHits {
+		ch, rect := hit.channel, hit.rect
+		x, y := rect.X, rect.Y
+		nameRect, iconRect, slider := hit.name, hit.icon, hit.slider
+		s.controllerCard(canvas, rect, colors)
 		editID := actionChannelFirst + actionID(slot*8+7)
 		s.controllerActionIDs[editID] = "edit:" + ch.Key
 		editing := s.controllerInline != nil && s.controllerInline.key == ch.Key
@@ -141,7 +192,7 @@ func (s *Shell) paintControllerChannels(canvas *walk.Canvas, bounds walk.Rectang
 		} else {
 			s.controllerText(canvas, ch.Key, s.captionFont, colors.secondary, slider, false)
 		}
-		if s.controllerGesture.dragging && s.controllerDropTarget(s.controllerGesture.point) == ch.Key {
+		if dropTarget == ch.Key {
 			controllerFill(canvas, walk.Rectangle{X: x + 12, Y: y + 2, Width: cw - 24, Height: 3}, colors.accent, 1)
 		}
 		actions := orderedControllerActions(ch.Actions)

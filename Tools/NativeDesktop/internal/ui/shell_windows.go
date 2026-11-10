@@ -2393,6 +2393,9 @@ func (s *Shell) onMouseMove(x, y int, _ walk.MouseButton) {
 	pressChanged := s.buttonActivation.pointerMove(action)
 	pointerChanged := s.visualPointer.X != x || s.visualPointer.Y != y
 	s.visualPointer = walk.Point{X: x, Y: y}
+	if s.controller != nil {
+		s.updateControllerChannelCursor(s.visualPointer)
+	}
 	if action == s.hover {
 		if pressChanged || (pointerChanged && action != actionNone) {
 			s.visualPointerDirty = true
@@ -2405,10 +2408,12 @@ func (s *Shell) onMouseMove(x, y int, _ walk.MouseButton) {
 		_ = s.surface.SetToolTipText(s.controllerActionHint(action))
 	}
 	s.startVisualAnimation()
-	if action == actionNone {
-		s.surface.SetCursor(walk.CursorArrow())
-	} else {
-		s.surface.SetCursor(walk.CursorHand())
+	if s.controller == nil {
+		if action == actionNone {
+			s.surface.SetCursor(walk.CursorArrow())
+		} else {
+			s.surface.SetCursor(walk.CursorHand())
+		}
 	}
 	s.surface.Invalidate()
 }
@@ -2418,6 +2423,9 @@ func (s *Shell) onMouseLeave() {
 		return
 	}
 	s.trackingMouse = false
+	if s.controllerGesture.key == "" {
+		s.surface.SetCursor(walk.CursorArrow())
+	}
 	if s.controller != nil {
 		_ = s.surface.SetToolTipText("")
 	}

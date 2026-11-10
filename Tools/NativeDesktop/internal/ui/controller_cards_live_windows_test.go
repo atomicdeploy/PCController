@@ -7,6 +7,7 @@ import (
 	"errors"
 	"github.com/lxn/walk"
 	"github.com/lxn/win"
+	"golang.org/x/sys/windows"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,6 +30,151 @@ func TestControllerCardsRenderedInteraction(t *testing.T) {
 	for _, backend := range []string{"auto", "legacy"} {
 		t.Run(backend, func(t *testing.T) { testControllerCardsRenderedInteraction(t, backend) })
 	}
+}
+
+func TestControllerCardOfflineDragNativeWindow(t *testing.T) {
+	s, _ := newControllerWindowFixture(t)
+	s.controllerChannels = true
+	s.controllerState.Preview = false
+	s.controllerState.Endpoint = "127.0.0.1:8788"
+	s.controllerState.CatalogRevision = "unconfigured-revision"
+	s.controllerState.Channels = []presentation.Channel{
+		{Key: "relay.5", Name: "Five", Kind: "relay", Order: 0},
+		{Key: "relay.6", Name: "Six", Kind: "relay", Order: 1},
+		{Key: "pwm.0", Name: "Window", Kind: "mosfet", Order: 0},
+	}
+	s.controller.UpdateChannel = func(context.Context, string, string, map[string]any) error {
+		t.Error("offline layout attempted a board-profile mutation")
+		return nil
+	}
+	s.controller.InvokeAction = func(context.Context, presentation.ControlOwner, string) error {
+		t.Error("arrangement actuated hardware")
+		return nil
+	}
+	s.mw.Show()
+	pumpControllerFixture(s)
+	canvas, err := s.surface.CreateCanvas()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer canvas.Dispose()
+	paint := func() {
+		t.Helper()
+		if err := s.paint(canvas, s.surface.ClientBoundsPixels()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	send := func(message uint32, p walk.Point) {
+		var flags uintptr
+		if message == win.WM_LBUTTONDOWN || message == win.WM_MOUSEMOVE {
+			flags = win.MK_LBUTTON
+		}
+		win.SendMessage(s.surface.Handle(), message, flags, uintptr(uint32(uint16(p.X))|uint32(uint16(p.Y))<<16))
+	}
+	paint()
+	first, second, other := s.controllerChannelHits[0], s.controllerChannelHits[1], s.controllerChannelHits[2]
+	start := walk.Point{X: first.grip.X + first.grip.Width/2, Y: first.grip.Y + first.grip.Height/2}
+	end := walk.Point{X: second.header.X + 50, Y: second.header.Y + 15}
+	bad := walk.Point{X: other.header.X + 50, Y: other.header.Y + 15}
+	// Exercise the no-action -> no-action early-return path that used to leave
+	// the arrow cursor on the grip, and verify the actual Win32 cursor handle.
+	getCursor := windows.NewLazySystemDLL("user32.dll").NewProc("GetCursor")
+	assertCursor := func(id uintptr) {
+		t.Helper()
+		got, _, _ := getCursor.Call()
+		want := win.LoadCursor(0, win.MAKEINTRESOURCE(id))
+		if got != uintptr(want) {
+			t.Fatalf("cursor=%x want %x (%d)", got, want, id)
+		}
+	}
+	send(win.WM_MOUSEMOVE, start)
+	assertCursor(win.IDC_SIZEALL)
+	var before win.RECT
+	win.GetWindowRect(s.mw.Handle(), &before)
+	send(win.WM_LBUTTONDOWN, start)
+	capture, _, _ := windows.NewLazySystemDLL("user32.dll").NewProc("GetCapture").Call()
+	if capture != uintptr(s.surface.Handle()) {
+		t.Fatal("card did not retain pointer capture")
+	}
+	send(win.WM_MOUSEMOVE, bad)
+	assertCursor(win.IDC_NO)
+	send(win.WM_MOUSEMOVE, end)
+	assertCursor(win.IDC_SIZEALL)
+	if s.orderedControllerChannels()[0].Key != "relay.5" {
+		t.Fatal("drag persisted before release")
+	}
+	send(win.WM_LBUTTONUP, end)
+	pumpControllerFixture(s)
+	paint()
+	if s.orderedControllerChannels()[0].Key != "relay.6" {
+		t.Fatal("offline drag did not reorder")
+	}
+	if s.controllerState.Channels[0].Key != "relay.5" {
+		t.Fatal("local layout overwrote authoritative catalog")
+	}
+	var after win.RECT
+	win.GetWindowRect(s.mw.Handle(), &after)
+	if before != after {
+		t.Fatal("card drag moved the application window")
+	}
+	loaded, err := config.Load(s.configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.UI.ControllerCardOrders[s.controllerLocalOrderContext()][0] != "relay.6" {
+		t.Fatal("arrangement not persisted")
+	}
+	// Rejected kinds and capture loss must not change the saved layout.
+	first = s.controllerChannelHits[0]
+	start = walk.Point{X: first.grip.X + 10, Y: first.grip.Y + 16}
+	send(win.WM_LBUTTONDOWN, start)
+	send(win.WM_MOUSEMOVE, bad)
+	send(win.WM_LBUTTONUP, bad)
+	pumpControllerFixture(s)
+	paint()
+	if s.orderedControllerChannels()[0].Key != "relay.6" {
+		t.Fatal("incompatible drop changed layout")
+	}
+	send(win.WM_LBUTTONDOWN, start)
+	send(win.WM_MOUSEMOVE, end)
+	win.ReleaseCapture()
+	pumpControllerFixture(s)
+	if s.controllerGesture.key != "" {
+		t.Fatal("capture loss retained gesture")
+	}
+	// A real configured profile ignores the offline order and owns persistence.
+	s.controllerState.ProfileAttached, s.controllerState.ProfileConfigured = true, true
+	if s.orderedControllerChannels()[0].Key != "relay.5" {
+		t.Fatal("offline layout leaked into board profile")
+	}
+	paint()
+	first, second = s.controllerChannelHits[0], s.controllerChannelHits[1]
+	start = walk.Point{X: second.grip.X + 10, Y: second.grip.Y + 16}
+	end = walk.Point{X: first.header.X + 50, Y: first.header.Y + 15}
+	s.controllerState.CatalogRevision = "configured-revision"
+	commits := make(chan string, 1)
+	s.controller.UpdateChannel = func(_ context.Context, key, revision string, fields map[string]any) error {
+		if revision != "configured-revision" || fields["order"] != 0 || len(fields) != 1 {
+			return errors.New("incorrect board-profile reorder request")
+		}
+		commits <- key
+		return nil
+	}
+	send(win.WM_LBUTTONDOWN, start)
+	send(win.WM_MOUSEMOVE, end)
+	send(win.WM_LBUTTONUP, end)
+	for i := 0; i < 10 && s.controllerBusy; i++ {
+		pumpControllerFixture(s)
+	}
+	select {
+	case key := <-commits:
+		if key != "relay.6" {
+			t.Fatalf("reordered the wrong channel: %s", key)
+		}
+	default:
+		t.Fatalf("configured profile did not receive the reorder: %s", s.controllerState.Error)
+	}
+	t.Log("native window: move/no-drop cursors, capture, release, persistence and no hardware mutations verified")
 }
 
 func captureControllerFixture(t *testing.T, s *Shell, name string) {
@@ -227,6 +373,7 @@ func testControllerCardsRenderedInteraction(t *testing.T, backend string) {
 	}
 	// A rejected remote save must retain the draft for correction/cancel.
 	s.controllerState.Preview = false
+	s.controllerState.ProfileAttached, s.controllerState.ProfileConfigured = true, true
 	s.controllerState.CatalogRevision = "fixture-revision"
 	s.controller.UpdateChannel = func(_ context.Context, key, revision string, fields map[string]any) error {
 		if key != "relay.6" || revision != "fixture-revision" || fields["name"] != "Keep draft" {
