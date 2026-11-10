@@ -84,6 +84,10 @@ func prepareNativeConsoleStreams() error {
 	if os.Getenv(nativeConsolePipeEnv) == "" {
 		return nil
 	}
+	return bindNativeConsoleStreams()
+}
+
+func bindNativeConsoleStreams() error {
 	var files [3]*os.File
 	for i, name := range []string{"CONIN$", "CONOUT$", "CONOUT$"} {
 		file, err := os.OpenFile(name, os.O_RDWR, 0)

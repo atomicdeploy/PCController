@@ -558,6 +558,14 @@ func runWebWithContext(
 	store *appconfig.Store,
 	initial hostui.AppAction,
 ) error {
+	return runWebWithConsolePolicy(externalContext, ready, args, stdout, stderr, store, initial, false)
+}
+
+func runWebWithConsolePolicy(
+	externalContext context.Context, ready func(), args []string,
+	stdout, stderr io.Writer, store *appconfig.Store, initial hostui.AppAction,
+	preserveConsole bool,
+) error {
 	if len(args) != 0 && strings.EqualFold(args[0], "export") {
 		if initial.Kind != "" {
 			return errors.New("a desktop action cannot be combined with web export")
@@ -590,7 +598,7 @@ func runWebWithContext(
 		return err
 	}
 	tuiEnabled := !*noTUI && externalContext == nil && terminalOutput(stdout) && terminalOutput(os.Stdin)
-	if !tuiEnabled {
+	if !tuiEnabled && !preserveConsole {
 		_, _ = consolewindow.HideBackground(true)
 	}
 	connection.captureOverrides(flags)

@@ -33,24 +33,33 @@ type Snapshot struct {
 
 type Options struct {
 	Title, ConfigPath string
-	PreviewPage       string // Offline-only capture entry point; never performs an action.
-	PageChanges       <-chan struct{}
-	PageVersion       func(string) uint64
-	Updates           <-chan Snapshot
-	Messages          <-chan Message
-	Execute           func(context.Context, string) error
-	OpenPage          func(string) error
-	InvokeHostMenu    func(context.Context, string) error
-	ShowConsole       func() error
-	ConsoleVisible    func() bool
-	Notify            func(context.Context, string, string, string) error
-	Log               func(string, ...any)
-	InvokeAction      func(context.Context, ControlOwner, string) error
-	SetPWM            func(context.Context, ControlOwner, string, float64) error
-	UpdateChannel     func(context.Context, string, string, map[string]any) error
-	LoadPage          func(context.Context, string) (Page, error)
-	SubmitPage        func(context.Context, string, string, map[string]string) (Page, error)
-	MotionHold        func(context.Context, string, MotionHoldLease, string) (MotionHoldLease, error)
+	// WindowRequests are local presentation commands, never hardware actions.
+	WindowRequests <-chan WindowRequest
+	StartHidden    bool
+	HideOnClose    bool   // Combined TUI sessions keep running when the GUI closes.
+	PreviewPage    string // Offline-only capture entry point; never performs an action.
+	PageChanges    <-chan struct{}
+	PageVersion    func(string) uint64
+	Updates        <-chan Snapshot
+	Messages       <-chan Message
+	Execute        func(context.Context, string) error
+	OpenPage       func(string) error
+	InvokeHostMenu func(context.Context, string) error
+	ShowConsole    func() error
+	ConsoleVisible func() bool
+	Notify         func(context.Context, string, string, string) error
+	Log            func(string, ...any)
+	InvokeAction   func(context.Context, ControlOwner, string) error
+	SetPWM         func(context.Context, ControlOwner, string, float64) error
+	UpdateChannel  func(context.Context, string, string, map[string]any) error
+	LoadPage       func(context.Context, string) (Page, error)
+	SubmitPage     func(context.Context, string, string, map[string]string) (Page, error)
+	MotionHold     func(context.Context, string, MotionHoldLease, string) (MotionHoldLease, error)
+}
+
+type WindowRequest struct {
+	Action string // show, hide or toggle
+	Result chan<- error
 }
 
 // Message is an already accepted host message, not an executable command.

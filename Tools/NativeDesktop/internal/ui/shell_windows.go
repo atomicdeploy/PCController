@@ -621,20 +621,24 @@ func (s *Shell) Show() {
 		return
 	}
 	s.mw.Synchronize(func() {
-		if s.quitting.Load() || s.closed.Load() {
-			return
-		}
-		state := s.rememberedWindowState()
-		// "Show" means make the window usable now. A window remembered as
-		// minimized starts minimized on an ordinary launch, but an explicit
-		// tray/IPC/CLI Show restores it to its normal rectangle.
-		if state == config.WindowStateMinimized {
-			state = config.WindowStateNormal
-		}
-		s.setRememberedWindowSession(true, state)
-		s.showWindowWithState(state, true, true)
-		s.persistWindowPlacement()
+		s.showOnUIThread()
 	})
+}
+
+func (s *Shell) showOnUIThread() {
+	if s.quitting.Load() || s.closed.Load() {
+		return
+	}
+	state := s.rememberedWindowState()
+	// "Show" means make the window usable now. A window remembered as
+	// minimized starts minimized on an ordinary launch, but an explicit
+	// tray/IPC/CLI Show restores it to its normal rectangle.
+	if state == config.WindowStateMinimized {
+		state = config.WindowStateNormal
+	}
+	s.setRememberedWindowSession(true, state)
+	s.showWindowWithState(state, true, true)
+	s.persistWindowPlacement()
 }
 
 func (s *Shell) Hide() {
@@ -642,14 +646,21 @@ func (s *Shell) Hide() {
 		return
 	}
 	s.mw.Synchronize(func() {
-		s.cancelButtonActivation()
-		s.observeNativeWindowPlacement()
-		s.setRememberedWindowVisibility(false)
-		s.persistWindowPlacement()
-		s.mw.SetVisible(false)
-		s.cancelEntranceFadeWhileHidden()
-		s.releaseHiddenRenderResources()
+		s.hideOnUIThread()
 	})
+}
+
+func (s *Shell) hideOnUIThread() {
+	if s.quitting.Load() || s.closed.Load() {
+		return
+	}
+	s.cancelButtonActivation()
+	s.observeNativeWindowPlacement()
+	s.setRememberedWindowVisibility(false)
+	s.persistWindowPlacement()
+	s.mw.SetVisible(false)
+	s.cancelEntranceFadeWhileHidden()
+	s.releaseHiddenRenderResources()
 }
 
 func (s *Shell) Quit() {
@@ -2746,7 +2757,7 @@ func (s *Shell) onKeyDown(key walk.Key) {
 			return
 		}
 		s.cancelButtonActivation()
-		if s.Config().UI.CloseToTray {
+		if s.hideWindowOnClose() {
 			s.Hide()
 		}
 		return
@@ -2822,7 +2833,7 @@ func (s *Shell) onClosing(canceled *bool, _ walk.CloseReason) {
 		s.closeWindowBoundIntegrations()
 		return
 	}
-	if !s.quitting.Load() && s.Config().UI.CloseToTray {
+	if !s.quitting.Load() && s.hideWindowOnClose() {
 		*canceled = true
 		s.Hide()
 		return
@@ -2836,6 +2847,10 @@ func (s *Shell) onClosing(canceled *bool, _ walk.CloseReason) {
 	}
 	*canceled = true
 	s.beginExitTransition()
+}
+
+func (s *Shell) hideWindowOnClose() bool {
+	return s.Config().UI.CloseToTray || (s.controller != nil && s.controller.HideOnClose)
 }
 
 func (s *Shell) closeWindowBoundIntegrations() {

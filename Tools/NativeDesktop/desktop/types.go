@@ -6,6 +6,7 @@ import "pccontroller.local/desktop/presentation"
 
 type Snapshot = presentation.Snapshot
 type Options = presentation.Options
+type WindowRequest = presentation.WindowRequest
 type Channel = presentation.Channel
 type Action = presentation.Action
 type Page = presentation.Page

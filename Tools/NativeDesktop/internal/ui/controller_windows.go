@@ -113,6 +113,21 @@ func RunController(ctx context.Context, options presentation.Options) error {
 				return
 			case <-shell.ctx.Done():
 				return
+			case request, ok := <-options.WindowRequests:
+				if !ok {
+					options.WindowRequests = nil
+					continue
+				}
+				shell.mw.Synchronize(func() {
+					err := shell.applyControllerWindowRequest(request.Action)
+					if request.Result != nil {
+						// Replies must be buffered; never block the UI dispatcher.
+						select {
+						case request.Result <- err:
+						default:
+						}
+					}
+				})
 			case message, ok := <-options.Messages:
 				if !ok {
 					options.Messages = nil
@@ -176,8 +191,33 @@ func RunController(ctx context.Context, options presentation.Options) error {
 			}
 		})
 	}
-	if code := shell.Run(StartupForceShow); code != 0 {
+	startup := StartupForceShow
+	if options.StartHidden {
+		startup = StartupForceHidden
+	}
+	if code := shell.Run(startup); code != 0 {
 		return fmt.Errorf("native desktop exited with code %d", code)
+	}
+	return nil
+}
+
+func (s *Shell) applyControllerWindowRequest(action string) error {
+	if s.closed.Load() || s.quitting.Load() {
+		return errors.New("desktop is closing")
+	}
+	switch action {
+	case "show":
+		s.showOnUIThread()
+	case "hide":
+		s.hideOnUIThread()
+	case "toggle":
+		if s.mw.Visible() {
+			s.hideOnUIThread()
+		} else {
+			s.showOnUIThread()
+		}
+	default:
+		return fmt.Errorf("unknown desktop window action %q", action)
 	}
 	return nil
 }

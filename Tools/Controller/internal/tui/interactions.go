@@ -273,6 +273,10 @@ func (model Model) handleKey(message tea.KeyMsg) (Model, tea.Cmd, bool) {
 	}
 
 	switch key {
+	case "ctrl+g":
+		if model.toggleGUI != nil {
+			return model.toggleDesktopWindow()
+		}
 	case "ctrl+c":
 		if model.preview == nil && model.remote == nil {
 			_ = model.runtime.Close()
@@ -418,6 +422,15 @@ func (model Model) handleKey(message tea.KeyMsg) (Model, tea.Cmd, bool) {
 	}
 	model.completion = nil
 	return model, nil, false
+}
+
+func (model Model) toggleDesktopWindow() (Model, tea.Cmd, bool) {
+	if model.toggleGUI == nil {
+		return model, nil, false
+	}
+	return model, func() tea.Msg {
+		return commandResultMsg{line: "Desktop window", err: model.toggleGUI()}
+	}, true
 }
 
 func (model Model) modalOwnsKeyboard() bool {
@@ -1974,6 +1987,9 @@ func (model Model) handleActionBarClick(x int) (tea.Model, tea.Cmd) {
 				return updated, command
 			case "refresh":
 				updated, command, _ := model.dispatchLine("status")
+				return updated, command
+			case "gui":
+				updated, command, _ := model.toggleDesktopWindow()
 				return updated, command
 			case "owner":
 				updated, command, _ := model.bringPortOwnerToForeground()

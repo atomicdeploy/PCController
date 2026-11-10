@@ -153,7 +153,29 @@ minimize/maximize/restore and Snap hit-testing contracts must still pass.
 
 ## Console / TUI button
 
-The GUI's Console button launches a full TUI client against its exact IPC
+### Single-process combined mode
+
+`controller gui --tui` runs the native GUI, full TUI and (when needed) local
+controller host in the same process. Both presentations use the same IPC
+primary; neither creates a second serial owner. `--ipc-addr HOST:PORT` still
+attaches to an existing primary instead. Native-less builds retain their
+explicit unsupported-GUI error.
+
+Ctrl+G or the TUI's `^G GUI` action shows/hides the existing GUI at runtime.
+`controller gui --tui --hidden` starts with only the terminal visible. Closing
+the GUI hides it without ending the combined session, regardless of the ordinary
+standalone close-to-tray preference. TUI Q/Ctrl+C or the tray's Exit ends the
+combined session; hiding a window never stops hardware work or discards drafts.
+
+Combined mode reuses interactive terminal handles, or allocates/binds its own
+console when launched without one. It does not replace redirected/shared
+streams or hide an entire Windows Terminal window. The GUI's console toggle
+reuses the same sole-owned classic console when available; it never launches a
+second TUI. Diagnostics append to `native-hybrid.log` beside the selected host
+configuration instead of corrupting the TUI screen. Ordinary `gui`, `tui`, Web
+and service startup modes remain unchanged.
+
+In ordinary GUI mode, the Console button launches a full TUI client against its exact IPC
 endpoint; it never starts a second serial owner. Its IPC token is passed only in
 the child environment when configured, not on the command line. Tokenless local
 IPC does not pass an empty secret reference (which would abort TUI startup).

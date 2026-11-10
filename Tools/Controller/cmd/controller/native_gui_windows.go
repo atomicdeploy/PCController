@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -25,19 +26,51 @@ import (
 	"pccontroller.local/desktop/desktop"
 )
 
-func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Store) error {
+func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Store) (resultErr error) {
 	flags := flag.NewFlagSet("gui", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	address := flags.String("ipc-addr", "", "attach to an existing controller host; defaults to the configured local primary")
 	tokenRef := flags.String("ipc-token-ref", "", "OS-vault/environment reference for a remote IPC token")
 	noAuto := flags.Bool("no-auto", false, "do not automatically connect a newly started local core to hardware")
+	withTUI := flags.Bool("tui", false, "run the full TUI and GUI together in this process (Ctrl+G toggles the GUI)")
+	hidden := flags.Bool("hidden", false, "start the combined-mode GUI hidden; requires --tui")
+	consoleOptions, err := addTUIConsoleFlags(flags, store.Current().UI.TUIConsole)
+	if err != nil {
+		return err
+	}
 	preview := flags.Bool("preview", false, "render an explicitly offline UI preview without starting a core or opening any transport")
 	previewPage := flags.String("preview-page", "", "offline capture page: outputs, preferences, menu, motion or a native activity key")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if flags.NArg() != 0 {
-		return errors.New("usage: controller gui [--ipc-addr HOST:PORT] [--ipc-token-ref REFERENCE] [--no-auto]")
+		return errors.New("usage: controller gui [--tui [--hidden]] [--ipc-addr HOST:PORT] [--ipc-token-ref REFERENCE] [--no-auto]")
+	}
+	if *hidden && !*withTUI {
+		return errors.New("--hidden requires --tui so the GUI remains reachable")
+	}
+	if *withTUI && *preview {
+		return errors.New("--tui cannot be combined with --preview")
+	}
+	if err := consoleOptions.captureOverrides(flags); err != nil {
+		return err
+	}
+	terminalOutputWriter := stdout
+	if *withTUI {
+		terminalOutputWriter, err = prepareNativeHybridConsole(stdout)
+		if err != nil {
+			return err
+		}
+		if err := applyTUIConsole(consoleOptions.resolve(store.Current().UI.TUIConsole), stderr, consoleOptions.haveRuntimeFlag()); err != nil {
+			return err
+		}
+		// Keep core/renderer diagnostics out of Bubble Tea's terminal stream.
+		log, err := os.OpenFile(filepath.Join(filepath.Dir(store.Path()), "native-hybrid.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+		if err != nil {
+			return fmt.Errorf("open combined-interface log: %w", err)
+		}
+		defer log.Close()
+		stdout, stderr = log, log
 	}
 	if *previewPage != "" {
 		if !*preview {
@@ -102,12 +135,12 @@ func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Stor
 			webArgs = append(webArgs, "--no-auto")
 		}
 		go func() {
-			completed <- runWebWithContext(ctx, func() {
+			completed <- runWebWithConsolePolicy(ctx, func() {
 				select {
 				case ready <- struct{}{}:
 				default:
 				}
-			}, webArgs, stdout, stderr, store, hostui.AppAction{})
+			}, webArgs, stdout, stderr, store, hostui.AppAction{}, *withTUI)
 		}()
 		select {
 		case <-ready:
@@ -128,7 +161,7 @@ func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Stor
 		*address = configured.Listen
 		auth = configured.AuthToken
 	}
-	finishStartupPresentation(stdout)
+	finishStartupPresentation(terminalOutputWriter)
 	client := newRemoteTUIIPC(ctx, *address, auth)
 	eventHistory := &nativeEventBuffer{}
 	pageChanges := make(chan struct{}, 1)
@@ -314,12 +347,32 @@ func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Stor
 		}
 	}()
 	console := newNativeConsole(store.Path(), *address, auth)
+	showConsole, consoleVisible := console.toggle, console.visible.Load
+	var windowRequests chan desktop.WindowRequest
+	if *withTUI {
+		windowRequests = make(chan desktop.WindowRequest, 8)
+		showConsole, consoleVisible = nativeHybridConsoleActions()
+		tuiDone := make(chan error, 1)
+		go func() {
+			tuiDone <- runRemoteTUIWithPresentation(ctx, *address, auth, terminalOutputWriter, store, consoleOptions, false, func() error {
+				return requestNativeWindow(ctx, windowRequests, "toggle")
+			})
+			cancel()
+		}()
+		defer func() {
+			cancel()
+			if err := <-tuiDone; err != nil && !errors.Is(err, context.Canceled) {
+				resultErr = errors.Join(resultErr, fmt.Errorf("combined TUI: %w", err))
+			}
+		}()
+	}
 	pages := nativePages{client: client, events: eventHistory, rfCache: &nativeRFCache{}}
 	notifiers := map[string]hostui.Notifier{}
 	for _, delivery := range []string{"auto", "toast", "balloon"} {
 		notifiers[delivery] = hostui.NewNotifier(hostui.NotifierOptions{Delivery: delivery})
 	}
 	return desktop.Run(ctx, desktop.Options{
+		WindowRequests: windowRequests, StartHidden: *hidden, HideOnClose: *withTUI,
 		MotionHold: func(ctx context.Context, phase string, lease desktop.MotionHoldLease, direction string) (desktop.MotionHoldLease, error) {
 			if phase != "start" && phase != "renew" && phase != "release" {
 				return desktop.MotionHoldLease{}, errors.New("invalid motion hold phase")
@@ -493,8 +546,8 @@ func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Stor
 			}
 			return openBrowser(target)
 		},
-		ShowConsole:    console.toggle,
-		ConsoleVisible: console.visible.Load,
+		ShowConsole:    showConsole,
+		ConsoleVisible: consoleVisible,
 		LoadPage:       pages.load, SubmitPage: pages.submit,
 		PageChanges: pageChanges,
 		PageVersion: eventHistory.version,
