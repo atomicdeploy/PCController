@@ -4,7 +4,9 @@ package ui
 
 import (
 	"image"
+	"runtime"
 	"slices"
+	"sync"
 
 	"github.com/lxn/walk"
 )
@@ -69,37 +71,67 @@ func (cache *glassCompositionCache) prepare(bounds image.Rectangle, panels, cont
 		} else {
 			clear(cache.background.Pix)
 		}
-		for _, layer := range panels {
-			drawGlassRoundedBody(cache.background, layer.rect, layer.radius, layer.style)
-		}
+		// Each scanline keeps the original panel paint order. Independent
+		// bands can rasterize together without changing blending or rounding.
+		minRows := max(1, 120000/max(1, bounds.Dx()))
+		renderGlassBatches(bounds.Dy(), minRows, func(start, end int) {
+			band := cache.background.SubImage(image.Rect(bounds.Min.X, bounds.Min.Y+start, bounds.Max.X, bounds.Min.Y+end)).(*image.RGBA)
+			for _, layer := range panels {
+				drawGlassRoundedBody(band, layer.rect, layer.radius, layer.style)
+			}
+		})
 		cache.panels = keys
 	}
-	if !slices.Equal(cache.masks, masks) || len(cache.controls) != len(controls) {
-		cache.controls = make([]glassControlRaster, len(controls))
+	masksChanged := !slices.Equal(cache.masks, masks)
+	if masksChanged {
 		cache.masks = append(cache.masks[:0], masks...)
 	}
-	for i, layer := range controls {
-		entry := &cache.controls[i]
-		key := layer.key()
-		rect := image.Rect(layer.rect.X, layer.rect.Y, layer.rect.X+layer.rect.Width, layer.rect.Y+layer.rect.Height)
-		bodyBounds := rect.Intersect(bounds)
-		spread := glassShadowExtent(layer.style)
-		shadowBounds := rect.Inset(-spread).Intersect(bounds)
-		if entry.body != nil && entry.key == key && entry.body.Bounds() == bodyBounds && entry.shadow != nil && entry.shadow.Bounds() == shadowBounds {
-			continue
-		}
-		if entry.body == nil || entry.body.Bounds() != bodyBounds {
-			entry.body = reuseRGBA(entry.body, bodyBounds)
-		} else {
-			clear(entry.body.Pix)
-		}
-		if entry.shadow == nil || entry.shadow.Bounds() != shadowBounds {
-			entry.shadow = reuseRGBA(entry.shadow, shadowBounds)
-		} else {
-			clear(entry.shadow.Pix)
-		}
-		drawGlassRoundedShadowMasked(entry.shadow, layer.rect, layer.radius, layer.style, masks)
-		drawGlassRoundedBody(entry.body, layer.rect, layer.radius, layer.style)
-		entry.key = key
+	if len(cache.controls) > len(controls) {
+		clear(cache.controls[len(controls):])
+		cache.controls = cache.controls[:len(controls)]
 	}
+	if missing := len(controls) - len(cache.controls); missing > 0 {
+		cache.controls = append(cache.controls, make([]glassControlRaster, missing)...)
+	}
+	drawControls := func(start, end int) {
+		for i := start; i < end; i++ {
+			layer := controls[i]
+			entry := &cache.controls[i]
+			key := layer.key()
+			rect := image.Rect(layer.rect.X, layer.rect.Y, layer.rect.X+layer.rect.Width, layer.rect.Y+layer.rect.Height)
+			bodyBounds := rect.Intersect(bounds)
+			shadowBounds := rect.Inset(-glassShadowExtent(layer.style)).Intersect(bounds)
+			if entry.body == nil || entry.key != key || entry.body.Bounds() != bodyBounds {
+				entry.body = reuseRGBA(entry.body, bodyBounds)
+				drawGlassRoundedBody(entry.body, layer.rect, layer.radius, layer.style)
+			}
+			if masksChanged || entry.shadow == nil || entry.key != key || entry.shadow.Bounds() != shadowBounds {
+				entry.shadow = reuseRGBA(entry.shadow, shadowBounds)
+				drawGlassRoundedShadowMasked(entry.shadow, layer.rect, layer.radius, layer.style, masks)
+			}
+			entry.key = key
+		}
+	}
+	if masksChanged {
+		renderGlassBatches(len(controls), 3, drawControls)
+	} else {
+		drawControls(0, len(controls))
+	}
+}
+
+// Only the raster work fans out. Presentation, layout and the cache lifetime
+// stay on the window thread. Small batches avoid goroutine overhead.
+func renderGlassBatches(count, minimum int, render func(start, end int)) {
+	batches := min(4, runtime.GOMAXPROCS(0), count/minimum)
+	if batches < 2 {
+		render(0, count)
+		return
+	}
+	var pending sync.WaitGroup
+	for batch := 1; batch < batches; batch++ {
+		start, end := batch*count/batches, (batch+1)*count/batches
+		pending.Go(func() { render(start, end) })
+	}
+	render(0, count/batches)
+	pending.Wait()
 }

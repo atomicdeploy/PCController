@@ -6,6 +6,8 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"image"
+	"image/color"
+	"image/draw"
 	"math"
 	"os"
 	"runtime"
@@ -32,6 +34,32 @@ func TestGlassResizeMaterialDigest(t *testing.T) {
 	const original = "1b1dc2de9644a386b34b01fd84ade1fc1be82335dec0b501ba62c802d08896ce"
 	if got := fmt.Sprintf("%x", hash.Sum(nil)); got != original {
 		t.Fatalf("resize changed glass material pixels: %s", got)
+	}
+}
+
+func TestGlassPanelInteriorDigest(t *testing.T) {
+	hash := sha256.New()
+	for _, dark := range []bool{false, true} {
+		p := controllerPalette(dark)
+		for _, rect := range []walk.Rectangle{
+			{X: 0, Y: 0, Width: 731, Height: 535},
+			{X: 42, Y: 12, Width: 654, Height: 295},
+			{X: -9, Y: -12, Width: 310, Height: 72},
+			{X: 24, Y: 19, Width: 41, Height: 17},
+		} {
+			frame := image.NewRGBA(image.Rect(8, 5, 724, 521))
+			draw.Draw(frame, frame.Bounds(), image.NewUniform(color.RGBA{21, 16, 34, 120}), image.Point{}, draw.Src)
+			for _, radius := range []float64{0, 18.5} {
+				drawGlassRoundedBody(frame, rect, radius, glassStyle{
+					Palette: &p, Dark: dark, Panel: true, Alpha: 180, BorderAlpha: 48,
+				})
+			}
+			hash.Write(frame.Pix)
+		}
+	}
+	const original = "9c5ea7a8230c92bbd35068e94bd480a7d90241169bbb3477673b8bd17d0d9939"
+	if got := fmt.Sprintf("%x", hash.Sum(nil)); got != original {
+		t.Fatalf("panel material pixels changed: %s", got)
 	}
 }
 
