@@ -719,10 +719,27 @@ func (s *Session) writeRawContext(ctx context.Context, data []byte) error {
 	if written != len(data) {
 		return io.ErrShortWrite
 	}
+	if committed, ok := ctx.Value(requestWriteSuccessKey{}).(func()); ok {
+		committed()
+	}
 	return nil
 }
 
 type requestWriteGuardKey struct{}
+type requestWriteSuccessKey struct{}
+
+// WithRequestWriteSuccess runs only after a complete successful transport write,
+// while the writer gate is still held. It is not an acknowledgement callback.
+func WithRequestWriteSuccess(ctx context.Context, committed func()) context.Context {
+	if committed == nil {
+		return ctx
+	}
+	if previous, ok := ctx.Value(requestWriteSuccessKey{}).(func()); ok {
+		next := committed
+		committed = func() { previous(); next() }
+	}
+	return context.WithValue(ctx, requestWriteSuccessKey{}, committed)
+}
 
 // WithRequestWriteGuard revalidates an ephemeral intent after both admission
 // and writer queues, immediately before handing bytes to the transport. It
@@ -730,6 +747,15 @@ type requestWriteGuardKey struct{}
 func WithRequestWriteGuard(ctx context.Context, guard func() error) context.Context {
 	if guard == nil {
 		return ctx
+	}
+	if previous, ok := ctx.Value(requestWriteGuardKey{}).(func() error); ok {
+		next := guard
+		guard = func() error {
+			if err := previous(); err != nil {
+				return err
+			}
+			return next()
+		}
 	}
 	return context.WithValue(ctx, requestWriteGuardKey{}, guard)
 }

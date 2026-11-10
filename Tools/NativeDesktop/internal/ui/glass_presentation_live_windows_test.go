@@ -39,24 +39,8 @@ func newControllerWindowFixture(t *testing.T) (*Shell, config.Config) {
 	}
 	panicHandler := walk.App().Panicking().Attach(func(err error) { t.Errorf("native callback: %v\n%s", err, debug.Stack()) })
 	t.Cleanup(func() { walk.App().Panicking().Detach(panicHandler) })
-	// Stable-path test executables do not embed the product's PE manifest.
-	// Activate its Common Controls v6 dependency for this test's UI thread.
+	activateNativeWindowTestManifest(t)
 	_, source, _, _ := runtime.Caller(0)
-	manifest, err := windows.UTF16PtrFromString(filepath.Join(filepath.Dir(source), "..", "..", "resources", "PCControllerDesktop.exe.manifest"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	activation := win.CreateActCtx(&win.ACTCTX{Source: manifest})
-	if activation == win.HANDLE(^uintptr(0)) {
-		t.Fatal("create product manifest activation context")
-	}
-	kernel := windows.NewLazySystemDLL("kernel32.dll")
-	t.Cleanup(func() { kernel.NewProc("ReleaseActCtx").Call(uintptr(activation)) })
-	cookie, ok := win.ActivateActCtx(activation)
-	if !ok {
-		t.Fatal("activate product manifest")
-	}
-	t.Cleanup(func() { kernel.NewProc("DeactivateActCtx").Call(0, cookie) })
 	configureControllerTokens()
 	cfg := config.Default()
 	cfg.UI.ViewMode = config.ViewDashboard
@@ -102,6 +86,29 @@ func newControllerWindowFixture(t *testing.T) (*Shell, config.Config) {
 	}
 	shell.installEvents()
 	return shell, cfg
+}
+
+// All window fixtures must activate the same Common Controls v6 manifest before
+// Walk creates its process-wide tooltip. Otherwise test order can mix v5/v6 HWNDs.
+// Call on a locked UI thread, before constructing any Walk window.
+func activateNativeWindowTestManifest(t *testing.T) {
+	t.Helper()
+	_, source, _, _ := runtime.Caller(0)
+	manifest, err := windows.UTF16PtrFromString(filepath.Join(filepath.Dir(source), "..", "..", "resources", "PCControllerDesktop.exe.manifest"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	activation := win.CreateActCtx(&win.ACTCTX{Source: manifest})
+	if activation == win.HANDLE(^uintptr(0)) {
+		t.Fatal("create product manifest activation context")
+	}
+	kernel := windows.NewLazySystemDLL("kernel32.dll")
+	t.Cleanup(func() { kernel.NewProc("ReleaseActCtx").Call(uintptr(activation)) })
+	cookie, ok := win.ActivateActCtx(activation)
+	if !ok {
+		t.Fatal("activate product manifest")
+	}
+	t.Cleanup(func() { kernel.NewProc("DeactivateActCtx").Call(0, cookie) })
 }
 
 func TestControllerGlassHoverPresentation(t *testing.T) {

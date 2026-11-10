@@ -108,7 +108,11 @@ func (p *controllerIconPicker) selection() (string, bool) {
 }
 
 func (s *Shell) chooseControllerIcon(current string) (string, bool) {
-	p, err := s.newControllerIconPicker(current)
+	return s.chooseControllerIconOwned(s.mw, current)
+}
+
+func (s *Shell) chooseControllerIconOwned(owner walk.Form, current string) (string, bool) {
+	p, err := s.newControllerIconPickerOwned(owner, current)
 	if err != nil {
 		s.showError("Choose icon", err)
 		return current, false
@@ -122,6 +126,10 @@ func (s *Shell) chooseControllerIcon(current string) (string, bool) {
 }
 
 func (s *Shell) newControllerIconPicker(current string) (*controllerIconPicker, error) {
+	return s.newControllerIconPickerOwned(s.mw, current)
+}
+
+func (s *Shell) newControllerIconPickerOwned(owner walk.Form, current string) (*controllerIconPicker, error) {
 	choices := append([]controllerIconChoice(nil), controllerIconChoices...)
 	known := false
 	for _, entry := range choices {
@@ -161,7 +169,7 @@ func (s *Shell) newControllerIconPicker(current string) (*controllerIconPicker, 
 		}},
 		d.Composite{Layout: d.HBox{MarginsZero: true}, Children: []d.Widget{d.HSpacer{}, d.PushButton{AssignTo: &accept, Text: "Use icon", Enabled: false, OnClicked: func() { dialog.Accept() }}, d.PushButton{AssignTo: &cancel, Text: "Cancel", OnClicked: func() { dialog.Cancel() }}}},
 	}}
-	if err := spec.Create(s.mw); err != nil {
+	if err := spec.Create(owner); err != nil {
 		font.Dispose()
 		if dialog != nil {
 			dialog.Dispose()

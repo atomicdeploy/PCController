@@ -18,10 +18,12 @@ import (
 )
 
 type controllerTelemetryPoint struct {
-	at                       time.Time
-	generation               uint64
-	volts, amps, temperature float64
-	power, thermal           bool
+	at                             time.Time
+	generation                     uint64
+	volts, amps, temperature       float64
+	power, thermal                 bool
+	busVolts, watts, temperatureBT float64
+	thermalBT                      bool
 }
 
 func (s *Shell) controllerRoot() *Shell {
@@ -68,7 +70,7 @@ func (s *Shell) controllerWidgetMenuItems() []traymenu.Item {
 		items = append(items, traymenu.Item{ID: traymenu.ActionID(id), Label: label, Checked: visible, Disabled: !enabled && !visible})
 	}
 	add("front-panel", "Front panel", true)
-	add("telemetry", "Live charts", root.controllerState.HavePower || root.controllerState.HaveTemperature || len(root.controllerHistory) > 0)
+	add("telemetry", "Live charts", root.controllerState.HavePower || root.controllerState.HaveTemperature || root.controllerState.HaveTemperatureBT || len(root.controllerHistory) > 0)
 	items = append(items, traymenu.Item{Separator: true})
 	for _, ch := range root.controllerState.Channels {
 		add("channel:"+ch.Key, ch.Name, true)
@@ -256,7 +258,7 @@ func (s *Shell) controllerSnapNeighbours() []winfx.Rect {
 }
 
 func (s *Shell) observeControllerTelemetry(state presentation.Snapshot) {
-	if state.ObservedAt.IsZero() || !state.Connected || (!state.HavePower && !state.HaveTemperature) {
+	if state.ObservedAt.IsZero() || !state.Connected || (!state.HavePower && !state.HaveTemperature && !state.HaveTemperatureBT) {
 		return
 	}
 	n := len(s.controllerHistory)
@@ -265,6 +267,7 @@ func (s *Shell) observeControllerTelemetry(state presentation.Snapshot) {
 		n = 0
 	}
 	point := controllerTelemetryPoint{at: state.ObservedAt, generation: state.Generation, volts: float64(state.SupplyMV) / 1000, amps: float64(state.CurrentMA) / 1000, temperature: state.TemperatureC, power: state.HavePower, thermal: state.HaveTemperature}
+	point.busVolts, point.watts, point.temperatureBT, point.thermalBT = float64(state.BusMV)/1000, float64(state.PowerMW)/1000, state.TemperatureBTC, state.HaveTemperatureBT
 	if n > 0 {
 		last := s.controllerHistory[n-1]
 		if !point.at.After(last.at) {
@@ -308,6 +311,9 @@ func (s *Shell) paintControllerCharts(c *walk.Canvas, b walk.Rectangle, p palett
 	if len(history) == 0 {
 		return nil
 	}
+	if prefs := s.controllerState.Preferences; prefs != nil && !prefs.ShowGraphs {
+		return nil
+	}
 	last := history[len(history)-1]
 	type metric struct {
 		name, unit string
@@ -317,16 +323,34 @@ func (s *Shell) paintControllerCharts(c *walk.Canvas, b walk.Rectangle, p palett
 	metrics := []metric{}
 	if last.power {
 		metrics = append(metrics, metric{"Voltage", "V", p.accent, func(v controllerTelemetryPoint) (float64, bool) { return v.volts, v.power }}, metric{"Current", "A", p.success, func(v controllerTelemetryPoint) (float64, bool) { return v.amps, v.power }})
+		metrics = append(metrics, metric{"Bus voltage", "V", p.accent, func(v controllerTelemetryPoint) (float64, bool) { return v.busVolts, v.power }}, metric{"Power", "W", p.warning, func(v controllerTelemetryPoint) (float64, bool) { return v.watts, v.power }})
 	}
 	if last.thermal {
-		metrics = append(metrics, metric{"Temperature", "°C", p.danger, func(v controllerTelemetryPoint) (float64, bool) { return v.temperature, v.thermal }})
+		metrics = append(metrics, metric{"LED temperature", "°C", p.danger, func(v controllerTelemetryPoint) (float64, bool) { return v.temperature, v.thermal }})
 	}
-	height := (b.Height - 54) / max(1, len(metrics))
+	if last.thermalBT {
+		metrics = append(metrics, metric{"BT temperature", "°C", p.warning, func(v controllerTelemetryPoint) (float64, bool) { return v.temperatureBT, v.thermalBT }})
+	}
+	visible := metrics[:0]
+	for _, metric := range metrics {
+		if controllerMetricVisible(s.controllerState.Preferences, metric.name) {
+			visible = append(visible, metric)
+		}
+	}
+	metrics = visible
+	columns := 1
+	if len(metrics) > 3 && b.Width >= 360 {
+		columns = 2
+	}
+	rows := (len(metrics) + columns - 1) / columns
+	height := (b.Height - 54) / max(1, rows)
+	width := (b.Width - 24 - (columns-1)*8) / columns
 	for i, m := range metrics {
-		r := walk.Rectangle{X: b.X + 12, Y: b.Y + 42 + i*height, Width: b.Width - 24, Height: height - 8}
+		r := walk.Rectangle{X: b.X + 12 + (i%columns)*(width+8), Y: b.Y + 42 + (i/columns)*height, Width: width, Height: height - 8}
 		s.controllerCard(c, r, p)
 		value, _ := m.value(last)
-		s.controllerText(c, fmt.Sprintf("%s   %.2f %s", m.name, value, m.unit), s.captionFont, m.color, walk.Rectangle{X: r.X + 12, Y: r.Y + 6, Width: r.Width - 24, Height: 24}, false)
+		s.controllerText(c, m.name, s.captionFont, p.secondary, walk.Rectangle{X: r.X + 12, Y: r.Y + 6, Width: r.Width - 24, Height: 20}, false)
+		s.controllerText(c, controllerMetricValue(s.controllerState.Preferences, value, m.unit), s.bodyFont, m.color, walk.Rectangle{X: r.X + 12, Y: r.Y + 25, Width: r.Width - 24, Height: 26}, false)
 		lo, hi := math.Inf(1), math.Inf(-1)
 		for _, point := range history {
 			if v, ok := m.value(point); ok {
@@ -338,7 +362,7 @@ func (s *Shell) paintControllerCharts(c *walk.Canvas, b walk.Rectangle, p palett
 			lo -= 0.5
 			hi += 0.5
 		}
-		plot := walk.Rectangle{X: r.X + 12, Y: r.Y + 36, Width: r.Width - 24, Height: max(8, r.Height-48)}
+		plot := walk.Rectangle{X: r.X + 12, Y: r.Y + 60, Width: r.Width - 24, Height: max(8, r.Height-72)}
 		points := make([]controllerChartPoint, 0, len(history))
 		span := last.at.Sub(history[0].at).Seconds()
 		if span <= 0 {

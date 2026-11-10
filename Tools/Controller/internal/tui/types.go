@@ -237,6 +237,7 @@ type Options struct {
 	UIConfig           func() appconfig.UI
 	SaveUI             func(appconfig.UI) error
 	ApplyTUIConsole    func(appconfig.TUIConsole) error
+	ToggleGUI          func() error // Local combined-mode presentation only.
 	HostIntegrations   func() appconfig.Integrations
 	SaveIntegrations   func(appconfig.Integrations) error
 	BuzzerRuntime      func() appconfig.BuzzerRuntimeStatus

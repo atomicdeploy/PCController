@@ -7,13 +7,16 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"github.com/Microsoft/go-winio"
 	"golang.org/x/sys/windows"
 	"io"
 	"net"
 	"os"
-	"os/exec"
+	"path/filepath"
 	"pccontroller.local/controller/internal/consolewindow"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -24,19 +27,19 @@ const nativeConsolePipeEnv = "PCCONTROLLER_GUI_CONSOLE_PIPE"
 
 // This server runs inside the explicitly launched TUI process. It can only
 // change its own sole-owned console, and its pipe ACL admits this user only.
-func startNativeConsoleBridge() func() {
+func startNativeConsoleBridge() (func(), error) {
 	name := os.Getenv(nativeConsolePipeEnv)
 	if name == "" {
-		return func() {}
+		return func() {}, nil
 	}
 	os.Unsetenv(nativeConsolePipeEnv)
 	user, err := windows.GetCurrentProcessToken().GetTokenUser()
 	if err != nil {
-		return func() {}
+		return nil, fmt.Errorf("identify console owner: %w", err)
 	}
 	listener, err := winio.ListenPipe(name, &winio.PipeConfig{SecurityDescriptor: "D:P(A;;GA;;;" + user.User.Sid.String() + ")"})
 	if err != nil {
-		return func() {}
+		return nil, fmt.Errorf("start TUI console control: %w", err)
 	}
 	go func() {
 		for {
@@ -71,31 +74,127 @@ func startNativeConsoleBridge() func() {
 			}()
 		}
 	}()
-	return func() { _ = listener.Close() }
+	return func() { _ = listener.Close() }, nil
+}
+
+// Only the explicitly launched GUI child rebinds streams. Go's exec.Cmd uses
+// NUL for nil streams, even with CREATE_NEW_CONSOLE; allocating a window alone
+// does not make those handles interactive. Never change a user's redirected CLI.
+func prepareNativeConsoleStreams() error {
+	if os.Getenv(nativeConsolePipeEnv) == "" {
+		return nil
+	}
+	return bindNativeConsoleStreams()
+}
+
+func bindNativeConsoleStreams() error {
+	var files [3]*os.File
+	for i, name := range []string{"CONIN$", "CONOUT$", "CONOUT$"} {
+		file, err := os.OpenFile(name, os.O_RDWR, 0)
+		if err != nil {
+			for _, opened := range files {
+				if opened != nil {
+					_ = opened.Close()
+				}
+			}
+			return fmt.Errorf("open TUI console streams: %w", err)
+		}
+		files[i] = file
+	}
+	handles := []uint32{windows.STD_INPUT_HANDLE, windows.STD_OUTPUT_HANDLE, windows.STD_ERROR_HANDLE}
+	var previous [3]windows.Handle
+	for i, id := range handles {
+		previous[i], _ = windows.GetStdHandle(id)
+		if err := windows.SetStdHandle(id, windows.Handle(files[i].Fd())); err != nil {
+			for j := 0; j < i; j++ {
+				_ = windows.SetStdHandle(handles[j], previous[j])
+			}
+			for _, file := range files {
+				_ = file.Close()
+			}
+			return fmt.Errorf("bind TUI console streams: %w", err)
+		}
+	}
+	os.Stdin, os.Stdout, os.Stderr = files[0], files[1], files[2]
+	return nil
+}
+
+type nativeConsoleLaunch struct {
+	Path      string
+	Args, Env []string
+}
+
+func (launch *nativeConsoleLaunch) start() (*os.Process, error) {
+	// Unlike exec.Cmd.Start, zero Files entries mean actual NULL startup
+	// handles, not NUL files. conhost interprets valid inherited streams as a
+	// ConPTY session; passing NUL/pipes makes it exit at EOF instead of opening
+	// the independently owned visible console requested here.
+	pid, handle, err := syscall.StartProcess(launch.Path, launch.Args,
+		&syscall.ProcAttr{Env: launch.Env, Files: []uintptr{0, 0, 0}})
+	if err != nil {
+		return nil, err
+	}
+	process, err := os.FindProcess(pid)
+	_ = syscall.CloseHandle(syscall.Handle(handle))
+	return process, err
+}
+
+func nativeConsoleCommand(executable string, arguments, environment []string) (*nativeConsoleLaunch, error) {
+	directory, err := windows.GetSystemDirectory()
+	if err != nil {
+		return nil, fmt.Errorf("locate Windows console host: %w", err)
+	}
+	// A dedicated system console can be hidden independently. A Terminal tab's
+	// GetConsoleWindow is a message-only HWND, not the visible Terminal window;
+	// hiding that shared Terminal window could hide unrelated tabs as well.
+	args := []string{"--", executable}
+	args = append(args, arguments...)
+	host := filepath.Join(directory, "conhost.exe")
+	return &nativeConsoleLaunch{Path: host, Args: append([]string{host}, args...), Env: environment}, nil
 }
 
 type nativeConsole struct {
 	mu      sync.Mutex
 	pipe    string
 	done    chan struct{}
+	exitErr error // written before closing done; read only after done is closed
 	visible atomic.Bool
-	launch  func(string) (*exec.Cmd, error)
+	launch  func(string) (*os.Process, error)
 }
 
 func newNativeConsole(configPath, address, auth string) *nativeConsole {
-	return &nativeConsole{launch: func(pipe string) (*exec.Cmd, error) {
+	return &nativeConsole{launch: func(pipe string) (*os.Process, error) {
 		executable, err := os.Executable()
 		if err != nil {
 			return nil, err
 		}
-		command := exec.Command(executable, "--config", configPath, "tui", "--ipc-addr", address, "--ipc-token-ref", "env:PCCONTROLLER_NATIVE_GUI_TOKEN")
-		command.Env = append(os.Environ(), "PCCONTROLLER_NATIVE_GUI_TOKEN="+auth, nativeConsolePipeEnv+"="+pipe)
-		command.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x00000010}
-		if err := command.Start(); err != nil {
+		command, err := nativeConsoleCommand(executable,
+			nativeConsoleArguments(configPath, address, auth),
+			nativeConsoleEnvironment(os.Environ(), auth, pipe))
+		if err != nil {
 			return nil, err
 		}
-		return command, nil
+		return command.start()
 	}}
+}
+
+func nativeConsoleArguments(configPath, address, auth string) []string {
+	args := []string{"--config", configPath, "tui", "--ipc-addr", address}
+	if auth != "" {
+		args = append(args, "--ipc-token-ref", "env:PCCONTROLLER_NATIVE_GUI_TOKEN")
+	}
+	return args
+}
+
+func nativeConsoleEnvironment(environment []string, auth, pipe string) []string {
+	result := make([]string, 0, len(environment)+2)
+	for _, entry := range environment {
+		key, _, _ := strings.Cut(entry, "=")
+		if !strings.EqualFold(key, "PCCONTROLLER_NATIVE_GUI_TOKEN") && !strings.EqualFold(key, nativeConsolePipeEnv) {
+			result = append(result, entry)
+		}
+	}
+	return append(result, "PCCONTROLLER_NATIVE_GUI_TOKEN="+auth, nativeConsolePipeEnv+"="+pipe)
 }
 func (c *nativeConsole) toggle() error {
 	c.mu.Lock()
@@ -114,19 +213,35 @@ func (c *nativeConsole) toggle() error {
 			return err
 		}
 		c.pipe = `\\.\pipe\pccontroller-console-` + hex.EncodeToString(token)
-		cmd, err := c.launch(c.pipe)
+		process, err := c.launch(c.pipe)
 		if err != nil {
 			return err
 		}
 		c.done = make(chan struct{})
 		done := c.done
-		go func() { _ = cmd.Wait(); c.visible.Store(false); close(done) }()
+		go func() {
+			state, err := process.Wait()
+			if err == nil && !state.Success() {
+				err = fmt.Errorf("exit code %d", state.ExitCode())
+			}
+			c.exitErr = err
+			c.visible.Store(false)
+			close(done)
+		}()
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	connection, err := winio.DialPipeContext(ctx, c.pipe)
+	connection, err := waitNativeConsolePipe(ctx, c.pipe, c.done)
 	if err != nil {
-		return err
+		select {
+		case <-c.done:
+			if c.exitErr != nil {
+				return fmt.Errorf("TUI closed during startup: %w", c.exitErr)
+			}
+			return errors.New("TUI closed during startup")
+		default:
+			return fmt.Errorf("connect to TUI console: %w", err)
+		}
 	}
 	defer connection.Close()
 	_ = connection.SetDeadline(time.Now().Add(2 * time.Second))
@@ -141,8 +256,41 @@ func (c *nativeConsole) toggle() error {
 		return err
 	}
 	if reply.Error != "" {
-		return &net.OpError{Op: "toggle console", Net: "pipe", Err: syscall.EINVAL}
+		return fmt.Errorf("TUI console: %s", reply.Error)
 	}
 	c.visible.Store(reply.Visible)
 	return nil
+}
+
+func waitNativeConsolePipe(ctx context.Context, pipe string, done <-chan struct{}) (net.Conn, error) {
+	for {
+		select {
+		case <-done:
+			return nil, errors.New("console process exited")
+		default:
+		}
+		connection, err := winio.DialPipeContext(ctx, pipe)
+		if err == nil {
+			return connection, nil
+		}
+		// go-winio retries PIPE_BUSY, but FILE_NOT_FOUND is returned immediately
+		// while the child is still loading. Retry startup discovery, not commands.
+		if !errors.Is(err, windows.ERROR_FILE_NOT_FOUND) {
+			var pathErr *os.PathError
+			if errors.As(err, &pathErr) {
+				return nil, pathErr.Err
+			}
+			return nil, err
+		}
+		timer := time.NewTimer(25 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-done:
+			timer.Stop()
+			return nil, errors.New("console process exited")
+		case <-timer.C:
+		}
+	}
 }

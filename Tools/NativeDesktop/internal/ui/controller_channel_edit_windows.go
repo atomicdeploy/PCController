@@ -23,6 +23,7 @@ type controllerChannelGesture struct {
 	origin, point    walk.Point
 	percent          float64
 	token            uint64
+	owner            presentation.ControlOwner
 }
 
 func (s *Shell) canEditControllerChannel() bool {
@@ -76,13 +77,13 @@ func (s *Shell) beginControllerChannel(x, y int) bool {
 		slider := h.channel.Kind == "mosfet" && pointInRect(p, h.slider)
 		if slider && !h.channel.Locked && h.channel.Known && (s.controllerState.Preview || s.controllerState.Connected && s.controller.SetPWM != nil) {
 			s.controllerGestureGeneration++
-			s.controllerGesture = controllerChannelGesture{key: h.key, revision: s.controllerState.CatalogRevision, slider: true, origin: p, point: p, percent: h.channel.Percent, token: s.controllerGestureGeneration}
+			s.controllerGesture = controllerChannelGesture{key: h.key, revision: s.controllerState.CatalogRevision, owner: s.controllerState.ControlOwner, slider: true, origin: p, point: p, percent: h.channel.Percent, token: s.controllerGestureGeneration}
 			s.moveControllerChannel(x, y)
 			return true
 		}
 		if pointInRect(p, h.header) && s.canEditControllerChannel() && s.controllerInline == nil {
 			s.controllerGestureGeneration++
-			s.controllerGesture = controllerChannelGesture{key: h.key, revision: s.controllerState.CatalogRevision, origin: p, point: p, token: s.controllerGestureGeneration}
+			s.controllerGesture = controllerChannelGesture{key: h.key, revision: s.controllerState.CatalogRevision, owner: s.controllerState.ControlOwner, origin: p, point: p, token: s.controllerGestureGeneration}
 			return true
 		}
 		if s.controllerInline != nil && s.controllerInline.key == h.key && pointInRect(p, h.icon) {
@@ -130,7 +131,7 @@ func (s *Shell) endControllerChannel(x, y int) bool {
 	if s.surface != nil {
 		s.surface.Invalidate()
 	}
-	if s.controllerState.Busy || s.controllerBusy || (!s.controllerState.Preview && g.revision != s.controllerState.CatalogRevision) {
+	if s.controllerState.Busy || s.controllerBusy || (!s.controllerState.Preview && (g.revision != s.controllerState.CatalogRevision || g.owner != s.controllerState.ControlOwner)) {
 		return true
 	}
 	if g.slider {
@@ -149,7 +150,7 @@ func (s *Shell) endControllerChannel(x, y int) bool {
 		}
 		if s.controllerState.Connected && s.controller.SetPWM != nil {
 			s.controllerPendingPWM = g
-			s.runControllerOperation(func(ctx context.Context) error { return s.controller.SetPWM(ctx, g.key, g.percent) })
+			s.runControllerOperation(func(ctx context.Context) error { return s.controller.SetPWM(ctx, g.owner, g.key, g.percent) })
 		}
 	} else if g.dragging {
 		target := controllerDropTarget(g, s.controllerChannelHits, walk.Point{X: x, Y: y})

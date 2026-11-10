@@ -43,6 +43,12 @@ for the exact donor revision, repeatable file audit, font replacement, and
 remaining native integration gaps. Complete source preservation is verified;
 full native feature parity is still in progress.
 
+On Windows, launch the integrated GUI with `desktop.cmd` or `.\desktop.ps1`.
+It starts with automatic hardware connection paused; use `--preview` for a
+transport-free preview. See [Desktop development and recovery](docs/NATIVE-DESKTOP-DEVELOPMENT.md)
+for installed, staged-package and development launch paths. The original no-argument
+`controller.exe` shortcuts intentionally continue to open the TUI.
+
 <p align="center">
   <img alt="Real-time board control" src="https://img.shields.io/badge/Real--time-board_control-8b5cf6?style=flat-square">
   <img alt="Recoverable programming" src="https://img.shields.io/badge/Recoverable-programming-ec4899?style=flat-square">
@@ -95,6 +101,20 @@ These are reproducible **offline previews**, rendered by the actual application 
 ### Desktop preferences
 
 ![PCController desktop preferences](docs/assets/screenshots/gui-settings.png)
+
+### Native activities
+
+![Native RF activity with tabbed editors and fixed actions](docs/assets/screenshots/gui-rf-activity.png)
+
+| Automation triggers | Ordered automation actions |
+| --- | --- |
+| ![Native trigger editor](docs/assets/screenshots/gui-automation-0-en.png) | ![Native action editor](docs/assets/screenshots/gui-automation-1-en.png) |
+
+| Melody notes | Peripheral presentation |
+| --- | --- |
+| ![Native melody editor](docs/assets/screenshots/gui-melody-0-en.png) | ![Native peripheral editor](docs/assets/screenshots/gui-peripheral-0-en.png) |
+
+![Native LCD presentation](docs/assets/screenshots/gui-lcd-0-en.png)
 
 | TUI dashboard | TUI Control page |
 | --- | --- |

@@ -86,6 +86,30 @@ func TestConvertPremultipliedRGBARejectsWrongSize(t *testing.T) {
 	}
 }
 
+func TestResizeFrameBufferReusesGrowthAndReleasesLargeShrink(t *testing.T) {
+	buffer, err := resizeFrameBuffer(nil, 40, 40)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := &buffer[0]
+	for i := range buffer {
+		buffer[i] = 255
+	}
+	buffer, err = resizeFrameBuffer(buffer, 41, 41)
+	if err != nil || &buffer[0] != base || len(buffer) != 41*41*4 {
+		t.Fatal("small resize did not reuse its backing buffer")
+	}
+	for _, value := range buffer {
+		if value != 0 {
+			t.Fatal("old frame pixels survived resize")
+		}
+	}
+	buffer, err = resizeFrameBuffer(buffer, 10, 10)
+	if err != nil || cap(buffer) > 2*len(buffer) {
+		t.Fatal("large shrink retained peak-size GPU staging memory")
+	}
+}
+
 func TestApplyPremultipliedOpacity(t *testing.T) {
 	t.Parallel()
 	source := []byte{20, 40, 60, 80, 100, 120, 140, 160}

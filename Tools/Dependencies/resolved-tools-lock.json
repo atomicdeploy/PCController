@@ -1,7 +1,7 @@
 {
   "format": "pccontroller-host-tool-lock/v1",
   "policy_name": "pccontroller-host-build-tools",
-  "resolved_at_utc": "2026-11-04T01:20:01.381Z",
+  "resolved_at_utc": "2026-11-10T01:38:57.916Z",
   "node": {
     "version": "26.13.0",
     "lts": "Lithium",
@@ -132,7 +132,7 @@
     "installer_sha256": "3c69305081e4a647144339a936244fcf7d3d9e558319e1ad7be2cd2886d4b6a1"
   },
   "web": {
-    "package_lock_sha256": "5172150cc64f215ea820775723539dbcc8610bfec1fccb7d01d2d8fbcdb086d5"
+    "package_lock_sha256": "c2f8dcb6e01aa9187204db9ee8768c938f536993b91570e0881df216597c705c"
   },
   "build": {
     "package_lock_sha256": "323ac44b9417ec4a68487f026e41d4bc29199b7f40ded040de0d5b592318ca98"
@@ -202,8 +202,8 @@
       },
       {
         "name": "actions/setup-java",
-        "revision": "b843ebf9b913146b38da2eaa7aeddf76074ae1ad",
-        "version": "v6.1.0",
+        "revision": "77dd5b2ce225ea11469928ac317850245a74ae78",
+        "version": "v6.2.0",
         "workflows": [
           "mobile.yml"
         ]
@@ -239,23 +239,23 @@
       },
       {
         "name": "github/codeql-action/analyze",
-        "revision": "9b3254085494b55a0f7c4c2b3d2d52cc712ce370",
-        "version": "v4.39.1",
+        "revision": "33d7b85da1a04171e211befe2c739303b9a4c066",
+        "version": "v4.39.3",
         "workflows": [
           "codeql.yml"
         ]
       },
       {
         "name": "github/codeql-action/init",
-        "revision": "9b3254085494b55a0f7c4c2b3d2d52cc712ce370",
-        "version": "v4.39.1",
+        "revision": "33d7b85da1a04171e211befe2c739303b9a4c066",
+        "version": "v4.39.3",
         "workflows": [
           "codeql.yml"
         ]
       },
       {
         "name": "peter-evans/create-pull-request",
-        "revision": "5f6978faf089d4d20b00c7766989d076bb2fc7f1",
+        "revision": "15733dbdfeedb4f7fdb73d13c6f5ac83b710fab8",
         "version": "v8",
         "workflows": [
           "update-dependencies.yml"
@@ -263,7 +263,7 @@
       },
       {
         "name": "softprops/action-gh-release",
-        "revision": "efb35369e0ad2afab669f228072c1b0d510eae64",
+        "revision": "8a0cd651e5b2365bd640854a3fa5dfc70e4875f3",
         "version": "v3",
         "workflows": [
           "release.yml"

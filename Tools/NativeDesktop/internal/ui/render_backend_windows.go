@@ -181,14 +181,6 @@ func (s *Shell) presentDirectXForeground(frame *image.RGBA) error {
 			state.capability.FeatureLevel.String(),
 		)
 	}
-	status := state.presenter.Status()
-	if status.Width != width || status.Height != height {
-		if err := state.presenter.Resize(width, height); err != nil {
-			state.status = state.presenter.Status()
-			return err
-		}
-	}
-
 	opacity := 1.0
 	if s.windowFadeBackend == windowFadeBackendDirectX {
 		opacity = float64(s.windowFade.Opacity()) / 255
@@ -197,7 +189,7 @@ func (s *Shell) presentDirectXForeground(frame *image.RGBA) error {
 		state.status = state.presenter.Status()
 		return err
 	}
-	if err := state.presenter.Present(frame); err != nil {
+	if err := state.presenter.PresentResized(frame); err != nil {
 		state.status = state.presenter.Status()
 		return err
 	}

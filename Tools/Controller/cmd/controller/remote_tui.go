@@ -1465,6 +1465,14 @@ func runRemoteTUIContext(
 	consoleOptions *tuiConsoleOptions,
 	syncNavigation bool,
 ) error {
+	return runRemoteTUIWithPresentation(parent, address, auth, stdout, store, consoleOptions, syncNavigation, nil)
+}
+
+func runRemoteTUIWithPresentation(
+	parent context.Context, address, auth string, stdout io.Writer,
+	store *appconfig.Store, consoleOptions *tuiConsoleOptions,
+	syncNavigation bool, toggleGUI func() error,
+) error {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	client := newRemoteTUIIPC(ctx, address, auth)
@@ -1543,9 +1551,10 @@ func runRemoteTUIContext(
 					// structured IPC mutations exist, leave those save hooks nil so
 					// the full TUI reports the capability as unavailable instead of
 					// silently changing this SSH client's unrelated configuration.
-					UIConfig: clientUI,
+					UIConfig:       clientUI,
+					ToggleGUI:      toggleGUI,
 					ChannelCatalog: newTUIChannelCatalog(client.call),
-					SaveUI:   saveClientUI,
+					SaveUI:         saveClientUI,
 					ApplyTUIConsole: func(value appconfig.TUIConsole) error {
 						settings := consoleOptions.resolve(value)
 						result, applyErr := consolewindow.Apply(settings)
@@ -1595,6 +1604,7 @@ func runRemoteTUIContext(
 				tea.WithAltScreen(),
 				tea.WithMouseCellMotion(),
 				tea.WithContext(ctx),
+				tea.WithOutput(stdout),
 			)
 			handoffStartupPresentation()
 			_, runErr := program.Run()

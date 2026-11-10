@@ -84,6 +84,7 @@ type Model struct {
 	uiConfig                 func() appconfig.UI
 	saveUI                   func(appconfig.UI) error
 	applyTUIConsole          func(appconfig.TUIConsole) error
+	toggleGUI                func() error
 	uiValue                  appconfig.UI
 	hostIntegrations         func() appconfig.Integrations
 	saveHostIntegrations     func(appconfig.Integrations) error
@@ -483,6 +484,7 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 		runtime:  runtime, engine: engine, remote: options.Remote, input: input, spinner: progress,
 		page: PageDashboard, historyPos: -1, completionIndex: -1, uiConfig: options.UIConfig,
 		saveUI: options.SaveUI, applyTUIConsole: options.ApplyTUIConsole, uiValue: uiValue,
+		toggleGUI:            options.ToggleGUI,
 		hostIntegrations:     options.HostIntegrations,
 		saveHostIntegrations: options.SaveIntegrations,
 		buzzerRuntime:        options.BuzzerRuntime,
@@ -2263,6 +2265,9 @@ func (model Model) actionBarItems(snapshot control.Snapshot) []actionBarItem {
 		actionBarItem{label: rebootLabel, action: rebootAction, style: buttonStyle},
 		actionBarItem{label: "↻ Refresh", action: "refresh", style: buttonStyle},
 	)
+	if model.toggleGUI != nil {
+		items = append(items, actionBarItem{label: "^G GUI", action: "gui", style: buttonStyle})
+	}
 	if model.portOwner != nil && model.width >= 150 {
 		items = append(items,
 			actionBarItem{label: "^F Owner", action: "owner", style: buttonStyle},

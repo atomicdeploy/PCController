@@ -16,7 +16,7 @@ including dependencies, assets, tests, tools, documentation and recovery records
 - Parent integration commit: `3aed9ef6`.
 - The subtree tree object equals the donor tree object exactly. This verifies
   every pathname, file mode and blob, not merely file counts or ancestry.
-- Current working-copy result: **2,049 identical files, 376 adapted files, seven
+- Current working-copy result: **2,048 identical files, 377 adapted files, seven
   regenerated content-hashed Web bundles, one explicitly excluded font, zero
   missing source files**. Exact old/new generated bundle paths are audited; the
   original bytes remain in the immutable import. Git clean/EOL filters
@@ -174,6 +174,10 @@ Settings dialog. Neutral surfaces, purple accents and checkbox glyphs all use
 the shared palette; high contrast retains the native checkbox renderer.
 
 ## Completion rule
+
+The dedicated [native feature ledger](NATIVE-FEATURE-PARITY.md) tracks the current
+Web/TUI integration work and its remaining gates. [Native activity RPC notes](NATIVE-ACTIVITY-RPC.md)
+describe the shared preferences, intent fences and safe motion leases.
 
 Full native feature parity remains **open**. Do not replace that status with a
 passing source audit, successful build, source-history marker, or screenshot.

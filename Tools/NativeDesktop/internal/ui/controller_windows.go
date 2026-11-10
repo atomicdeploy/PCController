@@ -113,6 +113,21 @@ func RunController(ctx context.Context, options presentation.Options) error {
 				return
 			case <-shell.ctx.Done():
 				return
+			case request, ok := <-options.WindowRequests:
+				if !ok {
+					options.WindowRequests = nil
+					continue
+				}
+				shell.mw.Synchronize(func() {
+					err := shell.applyControllerWindowRequest(request.Action)
+					if request.Result != nil {
+						// Replies must be buffered; never block the UI dispatcher.
+						select {
+						case request.Result <- err:
+						default:
+						}
+					}
+				})
 			case message, ok := <-options.Messages:
 				if !ok {
 					options.Messages = nil
@@ -129,14 +144,19 @@ func RunController(ctx context.Context, options presentation.Options) error {
 					}
 					previous := shell.controllerState
 					shell.controllerState = state
+					if next := state.Preferences; next != nil && (previous.Preferences == nil || previous.Preferences.Revision != next.Revision) {
+						cfg := shell.Config()
+						if cfg.UI.Theme != next.Theme || cfg.UI.Locale != next.Locale || cfg.UI.Animations == next.ReduceMotion {
+							cfg.UI.Theme, cfg.UI.Locale, cfg.UI.Animations = next.Theme, next.Locale, !next.ReduceMotion
+							shell.ApplyConfig(cfg)
+						}
+					}
 					shell.handleControllerEvents(previous, state)
 					shell.observeControllerTelemetry(state)
 					shell.syncControllerWidgets()
 					shell.updateControllerSegments(state)
 					minimum := 680
-					if state.HavePower || state.HaveTemperature {
-						minimum += 84
-					}
+					minimum += controllerMeasurementHeight(state, 512)
 					if state.LCDLine1 != "" || state.LCDLine2 != "" {
 						minimum += 78
 					}
@@ -164,13 +184,40 @@ func RunController(ctx context.Context, options presentation.Options) error {
 				shell.controllerPreferences = true
 			case "menu":
 				shell.mw.Synchronize(func() { b := shell.mw.BoundsPixels(); shell.showControllerMenu(int32(b.X+36), int32(b.Y+115)) })
+			case "motion":
+				shell.mw.Synchronize(func() { shell.openControllerMotion() })
 			default:
 				shell.mw.Synchronize(func() { shell.openControllerForm(options.PreviewPage) })
 			}
 		})
 	}
-	if code := shell.Run(StartupForceShow); code != 0 {
+	startup := StartupForceShow
+	if options.StartHidden {
+		startup = StartupForceHidden
+	}
+	if code := shell.Run(startup); code != 0 {
 		return fmt.Errorf("native desktop exited with code %d", code)
+	}
+	return nil
+}
+
+func (s *Shell) applyControllerWindowRequest(action string) error {
+	if s.closed.Load() || s.quitting.Load() {
+		return errors.New("desktop is closing")
+	}
+	switch action {
+	case "show":
+		s.showOnUIThread()
+	case "hide":
+		s.hideOnUIThread()
+	case "toggle":
+		if s.mw.Visible() {
+			s.hideOnUIThread()
+		} else {
+			s.showOnUIThread()
+		}
+	default:
+		return fmt.Errorf("unknown desktop window action %q", action)
 	}
 	return nil
 }
@@ -209,6 +256,12 @@ func (s *Shell) controllerActionHint(action actionID) string {
 		return "Firmware and backups"
 	case actionEvents:
 		return "Live event history"
+	case actionActivities:
+		return "All activities"
+	case actionProfiles:
+		return "Configure board profile"
+	case actionMotion:
+		return "Seat & motion"
 	case actionSettings:
 		return "Preferences · F2"
 	case actionConsole:
@@ -262,7 +315,8 @@ func (s *Shell) activateControllerAction(action actionID) bool {
 			return true
 		}
 		if ok && s.controller.InvokeAction != nil && s.controllerState.Connected && !s.controllerState.Busy && !s.controllerBusy {
-			s.runControllerOperation(func(ctx context.Context) error { return s.controller.InvokeAction(ctx, id) })
+			owner := s.controllerState.ControlOwner
+			s.runControllerOperation(func(ctx context.Context) error { return s.controller.InvokeAction(ctx, owner, id) })
 		}
 		return true
 	}
@@ -323,6 +377,12 @@ func (s *Shell) activateControllerAction(action actionID) bool {
 		s.openControllerForm("firmware")
 	case actionEvents:
 		s.openControllerForm("events")
+	case actionActivities:
+		s.openControllerActivities()
+	case actionProfiles:
+		s.openControllerForm("profiles")
+	case actionMotion:
+		s.openControllerMotion()
 	case actionConsole:
 		if s.controller.ShowConsole != nil {
 			s.runControllerOperation(func(context.Context) error { return s.controller.ShowConsole() })
@@ -472,6 +532,7 @@ func (s *Shell) controllerMenuItems() []traymenu.Item {
 		{Separator: true}, {ID: "console", Label: consoleLabel, Disabled: s.controller.ShowConsole == nil}, {ID: "control", Label: "Hardware channels"},
 		{ID: "rf", Label: "RF assignments"}, {ID: "programs", Label: "Programs"}, {ID: "firmware", Label: "Firmware"},
 		{ID: "events", Label: "Events"}, {ID: "settings", Label: "Preferences"},
+		{ID: "activities", Label: "All activities…"},
 		{ID: "desktop-settings", Label: "Desktop settings…"},
 		{Separator: true}, {ID: "appearance", Label: "Window appearance…"},
 		{ID: "compact", Label: "Compact front panel", Checked: s.Config().UI.ViewMode == config.ViewCompact},
@@ -548,6 +609,8 @@ func (s *Shell) showControllerMenu(x, y int32) {
 	switch result.Action {
 	case "desktop-settings":
 		s.OpenSettings()
+	case "activities":
+		s.openControllerActivities()
 	case "widgets":
 		s.showControllerWidgetMenu(x, y)
 	case "compact":

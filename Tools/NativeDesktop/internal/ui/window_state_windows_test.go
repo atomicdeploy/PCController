@@ -225,6 +225,12 @@ func TestTransparentFramelessWindowOwnsItsCorners(t *testing.T) {
 					test.want,
 				)
 			}
+			if windowCornerRounding(test.ui, true) {
+				t.Fatal("maximized window must clear rounded clipping regions")
+			}
+			if got := windowCornerRounding(test.ui, false); got != test.want {
+				t.Fatal("restoring a window must restore its configured corner policy")
+			}
 		})
 	}
 }

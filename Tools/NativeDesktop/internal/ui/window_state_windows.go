@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/lxn/walk"
-	"github.com/lxn/win"
 
 	"pccontroller.local/desktop/internal/config"
 	"pccontroller.local/desktop/internal/winfx"
@@ -62,6 +61,10 @@ func dwmWindowCornerRounding(ui config.UIConfig) bool {
 	return ui.RoundedCorners && !transparentFramelessWindow(ui)
 }
 
+func windowCornerRounding(ui config.UIConfig, maximized bool) bool {
+	return !maximized && dwmWindowCornerRounding(ui)
+}
+
 func perPixelForegroundForUI(ui config.UIConfig) bool {
 	// An ordinary non-client caption cannot be supplied through
 	// UpdateLayeredWindow. Native mode therefore uses the standard HWND paint
@@ -110,22 +113,16 @@ func (s *Shell) transparentPixelPassesThrough(lParam uintptr) bool {
 		!s.usesPerPixelForeground() {
 		return false
 	}
-	var bounds win.RECT
-	if s.mw == nil || !win.GetWindowRect(s.mw.Handle(), &bounds) {
+	point, ok := s.captionClientPoint(lParam)
+	if !ok {
 		return true
 	}
-	x := int32(int16(uint16(lParam & 0xffff)))
-	y := int32(int16(uint16((lParam >> 16) & 0xffff)))
-	// GetCursorPos avoids the 16-bit coordinate truncation in legacy
-	// WM_NCHITTEST lParam packing on wide/negative virtual desktops.
-	var cursor win.POINT
-	if win.GetCursorPos(&cursor) {
-		x, y = cursor.X, cursor.Y
-	}
+	// A maximized client is inset from the outer invisible sizing frame.
+	// Alpha belongs to the painted surface, never the outer HWND rectangle.
 	return !alphaPixelInteractive(
 		s.hitSurface,
-		int(x-bounds.Left),
-		int(y-bounds.Top),
+		point.X,
+		point.Y,
 		minimumInteractiveAlpha,
 	)
 }

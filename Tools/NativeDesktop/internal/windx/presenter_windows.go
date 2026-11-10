@@ -302,6 +302,43 @@ func (presenter *Presenter) Present(frame *image.RGBA) error {
 	if presenter.status.Closed {
 		return ErrClosed
 	}
+	return presenter.presentLocked(frame)
+}
+
+// PresentResized commits a completed frame at its exact new size in one
+// transaction. Unlike an independent Resize followed by Present, no transparent
+// intermediate frame is uploaded or presented during interactive resizing.
+// The existing Resize API retains its initialized-transparent-frame contract.
+func (presenter *Presenter) PresentResized(frame *image.RGBA) error {
+	if presenter == nil {
+		return ErrClosed
+	}
+	if frame == nil {
+		return ErrFrameSize
+	}
+	width, height := frame.Bounds().Dx(), frame.Bounds().Dy()
+	if _, err := frameByteCount(width, height); err != nil {
+		return err
+	}
+	presenter.mu.Lock()
+	defer presenter.mu.Unlock()
+	if presenter.status.Closed {
+		return ErrClosed
+	}
+	resized := presenter.width != width || presenter.height != height
+	if err := presenter.resizeLocked(width, height, false); err != nil {
+		return err
+	}
+	if err := presenter.presentLocked(frame); err != nil {
+		return err
+	}
+	if resized {
+		return presenter.commitLocked("IDCompositionDevice::Commit(resized frame)")
+	}
+	return nil
+}
+
+func (presenter *Presenter) presentLocked(frame *image.RGBA) error {
 	if err := convertPremultipliedRGBA(
 		frame,
 		presenter.source,
@@ -334,6 +371,10 @@ func (presenter *Presenter) Resize(width, height int) error {
 	if presenter.status.Closed {
 		return ErrClosed
 	}
+	return presenter.resizeLocked(width, height, true)
+}
+
+func (presenter *Presenter) resizeLocked(width, height int, initialize bool) error {
 	if presenter.width == width && presenter.height == height {
 		return nil
 	}
@@ -378,9 +419,13 @@ func (presenter *Presenter) Resize(width, height int) error {
 		width,
 		height,
 	)
-	presenter.hasFrame = true
+	presenter.hasFrame = false
 	presenter.status.Width = width
 	presenter.status.Height = height
+	if !initialize {
+		return nil
+	}
+	presenter.hasFrame = true
 	if err := presenter.uploadAndPresentLocked(0); err != nil {
 		return err
 	}

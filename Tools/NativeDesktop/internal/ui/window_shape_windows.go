@@ -3,6 +3,7 @@
 package ui
 
 import (
+	"github.com/lxn/win"
 	"image"
 
 	"pccontroller.local/desktop/internal/config"
@@ -53,7 +54,7 @@ func (s *Shell) applyConfiguredWindowCorners(ui config.UIConfig) error {
 	}
 	return winfx.ApplyWindowCorners(
 		s.HWND(),
-		dwmWindowCornerRounding(ui),
+		windowCornerRounding(ui, win.IsZoomed(s.mw.Handle())),
 		viewCornerRadius(ui.ViewMode),
 	)
 }
@@ -80,13 +81,13 @@ func (s *Shell) applyConfiguredWindowCornersForSize(
 		// outer window, including the ordinary Windows caption and frame.
 		return winfx.ApplyWindowCorners(
 			s.HWND(),
-			dwmWindowCornerRounding(ui),
+			windowCornerRounding(ui, win.IsZoomed(s.mw.Handle())),
 			viewCornerRadius(ui.ViewMode),
 		)
 	}
 	return winfx.ApplyWindowCornersForSize(
 		s.HWND(),
-		dwmWindowCornerRounding(ui),
+		windowCornerRounding(ui, win.IsZoomed(s.mw.Handle())),
 		viewCornerRadius(ui.ViewMode),
 		width,
 		height,
