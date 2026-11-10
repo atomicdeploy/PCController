@@ -137,6 +137,31 @@ state/geometry checks are not visual proof of the OS transition or human Snap
 Layout acceptance; those still require checking the installed window with the
 user's Windows animation/Snap preferences enabled.
 
+## Console / TUI button
+
+The GUI's Console button launches a full TUI client against its exact IPC
+endpoint; it never starts a second serial owner. Its IPC token is passed only in
+the child environment when configured, not on the command line. Tokenless local
+IPC does not pass an empty secret reference (which would abort TUI startup).
+A dedicated system `conhost.exe`
+is launched with actual NULL startup handles so it creates an independent
+visible console, not a redirected ConPTY session. This does not change the user's
+default Terminal application or hide unrelated Terminal tabs. The explicit GUI
+child binds CONIN$/CONOUT$ before startup so Bubble Tea gets interactive handles;
+ordinary CLI redirection is untouched.
+
+Console startup waits for the child's user-ACL-protected pipe (including the
+initial FILE_NOT_FOUND interval), with a deadline and early-process-exit fence.
+Only pipe discovery is retried; toggle commands are never replayed. Startup
+bridge failures are reported instead of swallowed. Closing the TUI allows the
+next explicit click to launch a fresh instance; hide/show reuses the same one.
+
+`TestNativeConsoleOwnedWindowToggle` is an opt-in real, test-owned console
+fixture. It verifies interactive streams, sole ownership, delayed startup and
+show/hide/show without duplicate processes. Other regressions cover deadlines,
+early exit, dedicated launch arguments, token placement, stale environment
+overrides and preservation of redirected non-GUI CLI streams.
+
 ## Preserve and resume
 
 - Host settings: `%APPDATA%\PCController\config.json` (or `controller config path`).

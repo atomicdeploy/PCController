@@ -50,6 +50,10 @@ var (
 )
 
 func main() {
+	if err := prepareNativeConsoleStreams(); err != nil {
+		fmt.Fprintln(os.Stderr, "TUI console:", err)
+		os.Exit(1)
+	}
 	prepareStartupPresentation(os.Args[1:], os.Stdout)
 	if _, err := envfile.LoadProcess(); err != nil {
 		finishStartupPresentation(os.Stdout)
@@ -278,7 +282,10 @@ func run(args []string, stdout, stderr io.Writer) (resultErr error) {
 		// unrelated listener or forwarded neighbour instead of this machine.
 		return runHostUpdateCommand(args[1:], stdout, stderr)
 	case "tui":
-		stopConsoleBridge := startNativeConsoleBridge()
+		stopConsoleBridge, bridgeErr := startNativeConsoleBridge()
+		if bridgeErr != nil {
+			return bridgeErr
+		}
 		defer stopConsoleBridge()
 		return runTUI(args[1:], stdout, stderr, store)
 	case "web":
@@ -1344,9 +1351,9 @@ func runTUIWithInitialAction(
 	tui.ConfigureInteractiveColorProfile()
 	program := tea.NewProgram(
 		tui.NewApplicationWithOptions(runtime, engine, tui.Options{
-			StartupWidth: startupTerminalWidth(stdout),
-			AutoConnect:  !*noAuto,
-			UIConfig:     func() appconfig.UI { return store.Current().UI },
+			StartupWidth:   startupTerminalWidth(stdout),
+			AutoConnect:    !*noAuto,
+			UIConfig:       func() appconfig.UI { return store.Current().UI },
 			ChannelCatalog: newTUIChannelCatalog(callPrimary),
 			SaveUI: func(value appconfig.UI) error {
 				_, err := store.UpdateUI(value)
