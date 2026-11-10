@@ -160,6 +160,7 @@ type DeviceConfig struct {
 }
 
 type UIConfig struct {
+	ControllerCardOrders     map[string][]string         `json:"controller_card_orders,omitempty"`
 	ControllerExpandedBounds WindowBounds                `json:"controller_expanded_bounds,omitempty"`
 	ControllerWidgets        map[string]ControllerWidget `json:"controller_widgets,omitempty"`
 	ViewMode                 string                      `json:"view_mode"`

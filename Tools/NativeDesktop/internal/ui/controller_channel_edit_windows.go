@@ -4,18 +4,21 @@ package ui
 
 import (
 	"context"
+	"math"
+	"strings"
+
 	"github.com/lxn/walk"
 	d "github.com/lxn/walk/declarative"
-	"math"
+	"github.com/lxn/win"
+	"pccontroller.local/desktop/internal/config"
 	"pccontroller.local/desktop/internal/dialogs"
 	"pccontroller.local/desktop/presentation"
-	"strings"
 )
 
 type controllerChannelHit struct {
-	key                              string
-	rect, header, name, icon, slider walk.Rectangle
-	channel                          presentation.Channel
+	key                                    string
+	rect, header, grip, name, icon, slider walk.Rectangle
+	channel                                presentation.Channel
 }
 type controllerChannelGesture struct {
 	key, revision    string
@@ -24,10 +27,76 @@ type controllerChannelGesture struct {
 	percent          float64
 	token            uint64
 	owner            presentation.ControlOwner
+	localContext     string
 }
 
 func (s *Shell) canEditControllerChannel() bool {
-	return s.controller != nil && !s.controllerBusy && !s.controllerState.Busy && (s.controllerState.Preview || s.controller.UpdateChannel != nil && s.controllerState.CatalogRevision != "")
+	return s.controller != nil && !s.controllerBusy && !s.controllerState.Busy && (s.controllerState.Preview || s.controller.UpdateChannel != nil && s.controllerState.ProfileAttached && s.controllerState.ProfileConfigured && s.controllerState.CatalogRevision != "")
+}
+
+// Unattached/unconfigured cards have no writable board profile. Their desktop
+// arrangement is local, scoped to this host and identity, never replayed as a
+// board configuration when an authenticated profile subsequently appears.
+func (s *Shell) controllerLocalOrderContext() string {
+	if s.controllerState.Preview || s.controllerState.ProfileAttached && s.controllerState.ProfileConfigured {
+		return ""
+	}
+	return s.controllerState.Endpoint + "|" + s.controllerState.ControlOwner.BoardIdentity
+}
+
+func (s *Shell) canArrangeControllerChannels() bool {
+	return s.controller != nil && !s.controllerBusy && !s.controllerState.Busy && s.controllerInline == nil && (s.canEditControllerChannel() || s.controllerLocalOrderContext() != "")
+}
+
+func (s *Shell) controllerChannelCursor(p walk.Point) int {
+	if g := s.controllerGesture; g.key != "" {
+		if g.slider {
+			return win.IDC_SIZEWE
+		}
+		if !g.dragging || controllerDropTarget(g, s.controllerChannelHits, p) != "" {
+			return win.IDC_SIZEALL
+		}
+		for _, h := range s.controllerChannelHits {
+			if h.key == g.key && pointInRect(p, h.rect) {
+				return win.IDC_SIZEALL
+			}
+		}
+		return win.IDC_NO
+	}
+	for _, h := range s.controllerChannelHits {
+		if pointInRect(p, h.grip) && s.canArrangeControllerChannels() {
+			return win.IDC_SIZEALL
+		}
+		if pointInRect(p, h.header) && s.canEditControllerChannel() {
+			return win.IDC_HAND
+		}
+	}
+	if s.layout.hit(p.X, p.Y) != actionNone {
+		return win.IDC_HAND
+	}
+	return win.IDC_ARROW
+}
+
+func (s *Shell) updateControllerChannelCursor(p walk.Point) {
+	if s.surface == nil {
+		return
+	}
+	id := s.controllerChannelCursor(p)
+	cursor := walk.CursorArrow()
+	switch id {
+	case win.IDC_SIZEALL:
+		cursor = walk.CursorSizeAll()
+	case win.IDC_SIZEWE:
+		cursor = walk.CursorSizeWE()
+	case win.IDC_NO:
+		cursor = walk.CursorNo()
+	case win.IDC_HAND:
+		cursor = walk.CursorHand()
+	}
+	s.surface.SetCursor(cursor)
+	// Walk.SetCursor only stores the value; apply it now, including during
+	// capture when Windows doesn't send WM_SETCURSOR on every pointer move.
+	win.SetCursor(win.LoadCursor(0, win.MAKEINTRESOURCE(uintptr(id))))
 }
 
 func controllerChannelGlyph(icon, fallback string) string {
@@ -81,9 +150,10 @@ func (s *Shell) beginControllerChannel(x, y int) bool {
 			s.moveControllerChannel(x, y)
 			return true
 		}
-		if pointInRect(p, h.header) && s.canEditControllerChannel() && s.controllerInline == nil {
+		if pointInRect(p, h.header) && s.canArrangeControllerChannels() && (pointInRect(p, h.grip) || s.canEditControllerChannel()) {
 			s.controllerGestureGeneration++
-			s.controllerGesture = controllerChannelGesture{key: h.key, revision: s.controllerState.CatalogRevision, owner: s.controllerState.ControlOwner, origin: p, point: p, token: s.controllerGestureGeneration}
+			s.controllerGesture = controllerChannelGesture{key: h.key, revision: s.controllerState.CatalogRevision, owner: s.controllerState.ControlOwner, localContext: s.controllerLocalOrderContext(), origin: p, point: p, token: s.controllerGestureGeneration}
+			s.updateControllerChannelCursor(p)
 			return true
 		}
 		if s.controllerInline != nil && s.controllerInline.key == h.key && pointInRect(p, h.icon) {
@@ -113,7 +183,7 @@ func (s *Shell) moveControllerChannel(x, y int) bool {
 		g.dragging = true
 	}
 	if s.surface != nil {
-		s.surface.SetCursor(walk.CursorHand())
+		s.updateControllerChannelCursor(g.point)
 		s.surface.Invalidate()
 	}
 	return true
@@ -128,10 +198,16 @@ func (s *Shell) endControllerChannel(x, y int) bool {
 		return false
 	}
 	s.controllerGesture = controllerChannelGesture{}
+	s.updateControllerChannelCursor(walk.Point{X: x, Y: y})
 	if s.surface != nil {
 		s.surface.Invalidate()
 	}
-	if s.controllerState.Busy || s.controllerBusy || (!s.controllerState.Preview && (g.revision != s.controllerState.CatalogRevision || g.owner != s.controllerState.ControlOwner)) {
+	owner, currentOwner := g.owner, s.controllerState.ControlOwner
+	if !g.slider {
+		// A PWM calibration update doesn't change presentation ownership.
+		owner.PWMRevision, currentOwner.PWMRevision = "", ""
+	}
+	if s.controllerState.Busy || s.controllerBusy || (!s.controllerState.Preview && (g.revision != s.controllerState.CatalogRevision || owner != currentOwner)) {
 		return true
 	}
 	if g.slider {
@@ -153,6 +229,15 @@ func (s *Shell) endControllerChannel(x, y int) bool {
 			s.runControllerOperation(func(ctx context.Context) error { return s.controller.SetPWM(ctx, g.owner, g.key, g.percent) })
 		}
 	} else if g.dragging {
+		if g.localContext != "" {
+			if g.localContext == s.controllerLocalOrderContext() {
+				s.saveLocalControllerOrder(g, walk.Point{X: x, Y: y})
+			}
+			return true
+		}
+		if !s.canEditControllerChannel() {
+			return true
+		}
 		target := controllerDropTarget(g, s.controllerChannelHits, walk.Point{X: x, Y: y})
 		for _, h := range s.controllerChannelHits {
 			if h.key == target {
@@ -199,9 +284,52 @@ func (s *Shell) cancelControllerGestureToken(token uint64) {
 	if token != 0 && s.controllerGesture.token == token {
 		s.controllerGesture = controllerChannelGesture{}
 		if s.surface != nil {
+			s.updateControllerChannelCursor(s.visualPointer)
 			s.surface.Invalidate()
 		}
 	}
+}
+
+func (s *Shell) saveLocalControllerOrder(g controllerChannelGesture, p walk.Point) {
+	target := controllerDropTarget(g, s.controllerChannelHits, p)
+	if target == "" {
+		return
+	}
+	channels := s.orderedControllerChannels()
+	from, to := -1, -1
+	for i, ch := range channels {
+		if ch.Key == g.key {
+			from = i
+		}
+		if ch.Key == target {
+			to = i
+		}
+	}
+	if from < 0 || to < 0 {
+		return
+	}
+	item := channels[from]
+	channels = append(channels[:from], channels[from+1:]...)
+	channels = append(channels, presentation.Channel{})
+	copy(channels[to+1:], channels[to:])
+	channels[to] = item
+	keys := make([]string, len(channels))
+	for i, ch := range channels {
+		keys[i] = ch.Key
+	}
+	root := s.controllerRoot()
+	cfg := root.Config()
+	orders := make(map[string][]string, len(cfg.UI.ControllerCardOrders)+1)
+	for k, v := range cfg.UI.ControllerCardOrders {
+		orders[k] = append([]string(nil), v...)
+	}
+	orders[g.localContext] = keys
+	cfg.UI.ControllerCardOrders = orders
+	if err := config.Save(root.configPath, cfg); err != nil {
+		root.showError("Card arrangement", err)
+		return
+	}
+	root.ApplyConfig(cfg)
 }
 
 func (s *Shell) saveControllerChannel(key, revision string, fields map[string]any) {
