@@ -14,6 +14,10 @@ import (
 
 var ErrUnsupported = errors.New("desktop OSD requires an interactive Windows session")
 
+// TaskbarOwnerProperty is independent of the legacy WM_COPYDATA primary marker:
+// controller-backed GUI windows deliberately do not own that legacy IPC route.
+const TaskbarOwnerProperty = "PCControllerDesktop.TaskbarOwner.{66F0C709-6E91-45BE-9013-5A96219E6D3D}"
+
 type Action struct {
 	ID    string `json:"id,omitempty"`
 	Label string `json:"label"`

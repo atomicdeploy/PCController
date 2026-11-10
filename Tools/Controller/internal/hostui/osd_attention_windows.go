@@ -7,6 +7,7 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+	"pccontroller.local/desktop/osd"
 )
 
 var osdAttentionUser32 = windows.NewLazySystemDLL("user32.dll")
@@ -16,9 +17,7 @@ var osdGetProp = osdAttentionUser32.NewProc("GetPropW")
 var osdGetForeground = osdAttentionUser32.NewProc("GetForegroundWindow")
 var osdFlashWindow = osdAttentionUser32.NewProc("FlashWindowEx")
 
-const osdPrimaryWindowProperty = "PCControllerDesktop.PrimaryWindow.{66F0C709-6E91-45BE-9013-5A96219E6D3D}"
-
-var osdPrimaryProperty, _ = windows.UTF16PtrFromString(osdPrimaryWindowProperty)
+var osdPrimaryProperty, _ = windows.UTF16PtrFromString(osd.TaskbarOwnerProperty)
 var osdAttentionEnumeration struct {
 	sync.Mutex
 	target uintptr
