@@ -55,7 +55,7 @@ func admit(payload []byte, retained, duplicate bool, config Config, identity Ide
 	if decoder.Decode(&command) != nil || decoder.Decode(new(any)) != io.EOF {
 		return command, r
 	}
-	if len(command.RequestID) <= 40 && identifier(command.RequestID) {
+	if len(command.RequestID) > 0 && len(command.RequestID) <= 40 && identifier(command.RequestID) {
 		r.RequestID = command.RequestID
 	} else {
 		r.Code = "invalid_request_id"
@@ -70,7 +70,7 @@ func admit(payload []byte, retained, duplicate bool, config Config, identity Ide
 		r.Code = "unsupported_command"
 	case !config.AllowCommands:
 		r.Code = "read_only"
-	case r.RequestID == "" || command.BoardID == "" || command.BootID == "":
+	case command.BoardID == "" || command.BootID == "":
 		r.Code = "invalid_envelope"
 	case identity.BoardID == "" || command.BoardID != identity.BoardID || command.BootID != identity.BootID:
 		r.Code = "stale_owner"

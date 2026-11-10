@@ -62,7 +62,8 @@ The retained state can outlive a disconnect; interpret it with availability,
 
 Send `{"command":"status","request_id":"read_1"}` (or `telemetry`) to
 `pccontroller/cinema/command` for a correlated status result on `event`.
-This works in the default read-only mode.
+This works in the default read-only mode. A nonempty `request_id` is required
+for both reads and writes so clients can correlate concurrent replies.
 
 To send a write, explicitly enable **Allow board commands**. Use the current
 `board_id` and `boot_id` from status, a new 1–40 character ASCII request ID

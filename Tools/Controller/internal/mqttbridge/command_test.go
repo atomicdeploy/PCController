@@ -49,7 +49,9 @@ func TestMQTTCommandAdmission(t *testing.T) {
 			t.Fatalf("want %s: %+v", want, got)
 		}
 	}
-	check("accepted", []byte(`{"command":"status"}`), false, false, false, owner, now)
+	check("invalid_request_id", []byte(`{"command":"status"}`), false, false, false, owner, now)
+	check("invalid_request_id", []byte(`{"command":"telemetry","request_id":""}`), false, false, false, owner, now)
+	check("accepted", []byte(`{"command":"status","request_id":"read1"}`), false, false, false, owner, now)
 	check("read_only", payload, false, false, false, owner, now)
 	check("replayed_delivery", payload, true, false, true, owner, now)
 	check("replayed_delivery", payload, false, true, true, owner, now)
@@ -57,5 +59,5 @@ func TestMQTTCommandAdmission(t *testing.T) {
 	check("invalid_deadline", payload, false, false, true, owner, now.Add(30*time.Second))
 	check("accepted", payload, false, false, true, owner, now)
 	check("duplicate_request", payload, false, false, true, owner, now)
-	check("invalid_json", []byte(`{"command":"status"} {}`), false, false, false, owner, now)
+	check("invalid_json", []byte(`{"command":"status","request_id":"read1"} {}`), false, false, false, owner, now)
 }
