@@ -157,6 +157,46 @@ int main() {
     require(std::any_of(missingRead.begin(),missingRead.end(),[](const auto &f){return f.opcode==wire::I2cTransferResponse && f.payload[0]==4 && f.payload[2]==0;}),"unavailable I2C read must report failure and exact byte count");
     auto bufferedRead=request(wire::I2cTransfer,34,{0x41,0,1,3,0});
     require(std::any_of(bufferedRead.begin(),bufferedRead.end(),[](const auto &f){return f.opcode==wire::I2cTransferResponse && f.payload[0]==0 && f.payload[2]==3 && f.payload.size()==6;}),"bounded I2C bulk read must return exactly the received bytes");
+    auto lcdNibble = [&](uint8_t nibble, bool data) {
+      const auto pins = static_cast<uint8_t>((nibble & 0xF0) | 0x08 | (data ? 1 : 0));
+      const auto result = request(wire::I2cTransfer, 61,
+          {0x27, 0, 3, 0, pins, static_cast<uint8_t>(pins | 0x04), pins});
+      require(std::any_of(result.begin(), result.end(), [](const auto &frame) {
+        return frame.opcode == wire::I2cTransferResponse && frame.payload[0] == 0;
+      }), "virtual LCD backpack did not acknowledge its I2C write");
+    };
+    auto lcdByte = [&](uint8_t value, bool data = false) {
+      lcdNibble(value, data);
+      lcdNibble(static_cast<uint8_t>(value << 4), data);
+    };
+    auto lcdPanel = [&]() {
+      const auto result = request(wire::FrontPanelGet, 62);
+      const auto frame = std::find_if(result.begin(), result.end(), [](const auto &value) {
+        return value.opcode == wire::FrontPanelResponse;
+      });
+      require(frame != result.end() && frame->payload.size() == 47, "LCD readback missing");
+      return frame->payload;
+    };
+    for (unsigned i = 0; i < 3; ++i) lcdNibble(0x30, false);
+    lcdNibble(0x20, false);
+    lcdByte(0x28);
+    lcdByte(0x0C);
+    lcdByte(0x01);
+    lcdByte('A', true);
+    lcdByte(0xC0);
+    lcdByte('B', true);
+    lcdByte(0x90);
+    lcdByte('X', true);
+    auto lcdReadback = lcdPanel();
+    require(lcdReadback[7] == 0x27 && (lcdReadback[8] & 3) == 3 &&
+            lcdReadback[9] == 'A' && lcdReadback[25] == 'B',
+            "front panel must expose the two visible DDRAM rows and backlight");
+    for (unsigned i = 0; i < 16; ++i) lcdByte(0x18);
+    require(lcdPanel()[9] == 'X', "display shift did not reveal the hidden LCD page");
+    lcdByte(0x02);
+    require(lcdPanel()[9] == 'A', "LCD home lost visible DDRAM");
+    lcdByte(0x01);
+    require(lcdPanel()[9] == ' ' && lcdPanel()[25] == ' ', "LCD clear left stale characters");
     board.console("tm1637 off"); receive(1100000);
     require(!board.outputSnapshot().tm1637Detected,"missing TM1637 ACK detection");
     board.console("tm1637 on"); receive(1100000);

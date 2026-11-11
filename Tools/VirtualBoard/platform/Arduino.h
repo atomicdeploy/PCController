@@ -35,6 +35,8 @@ uint8_t i2cBegin(uint8_t address);
 bool i2cWrite(uint8_t value);
 uint8_t i2cEnd();
 uint8_t i2cRead(uint8_t address, uint8_t *values, uint8_t length);
+constexpr uint8_t virtualLcdAddress = 0x27;
+bool copyLcdDisplay(uint8_t *rows);
 void showStrip(const uint8_t *values, uint16_t length);
 inline std::array<uint8_t,64> modes{}, levels{};
 inline std::array<int8_t,64> inputLevels=[] { std::array<int8_t,64> values{}; values.fill(-1); return values; }();
