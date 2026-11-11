@@ -728,8 +728,9 @@ func discoverSSDP(ctx context.Context, add func(Instance)) error {
 	}
 	var routes []route
 	interfaces, _ := net.Interfaces()
+	const multicast = net.FlagUp | net.FlagMulticast
 	for _, iface := range interfaces {
-		if iface.Flags&(net.FlagUp|net.FlagMulticast) != net.FlagUp|net.FlagMulticast || iface.Flags&net.FlagLoopback != 0 {
+		if iface.Flags&multicast != multicast || iface.Flags&net.FlagLoopback != 0 {
 			continue
 		}
 		addresses, _ := iface.Addrs()
@@ -755,6 +756,13 @@ func discoverSSDP(ctx context.Context, add func(Instance)) error {
 	}
 	if len(failures) != len(routes) {
 		return nil
+	}
+	if ctx.Err() == nil {
+		if err := discoverSSDPOn(ctx, add, nil, net.IPv4zero); err == nil {
+			return nil
+		} else {
+			failures = append(failures, err)
+		}
 	}
 	return errors.Join(failures...)
 }

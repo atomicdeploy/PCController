@@ -205,6 +205,7 @@ type PublicDiscovery struct {
 }
 
 type Source struct {
+	Verified bool      `json:"verified"`
 	Protocol string    `json:"protocol"`
 	Host     string    `json:"host,omitempty"`
 	Port     int       `json:"port,omitempty"`
@@ -505,7 +506,7 @@ func mergeInstances(values []Instance) []Instance {
 		}
 		if match < 0 {
 			value.Protocols = uniqueStrings(append(value.Protocols, value.Protocol))
-			value.Sources = []Source{{Protocol: value.Protocol, Host: value.Host, Port: value.Port, Location: value.Location, SeenAt: value.SeenAt}}
+			value.Sources = []Source{{Protocol: value.Protocol, Host: value.Host, Port: value.Port, Location: value.Location, SeenAt: value.SeenAt, Verified: value.Verified}}
 			result = append(result, value)
 			continue
 		}
@@ -515,7 +516,7 @@ func mergeInstances(values []Instance) []Instance {
 			current.Product = value.Product
 		}
 		current.Protocols = uniqueStrings(append(current.Protocols, value.Protocol))
-		current.Sources = append(current.Sources, Source{Protocol: value.Protocol, Host: value.Host, Port: value.Port, Location: value.Location, SeenAt: value.SeenAt})
+		current.Sources = append(current.Sources, Source{Protocol: value.Protocol, Host: value.Host, Port: value.Port, Location: value.Location, SeenAt: value.SeenAt, Verified: value.Verified})
 		current.Addresses = uniqueStrings(append(current.Addresses, value.Addresses...))
 		current.TXT = uniqueStrings(append(current.TXT, value.TXT...))
 		if current.Public == nil && value.Public != nil {
