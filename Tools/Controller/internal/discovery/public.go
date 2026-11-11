@@ -268,8 +268,20 @@ func trustedDiscoveryURL(candidate string, instance Instance) bool {
 	return false
 }
 
+func peerProduct(value string) bool {
+	if len(value) < 1 || len(value) > 48 || value[0] < 'a' || value[0] > 'z' {
+		return false
+	}
+	for _, b := range value {
+		if (b < 'a' || b > 'z') && (b < '0' || b > '9') && b != '-' {
+			return false
+		}
+	}
+	return true
+}
+
 func enrichInstance(ctx context.Context, instance Instance) Instance {
-	if instance.Product != "" && instance.Product != "pccontroller" {
+	if instance.generic || (instance.Product != "" && instance.Product != "pccontroller") {
 		for _, host := range append(append([]string(nil), instance.Addresses...), instance.Host) {
 			u := "http://" + net.JoinHostPort(host, strconv.Itoa(instance.Port)) + "/healthz"
 			requestCtx, cancel := context.WithTimeout(ctx, 650*time.Millisecond)
@@ -282,12 +294,25 @@ func enrichInstance(ctx context.Context, instance Instance) Instance {
 			response, err := client.Do(request)
 			if err == nil {
 				var health struct {
-					Service string `json:"service"`
-					Status  string `json:"status"`
+					ProductID string `json:"product_id"`
+					Product   string `json:"product"`
+					Discovery string `json:"discovery"`
+					Service   string `json:"service"`
+					Status    string `json:"status"`
 				}
 				err = json.NewDecoder(io.LimitReader(response.Body, 4096)).Decode(&health)
 				response.Body.Close()
-				if err == nil && response.StatusCode == 200 && health.Service == instance.Product && health.Status == "ok" {
+				identity := health.Service
+				if instance.generic {
+					identity = health.Product
+					if health.ProductID != "" {
+						identity = health.ProductID
+					}
+				}
+				if err == nil && response.StatusCode == 200 && health.Status == "ok" &&
+					(instance.Product == "" || identity == instance.Product) &&
+					(!instance.generic || (health.Discovery == peerClass && peerProduct(identity))) {
+					instance.Product = identity
 					instance.Verified = true
 					cancel()
 					return instance

@@ -4355,7 +4355,7 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 	mux.HandleFunc("/healthz", func(writer http.ResponseWriter, _ *http.Request) {
 		writeHTTPJSON(writer, http.StatusOK, map[string]any{
 			"ok":     true,
-			"status": "ok", "product": "pccontroller",
+			"status": "ok", "product": "pccontroller", "discovery": "lan-peer",
 			"service": productidentity.ServiceName(
 				service.hostConfig().UI.AppTitle,
 				"IPC",

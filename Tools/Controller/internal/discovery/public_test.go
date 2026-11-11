@@ -11,6 +11,34 @@ import (
 	"time"
 )
 
+func TestGenericDiscoveryHealthChecksProductAndClass(t *testing.T) {
+	for _, test := range []struct {
+		name, claim, class string
+		want               bool
+	}{
+		{"unlisted product", "", "lan-peer", true},
+		{"matching claim", "fixture-device", "lan-peer", true},
+		{"wrong claim", "another-device", "lan-peer", false},
+		{"missing discovery class", "", "", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/healthz" {
+					t.Errorf("unexpected verification route %s", r.URL.Path)
+				}
+				json.NewEncoder(w).Encode(map[string]string{"status": "ok", "discovery": test.class, "product": "fixture-device"})
+			}))
+			defer server.Close()
+			u, _ := url.Parse(server.URL)
+			port, _ := strconv.Atoi(u.Port())
+			peer := enrichInstance(context.Background(), Instance{generic: true, Product: test.claim, Host: u.Hostname(), Port: port})
+			if peer.Verified != test.want || (test.want && peer.Product != "fixture-device") {
+				t.Fatalf("unexpected verification %#v", peer)
+			}
+		})
+	}
+}
+
 func TestMergeInstancesDeduplicatesTransportSourcesByPublicIdentity(t *testing.T) {
 	info := &PublicInfo{Product: "PCController", InstanceID: "host-1", Hostname: "workshop", InstanceName: "Workshop"}
 	values := []Instance{

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/grandcat/zeroconf"
+	"golang.org/x/net/ipv4"
 
 	"pccontroller.local/controller/internal/productidentity"
 )
@@ -25,6 +26,8 @@ import (
 const (
 	MDNSService = "_pccontroller._tcp"
 	MDNSDomain  = "local."
+	peerService = "_lan-peer._tcp"
+	peerClass   = "lan-peer"
 	// SSDPType must exactly match the serviceType in /upnp/device.xml.
 	SSDPType               = "urn:pccontroller-org:service:Controller:1"
 	WSDiscoveryType        = "pc:PCControllerBridge"
@@ -35,6 +38,7 @@ const (
 )
 
 type Instance struct {
+	generic   bool
 	Product   string      `json:"product,omitempty"`
 	Verified  bool        `json:"verified"`
 	Protocol  string      `json:"protocol"`
@@ -97,6 +101,7 @@ type Advertiser struct {
 	mu       sync.RWMutex
 	closed   bool
 	mdns     *zeroconf.Server
+	peerMDNS *zeroconf.Server
 	txt      []string
 	active   []string
 	failures []TransportFailure
@@ -157,6 +162,16 @@ func AdvertiseWithOptions(
 		} else {
 			result.mdns = server
 			result.active = append(result.active, "dns-sd")
+		}
+		server, err = zeroconf.Register(name, peerService, MDNSDomain, port,
+			[]string{"product=pccontroller", "health=/healthz"}, nil)
+		if err != nil {
+			recordFailure("dns-sd-peer", err)
+		} else {
+			result.peerMDNS = server
+			if result.mdns == nil {
+				result.active = append(result.active, "dns-sd")
+			}
 		}
 	}
 	if options.SSDP {
@@ -285,10 +300,15 @@ func (advertiser *Advertiser) Close() {
 	advertiser.closed = true
 	mdns := advertiser.mdns
 	advertiser.mdns = nil
+	peerMDNS := advertiser.peerMDNS
+	advertiser.peerMDNS = nil
 	advertiser.mu.Unlock()
 	advertiser.cancel()
 	if mdns != nil {
 		mdns.Shutdown()
+	}
+	if peerMDNS != nil {
+		peerMDNS.Shutdown()
 	}
 	select {
 	case <-advertiser.done:
@@ -419,6 +439,9 @@ func DiscoverWithOptions(ctx context.Context, options Options) ([]Instance, erro
 			defer enrich.Done()
 			defer func() { <-enrichSlots }()
 			instance = enrichInstance(ctx, instance)
+			if instance.generic && !instance.Verified {
+				return
+			}
 			key := instance.Protocol + "|" + instance.USN + "|" + instance.Host +
 				"|" + strconv.Itoa(instance.Port)
 			mutex.Lock()
@@ -486,7 +509,7 @@ func browseMDNS(ctx context.Context, add func(Instance)) error {
 	var wait sync.WaitGroup
 	var first error
 	var mu sync.Mutex
-	for _, service := range []string{MDNSService, "_pealayer._tcp", "_digitalogic._tcp"} {
+	for _, service := range []string{MDNSService, "_pealayer._tcp", "_digitalogic._tcp", peerService} {
 		wait.Add(1)
 		go func(service string) {
 			defer wait.Done()
@@ -512,6 +535,18 @@ func browseMDNSService(ctx context.Context, service string, add func(Instance)) 
 	go func() {
 		defer close(done)
 		for entry := range entries {
+			product := map[string]string{MDNSService: "pccontroller", "_pealayer._tcp": "pealayer", "_digitalogic._tcp": "controller-mobile"}[service]
+			if service == peerService {
+				for _, field := range entry.Text {
+					if value, found := strings.CutPrefix(field, "product="); found {
+						product = value
+						break
+					}
+				}
+				if !peerProduct(product) {
+					continue
+				}
+			}
 			addresses := make([]string, 0, len(entry.AddrIPv4)+len(entry.AddrIPv6))
 			for _, address := range entry.AddrIPv4 {
 				addresses = append(addresses, address.String())
@@ -520,7 +555,7 @@ func browseMDNSService(ctx context.Context, service string, add func(Instance)) 
 				addresses = append(addresses, address.String())
 			}
 			add(Instance{
-				Product:  map[string]string{MDNSService: "pccontroller", "_pealayer._tcp": "pealayer", "_digitalogic._tcp": "controller-mobile"}[service],
+				Product: product, generic: service == peerService,
 				Protocol: "mdns", Name: entry.Instance,
 				Host: strings.TrimSuffix(entry.HostName, "."), Port: entry.Port,
 				Addresses: addresses, TXT: append([]string(nil), entry.Text...),
@@ -594,6 +629,8 @@ func respondSSDP(
 			"ST: " + SSDPType,
 			"USN: " + ssdpUSNWithText(name, port, advertiser.text()) + "::" + SSDPType,
 			"X-PCController-Name: " + sanitizeHeader(name),
+			"X-Digitalogic-Discovery: " + peerClass,
+			"X-Digitalogic-Product: pccontroller",
 		}
 		lines = append(lines, ssdpMetadataHeaders(advertiser.text())...)
 		lines = append(lines, "", "")
@@ -684,11 +721,54 @@ func sanitizeHeader(value string) string {
 }
 
 func discoverSSDP(ctx context.Context, add func(Instance)) error {
-	connection, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
+	type route struct {
+		iface net.Interface
+		ip    net.IP
+	}
+	var routes []route
+	interfaces, _ := net.Interfaces()
+	for _, iface := range interfaces {
+		if iface.Flags&(net.FlagUp|net.FlagMulticast) != net.FlagUp|net.FlagMulticast || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addresses, _ := iface.Addrs()
+		for _, addr := range addresses {
+			if network, ok := addr.(*net.IPNet); ok && network.IP.To4() != nil {
+				routes = append(routes, route{iface, network.IP})
+				break
+			}
+		}
+	}
+	if len(routes) == 0 {
+		return discoverSSDPOn(ctx, add, nil, net.IPv4zero)
+	}
+	results := make(chan error, len(routes))
+	for _, route := range routes {
+		go func() { results <- discoverSSDPOn(ctx, add, &route.iface, route.ip) }()
+	}
+	var failures []error
+	for range routes {
+		if err := <-results; err != nil {
+			failures = append(failures, err)
+		}
+	}
+	if len(failures) != len(routes) {
+		return nil
+	}
+	return errors.Join(failures...)
+}
+
+func discoverSSDPOn(ctx context.Context, add func(Instance), iface *net.Interface, ip net.IP) error {
+	connection, err := net.ListenUDP("udp4", &net.UDPAddr{IP: ip, Port: 0})
 	if err != nil {
 		return fmt.Errorf("listen for SSDP: %w", err)
 	}
 	defer connection.Close()
+	if iface != nil {
+		if err := ipv4.NewPacketConn(connection).SetMulticastInterface(iface); err != nil {
+			return fmt.Errorf("select SSDP interface %s: %w", iface.Name, err)
+		}
+	}
 	address, err := net.ResolveUDPAddr("udp4", ssdpAddress)
 	if err != nil {
 		return err
@@ -729,8 +809,20 @@ func parseSSDPResponse(data []byte, source *net.UDPAddr) (Instance, bool) {
 		return Instance{}, false
 	}
 	_ = request.Body.Close()
-	product := map[string]string{SSDPType: "pccontroller", "urn:digitalogic-ir:device:Pealayer:1": "pealayer", "urn:digitalogic-ir:device:ControllerMobile:1": "controller-mobile"}[request.Header.Get("ST")]
-	if product == "" {
+	if request.StatusCode != http.StatusOK {
+		return Instance{}, false
+	}
+	target := request.Header.Get("ST")
+	product := map[string]string{SSDPType: "pccontroller", "urn:digitalogic-ir:device:Pealayer:1": "pealayer", "urn:digitalogic-ir:device:ControllerMobile:1": "controller-mobile"}[target]
+	generic := request.Header.Get("X-Digitalogic-Discovery") == peerClass ||
+		target == "upnp:rootdevice" || target == "urn:schemas-upnp-org:device:Basic:1"
+	if generic && product == "" {
+		product = request.Header.Get("X-Digitalogic-Product")
+		if product != "" && !peerProduct(product) {
+			return Instance{}, false
+		}
+	}
+	if product == "" && !generic {
 		return Instance{}, false
 	}
 	host := ""
@@ -742,18 +834,24 @@ func parseSSDPResponse(data []byte, source *net.UDPAddr) (Instance, bool) {
 	port := 0
 	if location := request.Header.Get("Location"); location != "" {
 		if parsed, err := neturlParse(location); err == nil {
+			if generic && (source == nil || !source.IP.Equal(net.ParseIP(parsed.host))) {
+				return Instance{}, false
+			}
 			if host == "" {
 				host = parsed.host
 			}
 			port = parsed.port
 		}
 	}
+	if generic && (port < 1 || port > 65535) {
+		return Instance{}, false
+	}
 	name := request.Header.Get("X-PCController-Name")
 	if name == "" {
 		name = request.Header.Get("X-Digitalogic-Name")
 	}
 	return Instance{
-		Product:  product,
+		Product: product, generic: generic && product != "pccontroller",
 		Protocol: "ssdp", Name: name,
 		Host: host, Port: port, Addresses: addresses, Location: request.Header.Get("Location"), PublicURL: request.Header.Get("X-PCController-Public"),
 		USN: request.Header.Get("USN"),
