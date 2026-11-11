@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -833,10 +834,14 @@ func parseSSDPResponse(data []byte, source *net.UDPAddr) (Instance, bool) {
 	}
 	port := 0
 	if location := request.Header.Get("Location"); location != "" {
-		if parsed, err := neturlParse(location); err == nil {
-			if generic && (source == nil || !source.IP.Equal(net.ParseIP(parsed.host))) {
+		if generic {
+			uri, err := url.Parse(location)
+			if err != nil || uri.Scheme != "http" || uri.User != nil ||
+				source == nil || !source.IP.Equal(net.ParseIP(uri.Hostname())) {
 				return Instance{}, false
 			}
+		}
+		if parsed, err := neturlParse(location); err == nil {
 			if host == "" {
 				host = parsed.host
 			}

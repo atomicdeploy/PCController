@@ -283,6 +283,9 @@ func peerProduct(value string) bool {
 func enrichInstance(ctx context.Context, instance Instance) Instance {
 	if instance.generic || (instance.Product != "" && instance.Product != "pccontroller") {
 		for _, host := range append(append([]string(nil), instance.Addresses...), instance.Host) {
+			if instance.generic && (net.ParseIP(host) == nil || instance.Port < 1 || instance.Port > 65535) {
+				continue
+			}
 			u := "http://" + net.JoinHostPort(host, strconv.Itoa(instance.Port)) + "/healthz"
 			requestCtx, cancel := context.WithTimeout(ctx, 650*time.Millisecond)
 			request, err := http.NewRequestWithContext(requestCtx, http.MethodGet, u, nil)
