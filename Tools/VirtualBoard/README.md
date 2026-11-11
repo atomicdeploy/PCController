@@ -182,8 +182,9 @@ traverse production discovery/roles/conversion/smoothing and never masquerade as
 live physical measurements. TM1637 fixtures exercise the real ACK detection and
 reinitialization/recovery path without reset. Use controller protocol commands for
 relay, PWM, menu, settings, macro or display authoring—console shortcuts cannot
-bypass their dispatcher/safety owners. Generic I2C addresses other than the native
-PWM device at 0x41 NACK; missing/partial reads are not successful fabricated data.
+bypass their dispatcher/safety owners. The native bus models PWM at 0x41 and the
+write-only LCD backpack at 0x27. Other addresses NACK, and unsupported reads
+return their actual byte count with a failure status.
 
 ## Embedding and verification
 

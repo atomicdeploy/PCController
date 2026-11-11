@@ -209,7 +209,7 @@ func (presenter *LCDPresenter) RescanPhysical(ctx context.Context) (byte, error)
 	prompt := presenter.prompt
 	presenter.mu.RUnlock()
 	presenter.physical.reset()
-	if err := presenter.physical.render(ctx, lcdDeviceKey(snapshot), prompt[0], prompt[1]); err != nil {
+	if err := presenter.renderBackpack(ctx, snapshot, prompt[0], prompt[1]); err != nil {
 		presenter.ReportPhysicalError("HOST-controlled LCD", err)
 		return 0, err
 	}
@@ -451,7 +451,7 @@ func (presenter *LCDPresenter) send(version uint64, line1, line2 string) {
 		return
 	}
 	if snapshot.Hello.Capabilities&native.CapabilityI2CTransfer != 0 && presenter.physical != nil {
-		err = presenter.physical.render(ctx, device, line1, line2)
+		err = presenter.renderBackpack(ctx, snapshot, line1, line2)
 		presenter.ReportPhysicalError("HOST-controlled LCD", err)
 	}
 }
@@ -476,9 +476,28 @@ func (presenter *LCDPresenter) RenderPhysical(ctx context.Context, line1, line2 
 	if !snapshot.Connected || snapshot.Hello.Capabilities&native.CapabilityI2CTransfer == 0 {
 		return fmt.Errorf("connected firmware does not expose the HOST-controlled LCD transport")
 	}
-	err := presenter.physical.render(ctx, lcdDeviceKey(snapshot), line1, line2)
+	err := presenter.renderBackpack(ctx, snapshot, line1, line2)
 	presenter.ReportPhysicalError("HOST-controlled LCD", err)
 	return err
+}
+
+func (presenter *LCDPresenter) renderBackpack(ctx context.Context, snapshot Snapshot, line1, line2 string) error {
+	if err := presenter.physical.render(ctx, lcdDeviceKey(snapshot), line1, line2); err != nil {
+		return err
+	}
+	if snapshot.Hello.BuildFeatures&native.BuildFeatureNativeHAL != 0 {
+		// Publish the actual visible rows after the entire write, rather than
+		// presenting partial I²C batches or the host's intended text as readback.
+		_, err := presenter.runtime.requestAtGeneration(ctx, snapshot.ConnectionGeneration, native.OpFrontPanelGet, nil, native.OpFrontPanel)
+		if err == nil {
+			presenter.runtime.PublishStructuredEvent(Event{
+				Kind: "front_panel.changed", Stream: EventStreamState,
+				Text: "virtual LCD display read back",
+			})
+		}
+		return err
+	}
+	return nil
 }
 
 // PrepareDisconnect presents the fixed offline fallback while UART/I2C is

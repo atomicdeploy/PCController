@@ -25,6 +25,103 @@ auto epoch=std::chrono::steady_clock::now();
 std::array<uint8_t,256> pwmRegisters{};
 uint8_t address=0, cursor=0;
 bool firstByte=true;
+
+// Model the PCF8574 backpack and the two 40-character HD44780 DDRAM rows.
+// The firmware and host renderer both reach this model through I2C writes.
+class VirtualLcd {
+public:
+  VirtualLcd() { ddram.fill(' '); }
+
+  void write(uint8_t pins) {
+    const uint8_t previous = expander;
+    expander = pins;
+    if ((previous & 0x04) == 0 || (pins & 0x04) != 0 ||
+        (previous & 0x02) != 0) {
+      return;
+    }
+    const auto nibble = static_cast<uint8_t>(previous & 0xF0);
+    const bool data = (previous & 0x01) != 0;
+    if (!fourBit) {
+      if (!data) command(nibble);
+    } else if (!haveHighNibble) {
+      highNibble = nibble;
+      haveHighNibble = true;
+    } else {
+      haveHighNibble = false;
+      const auto value = static_cast<uint8_t>(highNibble | (nibble >> 4));
+      if (data) writeData(value);
+      else command(value);
+    }
+  }
+
+  bool copyDisplay(uint8_t *rows) const {
+    for (size_t row = 0; row < 2; ++row) {
+      for (size_t column = 0; column < 16; ++column) {
+        rows[row * 16 + column] = displayOn
+            ? ddram[row * rowWidth + (column + shift) % rowWidth] : ' ';
+      }
+    }
+    return (expander & 0x08) != 0;
+  }
+
+private:
+  static constexpr uint8_t rowWidth = 40;
+  std::array<uint8_t, rowWidth * 2> ddram{};
+  uint8_t expander = 0, highNibble = 0, cursorAddress = 0, shift = 0;
+  bool fourBit = false, haveHighNibble = false, displayOn = false;
+  bool increment = true, shiftOnWrite = false, cgram = false;
+
+  void moveCursor(bool forward) {
+    if (forward) {
+      if (cursorAddress == 0x27) cursorAddress = 0x40;
+      else if (cursorAddress == 0x67) cursorAddress = 0;
+      else cursorAddress = static_cast<uint8_t>((cursorAddress + 1) & 0x7F);
+    } else {
+      if (cursorAddress == 0x40) cursorAddress = 0x27;
+      else if (cursorAddress == 0) cursorAddress = 0x67;
+      else --cursorAddress;
+    }
+  }
+
+  void moveDisplay(bool left) {
+    shift = static_cast<uint8_t>((shift + (left ? 1 : rowWidth - 1)) % rowWidth);
+  }
+
+  void writeData(uint8_t value) {
+    if (cgram) return;  // Custom glyph bitmaps do not change visible DDRAM.
+    if (cursorAddress < rowWidth) ddram[cursorAddress] = value;
+    else if (cursorAddress >= 0x40 && cursorAddress < 0x40 + rowWidth) {
+      ddram[rowWidth + cursorAddress - 0x40] = value;
+    }
+    moveCursor(increment);
+    if (shiftOnWrite) moveDisplay(increment);
+  }
+
+  void command(uint8_t value) {
+    if ((value & 0x80) != 0) {
+      cgram = false;
+      cursorAddress = value & 0x7F;
+    } else if ((value & 0x40) != 0) {
+      cgram = true;
+    } else if ((value & 0x20) != 0) {
+      fourBit = (value & 0x10) == 0;
+    } else if ((value & 0x10) != 0) {
+      const bool right = (value & 0x04) != 0;
+      if ((value & 0x08) != 0) moveDisplay(!right);
+      else moveCursor(right);
+    } else if ((value & 0x08) != 0) {
+      displayOn = (value & 0x04) != 0;
+    } else if ((value & 0x04) != 0) {
+      increment = (value & 0x02) != 0;
+      shiftOnWrite = (value & 0x01) != 0;
+    } else if (value != 0) {
+      if (value == 1) ddram.fill(' ');
+      cursorAddress = shift = 0;
+      cgram = false;
+    }
+  }
+};
+VirtualLcd lcd;
 }
 uint64_t clockMicros() {
   return deterministic ? timeUs : static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now()-epoch).count());
@@ -37,20 +134,36 @@ void advance(uint64_t us) {
   else { const auto until=std::chrono::steady_clock::now()+std::chrono::microseconds(us); while(std::chrono::steady_clock::now()<until) {} }
 }
 [[noreturn]] void requestReset() { throw ResetRequested{}; }
-uint8_t i2cBegin(uint8_t a) { if(hostI2cEnabled()) return hostI2cBegin(a); address=a; firstByte=true; return a==0x41 && pwmPresent ? 0 : 2; }
+uint8_t i2cBegin(uint8_t a) {
+  address = a;
+  if (a == virtualLcdAddress) return 0;
+  if (hostI2cEnabled()) return hostI2cBegin(a);
+  firstByte = true;
+  return a == 0x41 && pwmPresent ? 0 : 2;
+}
 bool i2cWrite(uint8_t v) {
+  if (address == virtualLcdAddress) {
+    lcd.write(v);
+    return true;
+  }
   if(hostI2cEnabled()) return hostI2cWrite(v);
   if(address!=0x41 || !pwmPresent) return false;
   if(firstByte) { cursor=v; firstByte=false; } else pwmRegisters[cursor++]=v;
   return true;
 }
-uint8_t i2cEnd() { if(hostI2cEnabled()) return hostI2cEnd(); return address==0x41 && pwmPresent ? 0 : 2; }
+uint8_t i2cEnd() {
+  if (address == virtualLcdAddress) return 0;
+  if (hostI2cEnabled()) return hostI2cEnd();
+  return address == 0x41 && pwmPresent ? 0 : 2;
+}
 uint8_t i2cRead(uint8_t a,uint8_t *v,uint8_t n) {
+  if (a == virtualLcdAddress) return 0;  // Firmware uses the write-only backpack path.
   if(hostI2cEnabled()) return hostI2cRead(a,v,n);
   if(a!=0x41 || !pwmPresent) return 0;
   for(uint8_t i=0;i<n;++i) v[i]=pwmRegisters[cursor++];
   return n;
 }
+bool copyLcdDisplay(uint8_t *rows) { return lcd.copyDisplay(rows); }
 void showStrip(const uint8_t *v,uint16_t n) { strip.assign(v,v+n); }
 }
 

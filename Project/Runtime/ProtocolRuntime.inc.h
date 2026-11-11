@@ -102,6 +102,9 @@ void sendTelemetry(uint8_t sequence) {
   payload.pwmChannel = pwm.channel();
   payload.pwmValue = pwm.value();
   payload.lcdAddress = 0; // The host publishes its active LCD address.
+#if defined(PCCONTROLLER_NATIVE)
+  payload.lcdAddress = NativeHal::virtualLcdAddress;
+#endif
   payload.pwmErrors = pwm.errorCount();
   payload.framingErrors = appProtocol.framingErrors();
   payload.crcErrors = appProtocol.crcErrors();
@@ -185,7 +188,12 @@ void sendFrontPanel(uint8_t sequence) {
   // The compact change event stores the latest ACK-derived known/detected
   // flags in its brightness cache; reuse those reserved bits here.
   payload[8] = lastPushedSegmentBrightness & 0xC0U;
+#if defined(PCCONTROLLER_NATIVE)
+  payload[7] = NativeHal::virtualLcdAddress;
+  payload[8] |= NativeHal::copyLcdDisplay(payload + 9) ? 0x03U : 0x01U;
+#else
   memcpy(payload + 9, hostLcdText, sizeof(hostLcdText));
+#endif
   payload[41] =
       static_cast<uint8_t>(shiftRegisters.activeInputs() & 0x0FU);
   payload[42] = menuPage;
