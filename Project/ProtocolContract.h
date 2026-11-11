@@ -70,6 +70,7 @@ enum Opcode : uint8_t {
   AutomationRemove = 0x48,
   AutomationClear = 0x49,
   // 0x4A is reserved: Media cells reuse DISPLAY_TEXT scheduled segments instead of a parallel physical opcode.
+  VirtualKeyHold = 0x4B,
   Ack = 0x80,
   HelloResponse = 0x81,
   ErrorResponse = 0x82,

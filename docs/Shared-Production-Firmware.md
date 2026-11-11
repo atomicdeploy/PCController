@@ -99,3 +99,31 @@ migration. #227's Windows named-pipe/Unix-domain/pseudo-serial adapter matrix an
 multi-instance in-process ownership remain follow-up work; current multiple-board
 isolation is explicitly one process/image/port each. STM32 needs an exact chip and
 pin/peripheral profile, not a generic family claim.
+## Virtual Board client readback
+
+Virtual Board uses the normal PCController endpoint. Subscribe to `state`
+and `events` on the WebSocket to receive the initial `controller.snapshot`,
+changed display frames, buzzer notes, relay edges, and motion transitions.
+
+| Surface | JSON-RPC and observations |
+| --- | --- |
+| Seven-segment display | `controller.front_panel` with `{}` reads `raw_segments`, `brightness`, and TM1637 detection from firmware. `front_panel.segment` updates the changed bytes. To present text, call `controller.display.send` with `{"target":"segments","text":"1234","duration_ms":1500}`. |
+| Front-panel keys | Use `controller.opcode.exchange` with `{"opcode":75}` to probe for native key holds. A payload of `00bc02` holds Previous for 700 ms. Byte 0 selects Previous, Next, Decrease, or Increase (0–3). The next two bytes are the little-endian lease in milliseconds (100–2000, or 0 to release). Repeat the same payload before expiry to renew the hold. Firmware clears the input on expiry or Virtual Board UART disconnect. `controller.front_panel.pressed_keys` reports the logical input mask, and `controller.event` reports kind `key` with gesture 5 for Down or 6 for Up. |
+| Buzzer and melodies | `controller.buzzer.tone` takes `frequency_hz` and `duration_ms`. `controller.melodies.list` gives the current catalog. `controller.command.execute` accepts `{"command":"melody play NAME"}` and `{"command":"melody stop"}`. The snapshot exposes the host operation in `outputs.melody_id` and `outputs.melody_name`. The board publishes `buzzer.note` for the note or pause it starts. The host mirror policy and runtime are available from `controller.integrations.local.get`. |
+| Seat motion | `controller.snapshot` exposes `motion.left.applied` and `motion.right.applied` with `up`, `down`, or `stop`. On connected native firmware with relay feedback, `motion.simulation` adds `left_position`, `right_position` (0 fully down, 1 fully up), `full_travel_ms`, and the ISO timestamp `sampled_at`. |
+
+The host starts each simulated seat side at mid-travel for a new connection and
+integrates only the applied relay state. A stopped or interlocked side keeps its
+position. Clients can interpolate from the latest sample at one full stroke per
+`full_travel_ms`, then replace the estimate when they receive a newer snapshot.
+The state subscription pushes changed samples every 100 ms during travel,
+including the clamped end position. An applied Stop also pushes a snapshot.
+Set `connection.virtual_seat_travel_ms` to 100–60000 in the host configuration
+or use `controller.command.execute` with
+`{"command":"config set connection.virtual_seat_travel_ms 4500"}`. Omit the
+setting or use 0 for the default of 3000 ms.
+
+Older firmware can still accept explicit gestures through opcode 61 with
+`0005` for Previous Down and `0006` for Previous Up. Door and RF simulation
+fixtures are local Virtual Board console inputs, `door open|closed` and
+`rf CODE BITS PROTOCOL PULSE_US`.

@@ -49,6 +49,7 @@
       {"cpp":"AutomationPut","go":"OpAutomationPut","value":71,"wireName":"AUTOMATION_PUT"},
       {"cpp":"AutomationRemove","go":"OpAutomationRemove","value":72,"wireName":"AUTOMATION_REMOVE"},
       {"cpp":"AutomationClear","go":"OpAutomationClear","value":73,"wireName":"AUTOMATION_CLEAR"},
+      {"cpp":"VirtualKeyHold","go":"OpVirtualKeyHold","value":75,"wireName":"VIRTUAL_KEY_HOLD"},
       {"cpp":"Ack","go":"OpACK","value":128,"wireName":"ACK"},
       {"cpp":"HelloResponse","go":"OpHelloResp","value":129,"wireName":"HELLO"},
       {"cpp":"ErrorResponse","go":"OpError","value":130,"wireName":"ERROR"},

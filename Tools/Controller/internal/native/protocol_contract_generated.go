@@ -63,6 +63,7 @@ const (
 	OpAutomationPut      byte = 0x47
 	OpAutomationRemove   byte = 0x48
 	OpAutomationClear    byte = 0x49
+	OpVirtualKeyHold     byte = 0x4B
 	OpACK                byte = 0x80
 	OpHelloResp          byte = 0x81
 	OpError              byte = 0x82
@@ -145,6 +146,7 @@ var opcodeNames = map[byte]string{
 	OpAutomationPut:      "AUTOMATION_PUT",
 	OpAutomationRemove:   "AUTOMATION_REMOVE",
 	OpAutomationClear:    "AUTOMATION_CLEAR",
+	OpVirtualKeyHold:     "VIRTUAL_KEY_HOLD",
 	OpACK:                "ACK",
 	OpHelloResp:          "HELLO",
 	OpError:              "ERROR",

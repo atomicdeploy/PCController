@@ -153,6 +153,8 @@ func emergencyStopAllows(opcode byte, payload []byte) bool {
 		return len(payload) == 2 && payload[1] == 0
 	case native.OpRelaySide:
 		return len(payload) == 2 && payload[1] == 0
+	case native.OpVirtualKeyHold:
+		return len(payload) == 0 || (len(payload) == 3 && payload[0] <= native.MenuIncrease && binary.LittleEndian.Uint16(payload[1:]) == 0)
 	case native.OpRelayTest:
 		return len(payload) == 2 && binary.LittleEndian.Uint16(payload) == 0
 	case native.OpPWMSet:

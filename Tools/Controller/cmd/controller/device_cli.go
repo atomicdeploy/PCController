@@ -617,6 +617,7 @@ func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 			return err
 		}
 		client := controllerapi.New(clientOptions)
+		client.BindHostConfigStore(store)
 		if err := client.ConfigureHistory(configuredHistoryOptions(store)); err != nil {
 			return err
 		}
@@ -626,14 +627,12 @@ func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 		defer sessionSnapshot.logOnExit(stderr)
 		ctx, cancel := signalContext()
 		defer cancel()
-		go store.Watch(
-			ctx,
-			appconfig.DefaultWatchInterval,
-			func(value appconfig.Config) {
+		go func() {
+			for value := range store.SubscribeRuntime(ctx) {
 				clientOptions, optionsErr := apiOptions(value, connection)
 				if optionsErr != nil {
 					fmt.Fprintln(stderr, "configuration reload rejected:", optionsErr)
-					return
+					continue
 				}
 				client.ApplyHostOptions(clientOptions)
 				if historyErr := client.ConfigureHistory(
@@ -642,11 +641,11 @@ func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 					fmt.Fprintln(stderr, "history configuration rejected:", historyErr)
 				}
 				fmt.Fprintln(stderr, "configuration reloaded:", store.Path())
-			},
-			func(err error) {
-				fmt.Fprintln(stderr, "configuration reload rejected:", err)
-			},
-		)
+			}
+		}()
+		go store.Watch(ctx, appconfig.DefaultWatchInterval, nil, func(err error) {
+			fmt.Fprintln(stderr, "configuration reload rejected:", err)
+		})
 		if !*noConnect {
 			connectContext, connectCancel := context.WithTimeout(ctx, 15*time.Second)
 			err := client.Connect(connectContext)

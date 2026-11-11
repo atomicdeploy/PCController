@@ -5448,7 +5448,7 @@ func eventUpdatesClientSnapshot(event controller.Event) bool {
 	switch kind {
 	case "door", "bluetooth", "pwm", "relay", "hot", "reset", "identity",
 		"front_panel.changed", "settings.changed", "illumination.changed", "peripherals.changed", "programming.lifecycle",
-		"emergency_stop", "output", "motion.changed", "melodies.changed", "config", "port.process.changed":
+		"emergency_stop", "output", "motion.changed", "motion.simulation", "melodies.changed", "config", "port.process.changed":
 		return true
 	}
 	if kind == "macro" {

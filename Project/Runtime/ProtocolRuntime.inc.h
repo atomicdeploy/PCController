@@ -870,6 +870,23 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame,
       appEvents.key(payload[0], payload[1], InputEventSource::Host);
       goto acknowledged;
 
+#if defined(PCCONTROLLER_NATIVE)
+    case VirtualKeyHold: {
+      if (length == 0) {
+        goto acknowledged;  // Read-only support probe for older native builds.
+      }
+      if (length != 3 || payload[0] > MENU_INCREASE) {
+        goto badPayload;
+      }
+      const uint16_t leaseMs = readU16(payload + 1);
+      if (leaseMs != 0 && (leaseMs < 100 || leaseMs > 2000)) {
+        goto badPayload;
+      }
+      setVirtualKeyHold(payload[0], leaseMs, frameNow);
+      goto acknowledged;
+    }
+#endif
+
     case MenuSetPage: {
       const uint8_t page = payload[0] & 0x7FU;
       if (length != 1 || page >= PAGE_COUNT ||
@@ -1003,6 +1020,9 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame,
       goto acknowledged;
 
     case RelayAllOff:
+#if defined(PCCONTROLLER_NATIVE)
+      clearVirtualKeyHolds();
+#endif
       relays.allOff(frameNow);
       goto acknowledged;
 

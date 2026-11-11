@@ -29,6 +29,7 @@ type Options struct {
 	ResetOnReconnect      bool
 	ReconnectInitialDelay time.Duration
 	ReconnectMaximumDelay time.Duration
+	VirtualSeatTravel     time.Duration
 }
 
 type Snapshot struct {
@@ -96,8 +97,9 @@ type MotionSideState struct {
 // MotionSnapshot is the coordinator-owned semantic state for both interlocked
 // motion sides. Raw electrical truth remains available in Status.ActiveRelays.
 type MotionSnapshot struct {
-	Left  MotionSideState `json:"left"`
-	Right MotionSideState `json:"right"`
+	Left       MotionSideState           `json:"left"`
+	Right      MotionSideState           `json:"right"`
+	Simulation *MotionSimulationSnapshot `json:"simulation,omitempty"`
 }
 
 type PortProcessSnapshot struct {
@@ -276,6 +278,8 @@ type Runtime struct {
 	pwmRecallOptionsMu     sync.RWMutex
 	pwmRecallOptions       func() CommandOptions
 	motion                 MotionSnapshot
+	virtualSeats           virtualSeatPositions
+	virtualSeatTimer       *time.Timer
 	motionRevision         uint64
 	motionIntentToken      [2]uint64
 	motionIntentPending    [2]bool
@@ -599,6 +603,9 @@ func normalizedOptions(options Options) Options {
 	if options.ReconnectMaximumDelay < options.ReconnectInitialDelay {
 		options.ReconnectMaximumDelay = options.ReconnectInitialDelay
 	}
+	if options.VirtualSeatTravel < 100*time.Millisecond || options.VirtualSeatTravel > time.Minute {
+		options.VirtualSeatTravel = 3 * time.Second
+	}
 	return options
 }
 
@@ -874,6 +881,9 @@ func (runtime *Runtime) snapshot(includeCatalog bool) Snapshot {
 	if runtime.havePWMValues {
 		values := runtime.pwmValues
 		snapshot.PWMValues = &values
+	}
+	if snapshot.Connected && runtime.virtualSeats.valid {
+		snapshot.Motion.Simulation = runtime.virtualSeats.snapshot(time.Now(), runtime.options.VirtualSeatTravel)
 	}
 	if runtime.session != nil && runtime.pwmRecallGeneration == runtime.generation {
 		snapshot.PWMRecall = runtime.pwmRecall
@@ -1235,6 +1245,11 @@ func (runtime *Runtime) clearPeerStateLocked() {
 
 func (runtime *Runtime) clearMotionLocked() {
 	runtime.motion = MotionSnapshot{}
+	if runtime.virtualSeatTimer != nil {
+		runtime.virtualSeatTimer.Stop()
+		runtime.virtualSeatTimer = nil
+	}
+	runtime.virtualSeats = virtualSeatPositions{}
 	for side := range runtime.motionIntentPending {
 		runtime.motionIntentToken[side]++
 		runtime.motionIntentPending[side] = false
@@ -1295,20 +1310,26 @@ func (runtime *Runtime) ApplyOptions(options Options) bool {
 	previous.Filter.Preferred = options.Filter.Preferred
 	previous.ReconnectInitialDelay = options.ReconnectInitialDelay
 	previous.ReconnectMaximumDelay = options.ReconnectMaximumDelay
+	previous.VirtualSeatTravel = options.VirtualSeatTravel
 	if previous == options {
 		runtime.mu.Lock()
 		runtime.options.ResetOnReconnect = options.ResetOnReconnect
 		runtime.options.Filter.Preferred = options.Filter.Preferred
 		runtime.options.ReconnectInitialDelay = options.ReconnectInitialDelay
 		runtime.options.ReconnectMaximumDelay = options.ReconnectMaximumDelay
+		if runtime.options.VirtualSeatTravel != options.VirtualSeatTravel {
+			runtime.virtualSeats.advance(time.Now(), runtime.options.VirtualSeatTravel)
+			runtime.options.VirtualSeatTravel = options.VirtualSeatTravel
+		}
 		runtime.mu.Unlock()
 		runtime.publish(
 			"config",
 			fmt.Sprintf(
-				"connection retry policy applied without reconnect: reset_on_reconnect=%t initial=%s maximum=%s",
+				"runtime configuration applied without reconnect: reset_on_reconnect=%t initial=%s maximum=%s virtual_seat_travel=%s",
 				options.ResetOnReconnect,
 				options.ReconnectInitialDelay,
 				options.ReconnectMaximumDelay,
+				options.VirtualSeatTravel,
 			),
 			native.Frame{},
 		)
@@ -2169,6 +2190,11 @@ func (runtime *Runtime) rollbackMotionIntent(side byte, token uint64) {
 // visible through the board's break-before-make edge and settles only when the
 // requested direction is physically applied (or the bounded intent expires).
 func (runtime *Runtime) reconcileMotionLocked(mask byte, now time.Time) {
+	if runtime.hello.BuildFeatures&native.BuildFeatureNativeHAL != 0 &&
+		runtime.hello.Capabilities&native.CapabilityRelayMotion != 0 {
+		runtime.virtualSeats.observe(mask, now, runtime.options.VirtualSeatTravel)
+		runtime.scheduleVirtualSeatSampleLocked()
+	}
 	for side := byte(0); side < 2; side++ {
 		state := runtime.motionSideLocked(side)
 		before := *state

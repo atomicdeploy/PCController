@@ -38,6 +38,9 @@ func TestEmergencyStopOpcodeGateAllowsOnlyReadbackAndReleaseOperations(t *testin
 		{"program idle", native.OpProgramState, []byte{native.ProgramStateIdle}, true},
 		{"menu action", native.OpMenuAction, []byte{native.MenuIncrease}, false},
 		{"remote gesture", native.OpRemoteKeyGesture, []byte{1, 1}, false},
+		{"virtual key probe", native.OpVirtualKeyHold, nil, true},
+		{"virtual key hold", native.OpVirtualKeyHold, []byte{1, 188, 2}, false},
+		{"virtual key release", native.OpVirtualKeyHold, []byte{1, 0, 0}, true},
 		{"status readback", native.OpGetStatus, nil, true},
 	}
 	for _, test := range tests {

@@ -86,8 +86,8 @@ function stop() {
   for (const child of children) if (child.exitCode === null && !child.killed) child.kill()
 }
 process.on('SIGINT', stop); process.on('SIGTERM', stop)
-function start(binary, args) {
-  const child = spawn(binary, args, { windowsHide: true, stdio: ['ignore', 'inherit', 'inherit'] })
+function start(binary, args, env = process.env) {
+  const child = spawn(binary, args, { env, windowsHide: true, stdio: ['ignore', 'inherit', 'inherit'] })
   children.push(child)
   child.on('error', error => { console.error(error.message); process.exitCode = 1; stop() })
   child.on('exit', code => { if (!shuttingDown) { process.exitCode = code || 1; stop() } })
@@ -106,7 +106,8 @@ try {
   const sensorArgs = Object.entries(options).filter(([key,value]) => key.startsWith('sensor-') && value).flatMap(([key,value]) => ['--'+key,value])
   start(options.board, ['--bind','127.0.0.1','--port',String(boardPort),'--memory','--no-stdin','--quiet','--speaker',options.speaker,'--i2c',options.i2c,...sensorArgs])
   const ready = await connect(boardPort); ready.destroy()
-  start(options.controller, ['--config',configPath,'ipc','serve','--listen',`127.0.0.1:${hostPort}`,'--port',`tcp://127.0.0.1:${boardPort}`,'--no-connect'])
+  start(options.controller, ['--config',configPath,'ipc','serve','--listen',`127.0.0.1:${hostPort}`,'--port',`tcp://127.0.0.1:${boardPort}`,'--no-connect'],
+    {...process.env, PCCONTROLLER_DATA_DIR:join(state,'host-data')})
   socket = await connect(hostPort)
   const pending = new Map(); let nextId = 1
   const lines = createInterface({ input:socket })

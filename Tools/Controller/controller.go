@@ -251,6 +251,7 @@ type Options struct {
 	ResetOnReconnect      bool                   `json:"reset_on_reconnect,omitempty"`
 	ReconnectInitialDelay time.Duration          `json:"reconnect_initial_delay,omitempty"`
 	ReconnectMaximumDelay time.Duration          `json:"reconnect_maximum_delay,omitempty"`
+	VirtualSeatTravel     time.Duration          `json:"virtual_seat_travel,omitempty"`
 	ProjectPath           string                 `json:"project_path,omitempty"`
 	FQBN                  string                 `json:"fqbn,omitempty"`
 	FirmwareFeatures      []string               `json:"firmware_features,omitempty"`
@@ -630,6 +631,7 @@ type Client struct {
 	stripEffects       []appconfig.StripEffect
 	outputs            *control.OutputScheduler
 	hostMu             sync.RWMutex
+	hostConfigStore    *appconfig.Store
 	scripts            map[string]string
 	automations        []appconfig.Automation
 	safety             appconfig.Safety
@@ -689,6 +691,7 @@ func New(options Options) *Client {
 		ResetOnReconnect:      options.ResetOnReconnect,
 		ReconnectInitialDelay: options.ReconnectInitialDelay,
 		ReconnectMaximumDelay: options.ReconnectMaximumDelay,
+		VirtualSeatTravel:     options.VirtualSeatTravel,
 	})
 	client := &Client{
 		runtime:      runtime,
@@ -806,6 +809,7 @@ func (client *Client) ApplyHostOptions(options Options) bool {
 		ResetOnReconnect:      options.ResetOnReconnect,
 		ReconnectInitialDelay: options.ReconnectInitialDelay,
 		ReconnectMaximumDelay: options.ReconnectMaximumDelay,
+		VirtualSeatTravel:     options.VirtualSeatTravel,
 	})
 	client.SetMacros(options.Macros)
 	client.SetOutputDefinitions(options.Melodies, options.StatusEffects)
@@ -877,6 +881,10 @@ func cloneOSPolicyOrDefault(value hostos.Policy) hostos.Policy {
 
 func (client *Client) currentHostConfig() appconfig.Config {
 	client.hostMu.RLock()
+	if store := client.hostConfigStore; store != nil {
+		client.hostMu.RUnlock()
+		return store.Current()
+	}
 	scripts := cloneStringMap(client.scripts)
 	automations := cloneAppAutomations(client.automations)
 	safety := client.safety
@@ -908,6 +916,13 @@ func (client *Client) updateHostConfig(
 	if change == nil {
 		return errors.New("host configuration update callback is nil")
 	}
+	client.hostMu.RLock()
+	store := client.hostConfigStore
+	client.hostMu.RUnlock()
+	if store != nil {
+		_, err := store.Update(change)
+		return err
+	}
 	config := client.currentHostConfig()
 	if err := change(&config); err != nil {
 		return err
@@ -938,6 +953,14 @@ func (client *Client) updateHostConfig(
 	client.commandOptions.FirmwareFeaturesError = nil
 	client.optionsMu.Unlock()
 	return nil
+}
+
+// BindHostConfigStore makes commands and typed RPC authoring share the same
+// persisted configuration in the headless coordinator.
+func (client *Client) BindHostConfigStore(store *appconfig.Store) {
+	client.hostMu.Lock()
+	client.hostConfigStore = store
+	client.hostMu.Unlock()
 }
 
 func (client *Client) currentCommandOptions() control.CommandOptions {

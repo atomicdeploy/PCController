@@ -22,6 +22,8 @@ func segmentIntentCommand(opcode byte, payload []byte) bool {
 	switch opcode {
 	case native.OpMenuSetPage, native.OpMenuAction, native.OpRemoteKeyGesture:
 		return true
+	case native.OpVirtualKeyHold:
+		return len(payload) == 3
 	case native.OpDisplayText:
 		return len(payload) != 0 && payload[0] != 1 // LCD-only is independent
 	}

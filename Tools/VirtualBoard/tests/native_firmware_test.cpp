@@ -109,6 +109,27 @@ int main() {
       require((board.outputSnapshot().relayMask & 0x0A) == 0,
               "KEY release must still disable motion");
     }
+    request(wire::MenuSetPage, 46, {0x89});
+    receive(1000000);
+    request(wire::VirtualKeyHold, 47, {0, 0x20, 0x03}); // Previous, 800 ms
+    for (unsigned tick = 0; tick < 60; ++tick) receive(10000);
+    require((board.outputSnapshot().relayMask & 2) != 0,
+            "virtual key hold must traverse the physical key path");
+    request(wire::VirtualKeyHold, 48, {0, 0x20, 0x03});
+    for (unsigned tick = 0; tick < 45; ++tick) receive(10000);
+    require((board.outputSnapshot().relayMask & 2) != 0,
+            "virtual key renewal must keep the key held");
+    for (unsigned tick = 0; tick < 40; ++tick) receive(10000);
+    require((board.outputSnapshot().relayMask & 2) == 0,
+            "expired virtual key must release momentary motion");
+    request(wire::VirtualKeyHold, 49, {0, 0x20, 0x03});
+    for (unsigned tick = 0; tick < 8; ++tick) receive(10000);
+    require((board.outputSnapshot().relayMask & 2) != 0,
+            "second virtual key hold must enable momentary motion");
+    board.disconnected();
+    for (unsigned tick = 0; tick < 8; ++tick) receive(10000);
+    require((board.outputSnapshot().relayMask & 2) == 0,
+            "disconnect must release momentary motion before lease expiry");
     request(wire::MenuSetPage, 44, {0x80});
     request(wire::RadioLearnStart,27,{0,0});
     board.console("rf 0xABCDEF 24 1 350"); receive();
