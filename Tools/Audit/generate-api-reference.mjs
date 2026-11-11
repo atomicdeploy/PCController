@@ -310,7 +310,7 @@ const methodOverrides = {
 };
 
 const nonIdempotentMethods = new Set([
-  "controller.buzzer.tone",
+  "controller.buzzer.tone", "controller.front_panel.key",
   "controller.osd.show",
   "controller.reset.lines", "controller.reset", "controller.port.reset", "controller.command.execute",
 	"controller.audio.play",
