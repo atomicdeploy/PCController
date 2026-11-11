@@ -404,6 +404,26 @@ const rpcTypes={
   'controller.os.power':httpTypes['/api/os/power'],
 };
 export function rpcWireDocumentation(name,shapes) {
+  if (name === 'controller.front_panel.key') return {
+    request_fields: {
+      type:'object',required:['key','hold_ms'],additionalProperties:false,
+      properties:{
+        key:{type:'integer',minimum:1,maximum:4,description:'Previous, Next, Decrease or Increase, in order.'},
+        hold_ms:{oneOf:[{const:0},{type:'integer',minimum:100,maximum:2000}],description:'Lease duration from firmware receipt. Zero explicitly releases the key.'},
+        expected_connection_generation:{type:'integer',minimum:1,description:'Optional generation from the selected board snapshot.'},
+      },
+    },
+    request_template:{key:1,hold_ms:700},
+    result_schema:{
+      type:'object',required:['accepted','key','hold_ms','connection_generation'],
+      properties:{
+        accepted:{const:true,description:'Firmware acknowledged setting or releasing the leased input.'},
+        key:{type:'integer',minimum:1,maximum:4},
+        hold_ms:{type:'integer'},
+        connection_generation:{type:'integer',minimum:1},
+      },
+    },
+  };
   const names=rpcTypes[name];if(!names)return {};
   const read=key=>{if(!key)return undefined;const schema=shapes.$types[key];if(!schema||!Object.keys(schema).length)throw Error('Missing RPC Go type: '+key);return explainFields(structuredClone(schema));};
   const result={};
@@ -555,6 +575,11 @@ export function rpcMeaning(name, description) {
   }
   const extra=rpcDescriptions[name];
   if(extra) description=extra;
+  if (name === 'controller.front_panel.key') return {
+    title:'Hold or release a Virtual Board key', summary:'Hold or release a Virtual Board key', description,
+    use_case:'Send a bounded hold on pointer-down and release it on pointer-up or loss of focus.',
+    result_description:'The receipt reports the lease acknowledged by firmware. Observe controller.event or controller.front_panel for the resulting key state.',
+  };
   if (name.startsWith('controller.mqtt.')) return {
     title:methodTitle(name), summary:methodTitle(name), description,
     use_case:name.endsWith('.set')?'Enable a unique broker topic in read-only mode before granting board command access.':'Confirm the configured broker session before relying on retained telemetry.',
@@ -625,6 +650,7 @@ const rpcDescriptions = {
   'controller.discovery.scan':'Scan for LAN application peers using configured discovery mechanisms. Advertisements identify candidates only; verify the endpoint before selecting it and never acquire board authority just to discover it.',
   'controller.event.latest':'Read the latest retained controller activity event without waiting for a new one. An event ID belongs to this host history; it is not a board protocol sequence.',
   'controller.front_panel':'Read the physical front-panel presentation and button/display state. This is board-facing state, not the desktop GUI layout.',
+  'controller.front_panel.key':'Set, renew, or release a bounded Virtual Board key hold. Use key 1–4 and hold_ms 100–2000, or 0 to release. Optionally fence the request with expected_connection_generation from the snapshot. Firmware clears the input when the lease expires or its transport disconnects.',
   'controller.history.status':'Read recording/history availability and retention state. This does not start recording or replay any historical command.',
   'controller.history.timeline':'Read a bounded retained event timeline for inspection. Historical events are evidence, not commands to repeat on current hardware.',
   'controller.host_menu.content.push':'Publish content for a host-presented front-panel page. It updates display content rather than adding a firmware menu page or changing wiring.',

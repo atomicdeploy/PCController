@@ -166,7 +166,9 @@ func newRuntime(
 	connection *connectionFlags,
 	store *appconfig.Store,
 ) *control.Runtime {
-	runtime := control.New(runtimeOptions(connection))
+	options := runtimeOptions(connection)
+	options.VirtualSeatTravel = time.Duration(store.Current().Connection.VirtualSeatTravelMS) * time.Millisecond
+	runtime := control.New(options)
 	if err := configureRuntimeHistory(runtime, store); err != nil {
 		runtime.PublishHostEvent("error", "history configuration: "+err.Error())
 	}
@@ -279,6 +281,7 @@ func (options *connectionFlags) fromConfig(
 		ResetOnReconnect:      resetOnReconnect,
 		ReconnectInitialDelay: reconnectInitial,
 		ReconnectMaximumDelay: reconnectMaximum,
+		VirtualSeatTravel:     time.Duration(config.VirtualSeatTravelMS) * time.Millisecond,
 	}
 }
 
@@ -508,6 +511,7 @@ func apiOptions(
 		ResetOnReconnect:      resolved.ResetOnReconnect,
 		ReconnectInitialDelay: resolved.ReconnectInitialDelay,
 		ReconnectMaximumDelay: resolved.ReconnectMaximumDelay,
+		VirtualSeatTravel:     resolved.VirtualSeatTravel,
 		PreferredDevice:       publicPreferredDevice(config.Connection.LastDevice),
 		ProjectPath:           configuredProject(config, findProjectRoot()),
 		FQBN:                  configuredFQBN(config),

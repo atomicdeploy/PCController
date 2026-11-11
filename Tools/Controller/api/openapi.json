@@ -976,7 +976,8 @@
                     "motion": {
                       "properties": {
                         "left": {},
-                        "right": {}
+                        "right": {},
+                        "simulation": {}
                       },
                       "type": "object",
                       "x-go-type": "control.MotionSnapshot"
@@ -16538,6 +16539,7 @@
               "controller.exit",
               "controller.firmware.build",
               "controller.front_panel",
+              "controller.front_panel.key",
               "controller.front-panel",
               "controller.history.status",
               "controller.history.timeline",

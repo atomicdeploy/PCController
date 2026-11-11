@@ -1286,6 +1286,7 @@
             "controller.exit",
             "controller.firmware.build",
             "controller.front_panel",
+            "controller.front_panel.key",
             "controller.front-panel",
             "controller.history.status",
             "controller.history.timeline",
@@ -6200,6 +6201,80 @@
       "idempotency": "safe",
       "title": "Read front panel",
       "description": "Read the physical front-panel presentation and button/display state. This is board-facing state, not the desktop GUI layout."
+    },
+    "controller.front_panel.key": {
+      "capability": "board_commands",
+      "summary": "Hold or release a Virtual Board key",
+      "idempotency": "non-idempotent",
+      "title": "Hold or release a Virtual Board key",
+      "description": "Set, renew, or release a bounded Virtual Board key hold. Use key 1–4 and hold_ms 100–2000, or 0 to release. Optionally fence the request with expected_connection_generation from the snapshot. Firmware clears the input when the lease expires or its transport disconnects.",
+      "use_case": "Send a bounded hold on pointer-down and release it on pointer-up or loss of focus.",
+      "result_description": "The receipt reports the lease acknowledged by firmware. Observe controller.event or controller.front_panel for the resulting key state.",
+      "request_fields": {
+        "type": "object",
+        "required": [
+          "key",
+          "hold_ms"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4,
+            "description": "Previous, Next, Decrease or Increase, in order."
+          },
+          "hold_ms": {
+            "oneOf": [
+              {
+                "const": 0
+              },
+              {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 2000
+              }
+            ],
+            "description": "Lease duration from firmware receipt. Zero explicitly releases the key."
+          },
+          "expected_connection_generation": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Optional generation from the selected board snapshot."
+          }
+        }
+      },
+      "request_template": {
+        "key": 1,
+        "hold_ms": 700
+      },
+      "result_schema": {
+        "type": "object",
+        "required": [
+          "accepted",
+          "key",
+          "hold_ms",
+          "connection_generation"
+        ],
+        "properties": {
+          "accepted": {
+            "const": true,
+            "description": "Firmware acknowledged setting or releasing the leased input."
+          },
+          "key": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4
+          },
+          "hold_ms": {
+            "type": "integer"
+          },
+          "connection_generation": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
     },
     "controller.front-panel": {
       "capability": "read",

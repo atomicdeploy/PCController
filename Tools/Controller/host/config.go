@@ -32,6 +32,7 @@ func controllerOptionsFromConfig(
 		ResetOnReconnect:      config.Connection.ResetOnReconnect,
 		ReconnectInitialDelay: time.Duration(config.Connection.ReconnectInitialMS) * time.Millisecond,
 		ReconnectMaximumDelay: time.Duration(config.Connection.ReconnectMaximumMS) * time.Millisecond,
+		VirtualSeatTravel:     time.Duration(config.Connection.VirtualSeatTravelMS) * time.Millisecond,
 		ProjectPath:           project,
 		FQBN:                  config.Programming.FQBN,
 		FirmwareFeatures:      features,

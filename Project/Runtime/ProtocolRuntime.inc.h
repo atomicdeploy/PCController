@@ -66,7 +66,7 @@ void sendHello(uint8_t sequence) {
   payload.buildFeatures = static_cast<uint8_t>((1U << 6) |
       (PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS ? (1U << 5) : 0));
 #if defined(PCCONTROLLER_NATIVE)
-  payload.buildFeatures |= (1U << 7); // Native HAL: mapped/fixture inputs, not physical sensors.
+  payload.buildFeatures |= (1U << 7) | (1U << 0); // Native HAL and bounded virtual key holds.
 #endif
 #if defined(__AVR__) && !defined(__AVR_ATmega2560__)
   // Copy the two contiguous, host-patchable identity fields in one flash
@@ -870,6 +870,23 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame,
       appEvents.key(payload[0], payload[1], InputEventSource::Host);
       goto acknowledged;
 
+#if defined(PCCONTROLLER_NATIVE)
+    case VirtualKeyHold: {
+      if (length == 0) {
+        goto acknowledged;  // Read-only support probe for older native builds.
+      }
+      if (length != 3 || payload[0] > MENU_INCREASE) {
+        goto badPayload;
+      }
+      const uint16_t leaseMs = readU16(payload + 1);
+      if (leaseMs != 0 && (leaseMs < 100 || leaseMs > 2000)) {
+        goto badPayload;
+      }
+      setVirtualKeyHold(payload[0], leaseMs, frameNow);
+      goto acknowledged;
+    }
+#endif
+
     case MenuSetPage: {
       const uint8_t page = payload[0] & 0x7FU;
       if (length != 1 || page >= PAGE_COUNT ||
@@ -1003,6 +1020,9 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame,
       goto acknowledged;
 
     case RelayAllOff:
+#if defined(PCCONTROLLER_NATIVE)
+      clearVirtualKeyHolds();
+#endif
       relays.allOff(frameNow);
       goto acknowledged;
 

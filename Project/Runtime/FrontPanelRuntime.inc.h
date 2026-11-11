@@ -1012,6 +1012,37 @@ void serviceSystemInputs(uint32_t at) {
   }
 }
 
+#if defined(PCCONTROLLER_NATIVE)
+// Native clients hold a virtual physical input for a bounded time. Renewals
+// extend the same input level and let the normal debounce/gesture path repeat.
+static uint32_t virtualKeyDeadlines[4] = {};
+static uint8_t virtualKeyHolds = 0;
+
+void setVirtualKeyHold(uint8_t key, uint16_t durationMs, uint32_t at) {
+  if (durationMs == 0) {
+    virtualKeyHolds &= static_cast<uint8_t>(~_BV(key));
+  } else {
+    virtualKeyHolds |= _BV(key);
+    virtualKeyDeadlines[key] = at + durationMs;
+  }
+  shiftRegisters.setVirtualInput(key, durationMs != 0);
+}
+
+void clearVirtualKeyHolds() {
+  virtualKeyHolds = 0;
+  shiftRegisters.clearVirtualInputs();
+}
+
+void expireVirtualKeyHolds(uint32_t at) {
+  for (uint8_t key = 0; key < 4; ++key) {
+    if ((virtualKeyHolds & _BV(key)) != 0 &&
+        static_cast<int32_t>(at - virtualKeyDeadlines[key]) >= 0) {
+      setVirtualKeyHold(key, 0, at);
+    }
+  }
+}
+#endif
+
 // Polls both shift registers, then advances keys and motion-exit detection.
 void serviceShiftRegisterAndKeys(uint32_t at) {
   if (static_cast<uint32_t>(at - lastShiftPollAt) < SHIFT_POLL_MS) {

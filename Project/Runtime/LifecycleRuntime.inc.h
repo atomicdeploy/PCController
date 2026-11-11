@@ -151,6 +151,9 @@ __attribute__((noinline)) void serviceController() {
     }
   }
 
+#if defined(PCCONTROLLER_NATIVE)
+  expireVirtualKeyHolds(loopNow);
+#endif
   appProtocol.service();
   if (settingsStore.values().programmingMode()) {
     return;

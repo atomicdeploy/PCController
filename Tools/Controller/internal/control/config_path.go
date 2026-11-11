@@ -80,6 +80,12 @@ func genericHostConfigGet(config appconfig.Config, path string) (string, error) 
 	if err != nil {
 		return "", err
 	}
+	secret := configPathIsSecret(parts)
+	if !secret {
+		// A parent request such as "config get ipc" must also hide every
+		// known credential nested in the selected configuration object.
+		config = appconfig.Redacted(config)
+	}
 	encoded, err := json.Marshal(config)
 	if err != nil {
 		return "", err
@@ -92,7 +98,7 @@ func genericHostConfigGet(config appconfig.Config, path string) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	if configPathIsSecret(parts) {
+	if secret {
 		if text, ok := value.(string); ok && text != "" {
 			return path + "=<redacted>", nil
 		}

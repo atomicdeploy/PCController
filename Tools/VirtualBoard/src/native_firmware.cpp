@@ -53,6 +53,7 @@ std::vector<uint8_t> VirtualBoard::connectedBytes() {
 }
 void VirtualBoard::disconnected() {
   std::lock_guard<std::mutex> lock(mutex_);
+  clearVirtualKeyHolds();
   Serial.disconnect();
   // Reset the stream parser, not firmware clocks/settings/outputs. Production
   // host-offline safety expires through the same serviceController deadline.

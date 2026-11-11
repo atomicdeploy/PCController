@@ -173,7 +173,7 @@ const capabilityGroups = {
 		"controller.rf.catalog", "controller.pwm.trace.get",
   ],
   board_commands: [
-    "controller.buzzer.tone",
+    "controller.buzzer.tone", "controller.front_panel.key",
     "controller.channel.set", "controller.output.set",
 		"controller.mirror.apply", "controller.mirror.resync",
     "controller.program_state.set", "controller.program-state.set", "controller.menu.layout.set",
@@ -310,7 +310,7 @@ const methodOverrides = {
 };
 
 const nonIdempotentMethods = new Set([
-  "controller.buzzer.tone",
+  "controller.buzzer.tone", "controller.front_panel.key",
   "controller.osd.show",
   "controller.reset.lines", "controller.reset", "controller.port.reset", "controller.command.execute",
 	"controller.audio.play",

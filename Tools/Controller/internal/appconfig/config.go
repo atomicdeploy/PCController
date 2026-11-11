@@ -73,18 +73,19 @@ type Config struct {
 
 // Connection configures serial discovery, handshake timing, and reconnect behavior.
 type Connection struct {
-	Port               string          `json:"port,omitempty"`
-	VID                string          `json:"vid,omitempty"`
-	PID                string          `json:"pid,omitempty"`
-	Name               string          `json:"name,omitempty"`
-	BaudRate           int             `json:"baud_rate"`
-	StartupWaitMS      int             `json:"startup_wait_ms"`
-	RequestTimeoutMS   int             `json:"request_timeout_ms"`
-	HelloAttempts      int             `json:"hello_attempts"`
-	ResetOnReconnect   bool            `json:"reset_on_reconnect"`
-	ReconnectInitialMS int             `json:"reconnect_initial_ms"`
-	ReconnectMaximumMS int             `json:"reconnect_maximum_ms"`
-	LastDevice         *DeviceIdentity `json:"last_device,omitempty"`
+	Port                string          `json:"port,omitempty"`
+	VID                 string          `json:"vid,omitempty"`
+	PID                 string          `json:"pid,omitempty"`
+	Name                string          `json:"name,omitempty"`
+	BaudRate            int             `json:"baud_rate"`
+	StartupWaitMS       int             `json:"startup_wait_ms"`
+	RequestTimeoutMS    int             `json:"request_timeout_ms"`
+	HelloAttempts       int             `json:"hello_attempts"`
+	ResetOnReconnect    bool            `json:"reset_on_reconnect"`
+	ReconnectInitialMS  int             `json:"reconnect_initial_ms"`
+	ReconnectMaximumMS  int             `json:"reconnect_maximum_ms"`
+	VirtualSeatTravelMS int             `json:"virtual_seat_travel_ms,omitempty"`
+	LastDevice          *DeviceIdentity `json:"last_device,omitempty"`
 }
 
 // DeviceIdentity records the last successfully connected USB serial device.
@@ -742,6 +743,10 @@ func (value Config) Validate() error {
 		return fmt.Errorf("programming.firmware_features: %w", err)
 	}
 	connection := value.Connection
+	if connection.VirtualSeatTravelMS != 0 &&
+		(connection.VirtualSeatTravelMS < 100 || connection.VirtualSeatTravelMS > 60000) {
+		return fmt.Errorf("connection.virtual_seat_travel_ms must be 0 (default) or 100..60000")
+	}
 	if connection.BaudRate < 1200 || connection.BaudRate > 2_000_000 {
 		return fmt.Errorf("connection.baud_rate must be 1200..2000000")
 	}

@@ -49,4 +49,8 @@ func TestGenericHostConfigGetRedactsInlineSecrets(t *testing.T) {
 	if strings.Contains(output, config.IPC.AuthToken) || !strings.Contains(output, "<redacted>") {
 		t.Fatalf("secret output=%q", output)
 	}
+	output, err = genericHostConfigGet(config, "ipc")
+	if err != nil || strings.Contains(output, config.IPC.AuthToken) {
+		t.Fatalf("config parent exposed a secret: output=%q err=%v", output, err)
+	}
 }

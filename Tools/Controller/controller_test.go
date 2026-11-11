@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,26 @@ import (
 	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/ports"
 )
+
+func TestBoundHostStoreSharesMelodyCommandsAndCatalog(t *testing.T) {
+	store, err := appconfig.Open(filepath.Join(t.TempDir(), "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := New(Options{})
+	defer client.Shutdown()
+	client.BindHostConfigStore(store)
+	if _, err := client.Execute(context.Background(), "melody create parity 523:300 659:300"); err != nil {
+		t.Fatal(err)
+	}
+	var saved bool
+	for _, melody := range store.Current().Melodies {
+		saved = saved || melody.Name == "parity"
+	}
+	if !saved {
+		t.Fatal("command reported a saved melody but the host catalog omitted it")
+	}
+}
 
 func TestPublicPortInfoPublishesCrossPlatformDisplayIdentity(t *testing.T) {
 	info := publicPortInfo(ports.Info{
