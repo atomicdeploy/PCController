@@ -1059,6 +1059,26 @@ func (service *Service) dispatch(
 		}
 	case "controller.front_panel", "controller.front-panel":
 		result, err = service.Client.RefreshFrontPanel(ctx)
+	case "controller.front_panel.key":
+		var params struct {
+			Key        byte   `json:"key"`
+			HoldMS     *int   `json:"hold_ms"`
+			Generation uint64 `json:"expected_connection_generation,omitempty"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			if params.HoldMS == nil || params.Key < 1 || params.Key > 4 ||
+				(*params.HoldMS != 0 && (*params.HoldMS < 100 || *params.HoldMS > 2000)) {
+				err = &RPCError{Code: -32602, Message: "key must be 1..4 and hold_ms must be 0 or 100..2000"}
+			} else {
+				var generation uint64
+				generation, err = service.Client.SetVirtualFrontPanelKey(ctx, params.Key, *params.HoldMS, params.Generation)
+				if err == nil {
+					result = map[string]any{"accepted": true, "key": params.Key, "hold_ms": *params.HoldMS, "connection_generation": generation}
+				}
+			}
+		} else {
+			err = &RPCError{Code: -32602, Message: err.Error()}
+		}
 	case "controller.command.catalog":
 		result = service.Client.CommandCatalog()
 	case "controller.melodies.list":
@@ -2760,7 +2780,7 @@ func requestCapability(method string, params json.RawMessage) string {
 		return capabilityRead
 	case "controller.message.send", "controller.osd.show", "controller.osd.dismiss":
 		return capabilityMessages
-	case "controller.display.send", "controller.opcode.send",
+	case "controller.display.send", "controller.front_panel.key", "controller.opcode.send",
 		"controller.opcode.exchange", "controller.opcode.request", "controller.action.invoke":
 		return capabilityBoard
 	case "controller.estop.set", "controller.media.playback.update", "controller.media.timeline.prepare", "controller.media.authority.change":

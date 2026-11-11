@@ -625,6 +625,7 @@ const rpcDescriptions = {
   'controller.discovery.scan':'Scan for LAN application peers using configured discovery mechanisms. Advertisements identify candidates only; verify the endpoint before selecting it and never acquire board authority just to discover it.',
   'controller.event.latest':'Read the latest retained controller activity event without waiting for a new one. An event ID belongs to this host history; it is not a board protocol sequence.',
   'controller.front_panel':'Read the physical front-panel presentation and button/display state. This is board-facing state, not the desktop GUI layout.',
+  'controller.front_panel.key':'Set, renew, or release a bounded Virtual Board key hold. Use key 1–4 and hold_ms 100–2000, or 0 to release. Optionally fence the request with expected_connection_generation from the snapshot. Firmware clears the input when the lease expires or its transport disconnects.',
   'controller.history.status':'Read recording/history availability and retention state. This does not start recording or replay any historical command.',
   'controller.history.timeline':'Read a bounded retained event timeline for inspection. Historical events are evidence, not commands to repeat on current hardware.',
   'controller.host_menu.content.push':'Publish content for a host-presented front-panel page. It updates display content rather than adding a firmware menu page or changing wiring.',

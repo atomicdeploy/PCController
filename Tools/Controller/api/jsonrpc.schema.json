@@ -1286,6 +1286,7 @@
             "controller.exit",
             "controller.firmware.build",
             "controller.front_panel",
+            "controller.front_panel.key",
             "controller.front-panel",
             "controller.history.status",
             "controller.history.timeline",
@@ -6200,6 +6201,30 @@
       "idempotency": "safe",
       "title": "Read front panel",
       "description": "Read the physical front-panel presentation and button/display state. This is board-facing state, not the desktop GUI layout."
+    },
+    "controller.front_panel.key": {
+      "capability": "board_commands",
+      "summary": "Read front panel key",
+      "idempotency": "idempotent-with-authoritative-readback",
+      "title": "Read front panel key",
+      "description": "Set, renew, or release a bounded Virtual Board key hold. Use key 1–4 and hold_ms 100–2000, or 0 to release. Optionally fence the request with expected_connection_generation from the snapshot. Firmware clears the input when the lease expires or its transport disconnects.",
+      "request_fields": {
+        "properties": {
+          "expected_connection_generation": {
+            "minimum": 0,
+            "type": "integer",
+            "description": "Current board connection generation from the selected snapshot; fences writes against reconnects."
+          },
+          "hold_ms": {
+            "type": "integer"
+          },
+          "key": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
     },
     "controller.front-panel": {
       "capability": "read",

@@ -34,6 +34,14 @@ const BuildFeatureVolatileMenu byte = 1 << 6
 // Native firmware inputs are explicit mappings/fixtures, not physical probes.
 const BuildFeatureNativeHAL byte = 1 << 7
 
+// Virtual key leases are available only in native firmware.
+const BuildFeatureVirtualKeyHold byte = 1 << 0
+
+func (hello Hello) SupportsVirtualKeyHold() bool {
+	const required = BuildFeatureNativeHAL | BuildFeatureVirtualKeyHold
+	return hello.BuildFeatures&required == required
+}
+
 // HELLO capability bits are the authoritative guard for optional operations.
 const (
 	CapabilityINA219             uint32 = 1 << 0

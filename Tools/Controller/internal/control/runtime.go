@@ -1257,6 +1257,26 @@ func (runtime *Runtime) clearMotionLocked() {
 	}
 }
 
+// SetVirtualFrontPanelKey drives a leased native input through firmware.
+func (runtime *Runtime) SetVirtualFrontPanelKey(ctx context.Context, key byte, holdMS int, generation uint64) (uint64, error) {
+	if key < 1 || key > 4 || (holdMS != 0 && (holdMS < 100 || holdMS > 2000)) {
+		return 0, errors.New("key must be 1..4 and hold_ms must be 0 or 100..2000")
+	}
+	runtime.mu.RLock()
+	current := runtime.generation
+	supported := runtime.sessionUsableLocked() && runtime.hello.SupportsVirtualKeyHold()
+	runtime.mu.RUnlock()
+	if !supported {
+		return 0, errors.New("bounded key holds require connected Virtual Board firmware that advertises them")
+	}
+	if generation != 0 && generation != current {
+		return 0, errors.New("board connection changed before the key request")
+	}
+	payload := append([]byte{key - 1}, native.U16(uint16(holdMS))...)
+	_, err := runtime.requestAtGeneration(ctx, current, native.OpVirtualKeyHold, payload, native.OpACK)
+	return current, err
+}
+
 func (runtime *Runtime) SetFilter(filter ports.Filter) {
 	runtime.mu.Lock()
 	runtime.options.Filter = filter

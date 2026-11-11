@@ -2545,6 +2545,11 @@ func (client *Client) RefreshFrontPanel(ctx context.Context) (FrontPanel, error)
 	return client.runtime.RefreshFrontPanel(ctx)
 }
 
+// SetVirtualFrontPanelKey sets or releases a firmware-owned virtual key lease.
+func (client *Client) SetVirtualFrontPanelKey(ctx context.Context, key byte, holdMS int, generation uint64) (uint64, error) {
+	return client.runtime.SetVirtualFrontPanelKey(ctx, key, holdMS, generation)
+}
+
 // Events returns the lossy, bounded stream of normalized runtime events.
 func (client *Client) Events() <-chan Event {
 	return client.events
